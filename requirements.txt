@@ -1,0 +1,7 @@
+flask 
+psycopg2-binary 
+sqlalchemy 
+pandas 
+nba_api 
+python-dotenv 
+gunicorn
