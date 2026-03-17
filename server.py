@@ -301,6 +301,27 @@ def get_seasons():
         return jsonify({'error': str(e)}), 500
 
 
+def get_current_season():
+    """Return the most recent season in the DB."""
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT season, season_type FROM player_seasons
+            ORDER BY season DESC, season_type
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row:
+            return row[0], row[1]
+    except:
+        pass
+    return '2024-25', 'Regular Season'  # fallback
+
+DEFAULT_SEASON, DEFAULT_SEASON_TYPE = get_current_season()
+
 @app.route('/api/leaders')
 def get_leaders():
     season      = request.args.get('season', DEFAULT_SEASON)
