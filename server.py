@@ -221,7 +221,10 @@ def get_players():
     min_ast_pg      = float(request.args.get('min_ast_pg',      2.0))
     min_touches_pg  = float(request.args.get('min_touches_pg',  40.0))
     min_drives_pg   = float(request.args.get('min_drives_pg',   2.0))
-    min_paint_fga   = float(request.args.get('min_paint_fga',   2.0))
+    # min_paint_fga removed — finishing_score gating is handled in compute_metrics.py
+    # via the has_paint check (paint_efg_vw or paint_scoring_rate must be non-NULL).
+    # Applying a second gate here was stricter than the compute layer and caused valid
+    # scores (e.g. off-ball wings with real drive/foul data) to show as blank.
     min_rim_fga     = float(request.args.get('min_rim_fga',     50.0))
     min_3pt_fga     = float(request.args.get('min_3pt_fga',     1.5))
 
@@ -244,8 +247,7 @@ def get_players():
     # Dynamic sub-composite expressions — return NULL if player doesn't meet thresholds
     # touches and drives are season totals in player_seasons, divide by gp for per-game
     sub_expr = f"""
-        CASE WHEN pm.paint_fga_pg >= {min_paint_fga}
-             THEN pm.finishing_score    ELSE NULL END AS finishing_score,
+        pm.finishing_score,
         pm.shooting_score,
         CASE WHEN ps.drives / NULLIF(ps.gp, 0) >= {min_drives_pg}
              THEN pm.creation_score     ELSE NULL END AS creation_score,

@@ -474,7 +474,6 @@ td.c-primary{min-width:140px}
       <div class="sd-row"><span class="sd-row-label">Passing — min AST/g</span><div class="sd-row-input"><input type="number" id="sd-ast-pg" value="2.0" min="0" max="10" step="0.5"><span class="sd-row-unit">AST/g</span></div></div>
       <div class="sd-row"><span class="sd-row-label">Ball Handling — min Touches/g</span><div class="sd-row-input"><input type="number" id="sd-touches-pg" value="40" min="0" max="120" step="5"><span class="sd-row-unit">TCH/g</span></div></div>
       <div class="sd-row"><span class="sd-row-label">Creation — min Drives/g</span><div class="sd-row-input"><input type="number" id="sd-drives-pg" value="2.0" min="0" max="20" step="0.5"><span class="sd-row-unit">DRV/g</span></div></div>
-      <div class="sd-row"><span class="sd-row-label">Finishing — min Paint FGA/g</span><div class="sd-row-input"><input type="number" id="sd-paint-fga" value="2.0" min="0" max="15" step="0.5"><span class="sd-row-unit">FGA/g</span></div></div>
       <div class="sd-row"><span class="sd-row-label">Interior Def — min Rim FGA def.</span><div class="sd-row-input"><input type="number" id="sd-rim-fga" value="50" min="0" max="300" step="10"><span class="sd-row-unit">FGA</span></div></div>
       <div class="sd-row"><span class="sd-row-label">3-Pointers — min 3PT FGA/g</span><div class="sd-row-input"><input type="number" id="sd-3pt-fga" value="1.5" min="0" max="15" step="0.5"><span class="sd-row-unit">FGA/g</span></div></div>
     </div>
@@ -522,7 +521,6 @@ const DEFAULTS = {
   minAstPg:     2.0,
   minTouchesPg: 40.0,
   minDrivesPg:  2.0,
-  minPaintFga:  2.0,
   minRimFga:    50.0,
   min3ptFga:    1.5,
 };
@@ -830,7 +828,6 @@ const ST = {
   minAstPg:     2.0,
   minTouchesPg: 40.0,
   minDrivesPg:  2.0,
-  minPaintFga:  2.0,
   minRimFga:    50.0,
   min3ptFga:    1.5,
 };
@@ -1352,7 +1349,6 @@ async function fetchPlayers() {
     min_ast_pg:     ST.minAstPg,
     min_touches_pg: ST.minTouchesPg,
     min_drives_pg:  ST.minDrivesPg,
-    min_paint_fga:  ST.minPaintFga,
     min_rim_fga:    ST.minRimFga,
     min_3pt_fga:    ST.min3ptFga,
   });
@@ -1452,7 +1448,6 @@ function openSettings(){
   document.getElementById('sd-ast-pg').value     = ST.minAstPg;
   document.getElementById('sd-touches-pg').value = ST.minTouchesPg;
   document.getElementById('sd-drives-pg').value  = ST.minDrivesPg;
-  document.getElementById('sd-paint-fga').value  = ST.minPaintFga;
   document.getElementById('sd-rim-fga').value    = ST.minRimFga;
   document.getElementById('sd-3pt-fga').value    = ST.min3ptFga;
   document.getElementById('sd-paint').value      = DEFAULTS.paint;
@@ -1472,7 +1467,6 @@ document.getElementById('sd-reset').addEventListener('click',()=>{
   document.getElementById('sd-ast-pg').value   = DEFAULTS.minAstPg;
   document.getElementById('sd-touches-pg').value = DEFAULTS.minTouchesPg;
   document.getElementById('sd-drives-pg').value  = DEFAULTS.minDrivesPg;
-  document.getElementById('sd-paint-fga').value  = DEFAULTS.minPaintFga;
   document.getElementById('sd-rim-fga').value    = DEFAULTS.minRimFga;
   document.getElementById('sd-3pt-fga').value    = DEFAULTS.min3ptFga;
   document.getElementById('sd-paint').value    = DEFAULTS.paint;
@@ -1483,7 +1477,6 @@ document.getElementById('sd-apply').addEventListener('click',()=>{
   ST.minAstPg      = parseFloat(document.getElementById('sd-ast-pg').value)   || 0;
   ST.minTouchesPg  = parseFloat(document.getElementById('sd-touches-pg').value)|| 0;
   ST.minDrivesPg   = parseFloat(document.getElementById('sd-drives-pg').value) || 0;
-  ST.minPaintFga   = parseFloat(document.getElementById('sd-paint-fga').value) || 0;
   ST.minRimFga     = parseFloat(document.getElementById('sd-rim-fga').value)   || 0;
   ST.min3ptFga     = parseFloat(document.getElementById('sd-3pt-fga').value)   || 0;
   document.getElementById('min-min').value = ST.minMin;
@@ -1493,7 +1486,6 @@ document.getElementById('sd-apply').addEventListener('click',()=>{
     ST.minAstPg !== DEFAULTS.minAstPg ||
     ST.minTouchesPg !== DEFAULTS.minTouchesPg ||
     ST.minDrivesPg !== DEFAULTS.minDrivesPg ||
-    ST.minPaintFga !== DEFAULTS.minPaintFga ||
     ST.minRimFga !== DEFAULTS.minRimFga ||
     ST.min3ptFga !== DEFAULTS.min3ptFga;
   document.getElementById('filter-btn').classList.toggle('active', isNonDefault);
