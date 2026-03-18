@@ -533,11 +533,11 @@ const DEFAULTS = {
 const NAV = {
   scoring: {
     label: 'Scoring',
-    overall: { key:'creator_score', label:'Overall', fmt:'1f', isOverall:true },
+    overall: { key:'creator_score', label:'Scoring Avg Percentile', fmt:'1f', isOverall:true },
     subs: [
       {
         key:'finishing', label:'Finishing',
-        overall: { key:'finishing_score',    label:'Finishing',     fmt:'1f', isOverall:true },
+        overall: { key:'finishing_score',    label:'Finishing Avg Percentile',     fmt:'1f', isOverall:true },
         metrics: [
           { key:'paint_efg_vw',      label:'Paint EFG+',     fmt:'3f', badge:'PAINT' },
           { key:'paint_scoring_rate',label:'Paint Scoring',  fmt:'2f', badge:'PSR'   },
@@ -548,7 +548,7 @@ const NAV = {
       },
       {
         key:'shooting', label:'Shooting',
-        overall: { key:'shooting_score',     label:'Shooting',      fmt:'1f', isOverall:true },
+        overall: { key:'shooting_score',     label:'Shooting Avg Percentile',      fmt:'1f', isOverall:true },
         metrics: [
           { key:'ts_pct',            label:'True Shooting',  fmt:'pct', badge:'TS%'  },
           { key:'efg_pct',           label:'Eff FG%',        fmt:'pct', badge:'EFG%' },
@@ -562,7 +562,7 @@ const NAV = {
       },
       {
         key:'creation', label:'Shot Creation',
-        overall: { key:'creation_score',     label:'Creation',      fmt:'1f', isOverall:true },
+        overall: { key:'creation_score',     label:'Creation Avg Percentile',      fmt:'1f', isOverall:true },
         metrics: [
           { key:'iso_ppp',           label:'ISO PPP',        fmt:'2f',  badge:'ISO'   },
           { key:'creation_premium',  label:'Creation Delta', fmt:'3f',  badge:'CΔ'    },
@@ -577,11 +577,11 @@ const NAV = {
 
   playmaking: {
     label: 'Playmaking',
-    overall: { key:'playmaker_score', label:'Overall', fmt:'1f', isOverall:true },
+    overall: { key:'playmaker_score', label:'Playmaking Avg Percentile', fmt:'1f', isOverall:true },
     subs: [
       {
         key:'passing', label:'Passing',
-        overall: { key:'passing_score',      label:'Passing',       fmt:'1f', isOverall:true },
+        overall: { key:'passing_score',      label:'Passing Avg Percentile',       fmt:'1f', isOverall:true },
         metrics: [
           { key:'potential_ast_per75', label:'Pot AST / 75',     fmt:'1f',  badge:'POT'   },
           { key:'ast_conversion_rate', label:'AST Conv %',       fmt:'pct', badge:'CONV'  },
@@ -594,7 +594,7 @@ const NAV = {
       },
       {
         key:'ballhandling', label:'Ball Handling',
-        overall: { key:'ballhandling_score', label:'Ball Handling', fmt:'1f', isOverall:true },
+        overall: { key:'ballhandling_score', label:'Ball Handling Avg Percentile', fmt:'1f', isOverall:true },
         metrics: [
           { key:'playmaking_gravity',  label:'PM Gravity',       fmt:'2f',  badge:'GRAV'  },
           { key:'drive_and_dish_rate', label:'Drive & Dish %',   fmt:'pct', badge:'D&D'   },
@@ -619,11 +619,11 @@ const NAV = {
 
   defense: {
     label: 'Defense',
-    overall: { key:'defender_score', label:'Overall', fmt:'1f', isOverall:true },
+    overall: { key:'defender_score', label:'Defense Avg Percentile', fmt:'1f', isOverall:true },
     subs: [
       {
         key:'perimeter', label:'Perimeter',
-        overall: { key:'perimeter_def_score',label:'Perimeter Def', fmt:'1f', isOverall:true },
+        overall: { key:'perimeter_def_score',label:'Perimeter Def Avg Percentile', fmt:'1f', isOverall:true },
         metrics: [
           { key:'def_delta_3pt',        label:'Def Delta 3PT',   fmt:'3f', badge:'3PT'  },
           { key:'def_disruption_rate',  label:'Disruption/75',   fmt:'2f', badge:'DISR' },
@@ -636,7 +636,7 @@ const NAV = {
       },
       {
         key:'interior', label:'Interior',
-        overall: { key:'interior_def_score', label:'Interior Def',  fmt:'1f', isOverall:true },
+        overall: { key:'interior_def_score', label:'Interior Def Avg Percentile',  fmt:'1f', isOverall:true },
         metrics: [
           { key:'rim_protection_score', label:'Rim Protection',  fmt:'1f',  badge:'RIM'  },
           { key:'def_delta_2pt',        label:'Def Delta 2PT',   fmt:'3f',  badge:'2PT'  },
@@ -662,11 +662,11 @@ const NAV = {
 
   hustle: {
     label: 'Hustle',
-    overall: { key:'hustle_score', label:'Overall', fmt:'1f', isOverall:true },
+    overall: { key:'hustle_score', label:'Hustle Avg Percentile', fmt:'1f', isOverall:true },
     subs: [
       {
         key:'activity', label:'Activity',
-        overall: { key:'activity_score',     label:'Activity',      fmt:'1f', isOverall:true },
+        overall: { key:'activity_score',     label:'Activity Avg Percentile',      fmt:'1f', isOverall:true },
         metrics: [
           { key:'motor_score',       label:'Motor Score',    fmt:'2f', badge:'MOTR' },
           { key:'hustle_composite',  label:'Hustle Comp',    fmt:'2f', badge:'COMP' },
@@ -678,7 +678,7 @@ const NAV = {
       },
       {
         key:'rebounding_h', label:'Rebounding',
-        overall: { key:'rebounding_score',   label:'Rebounding',    fmt:'1f', isOverall:true },
+        overall: { key:'rebounding_score',   label:'Rebounding Avg Percentile',    fmt:'1f', isOverall:true },
         metrics: [
           { key:'dreb_pct',      label:'DREB %',        fmt:'pct', badge:'DRB%' },
           { key:'box_out_rate',  label:'Box Out / 75',  fmt:'2f',  badge:'BOX'  },
@@ -933,20 +933,20 @@ const METRIC_INFO = {
   war:{formula:'LEBRON / league wins-per-point constant (~2.7)',desc:'Wins Above Replacement — estimated wins contributed above a replacement-level player.',source:'BBall Index'},
   paint_fga_pg:{formula:null,desc:'Paint field goal attempts per game.',source:'Shot Zones'},
   pct_uast_fgm:{formula:'Unassisted FGM / Total FGM',desc:'% of made field goals that were unassisted — indicates self-creation.',source:'Tracking'},
-  // Composites
-  creator_score:{formula:'Position-normalized z-score: Unassisted FGM% (25%) + Pull-Up EFG% (25%) + Creation Load (20%) + ISO PPP (15%) + Drive FG% (15%)',desc:'Overall scoring/creation composite.',source:'Composite'},
-  playmaker_score:{formula:'Position-normalized z-score: AST% (25%) + PM Gravity (25%) + Pot AST/75 (20%) + AST Conv% (15%) + Pass→Score% (15%)',desc:'Overall playmaking composite.',source:'Composite'},
-  defender_score:{formula:'Position-normalized z-score: Def Delta (30%) + Disruption (25%) + Rim Prot (20%) + DREB% (15%) + Box Out (10%)',desc:'Overall defensive composite.',source:'Composite'},
-  hustle_score:{formula:'Position-normalized z-score: Motor (30%) + Hustle Comp (25%) + Loose Balls (20%) + Box Outs (15%) + Screen AST (10%)',desc:'Overall hustle composite.',source:'Composite'},
-  finishing_score:{formula:'League-wide z-score: Paint EFG+ (50%) + Paint Scoring Rate (30%) + FT Rate (20%)',desc:'Finishing sub-composite — paint efficiency, scoring rate at the rim, and ability to draw fouls.',source:'Composite'},
-  shooting_score:{formula:'League-wide z-score: TS% (30%) + Shot Quality Δ (25%) + Pull-Up EFG% (25%) + C&S EFG% (20%)',desc:'Overall shooting quality composite.',source:'Composite'},
-  creation_score:{formula:'League-wide z-score: Unassisted FGM% (30%) + Creation Load (25%) + ISO PPP (25%) + Creation Δ (20%)',desc:'Shot creation composite.',source:'Composite'},
-  passing_score:{formula:'League-wide z-score: Pot AST/75 (25%) + AST Conv% (20%) + Pot AST/BP TOV (25%) + Pass Quality (15%) + Pass→Score% (15%)',desc:'Passing quality composite.',source:'Composite'},
-  ballhandling_score:{formula:'League-wide z-score: PM Gravity (35%) + Drive & Dish% (25%) + PnR BH PPP (25%) + Trans PPP (15%)',desc:'Ball handling and creation composite.',source:'Composite'},
-  perimeter_def_score:{formula:'Position-normalized z-score: Def Δ 3PT (30%) + Disruption (25%) + STL (20%) + Def Δ Overall (15%) + ISO PPP Allowed (10%)',desc:'Perimeter defense composite.',source:'Composite'},
-  interior_def_score:{formula:'Position-normalized z-score: Rim Protection (35%) + Def Δ 2PT (25%) + DREB% (20%) + BLK (15%) + Box Out (5%)',desc:'Interior defense composite.',source:'Composite'},
-  activity_score:{formula:'Position-normalized z-score: Motor (40%) + Hustle Comp (35%) + Disruption (25%)',desc:'Activity and effort composite.',source:'Composite'},
-  rebounding_score:{formula:'Position-normalized z-score: DREB% (50%) + Box Out/75 (30%) + Loose Balls/75 (20%)',desc:'Rebounding composite.',source:'Composite'},
+  // Composites — percentile-averaging methodology
+  creator_score:{formula:'Avg percentile of: Finishing score + Shooting score + Creation score',desc:'Overall Scoring composite. Average of sub-category percentile scores across Finishing, Shooting, and Shot Creation. Requires qualifying in all three.',source:'Composite'},
+  playmaker_score:{formula:'Avg percentile of: Passing score + Ball Handling score',desc:'Overall Playmaking composite. Average of Passing and Ball Handling sub-scores. Requires qualifying in both (min 2 AST/g and G/GF with 40+ touches/g).',source:'Composite'},
+  defender_score:{formula:'Avg percentile of: Perimeter Defense score + Interior Defense score',desc:'Overall Defense composite (position-normalized). Average of Perimeter and Interior Defense sub-scores. Requires qualifying in both.',source:'Composite'},
+  hustle_score:{formula:'Avg percentile of: Activity score + Rebounding score',desc:'Overall Hustle composite (position-normalized). Average of Activity and Rebounding sub-scores.',source:'Composite'},
+  finishing_score:{formula:'Avg percentile (league-wide) of: Paint EFG+, Paint Scoring Rate, FT Rate',desc:'Finishing sub-composite. Gate: min 2.0 paint FGA/g.',source:'Composite'},
+  shooting_score:{formula:'Avg percentile (league-wide) of: TS%, EFG%, Shot Quality, C&S EFG%, All 3PT EFG+, Clutch Rating',desc:'Shooting sub-composite. No volume gate beyond 1000 min.',source:'Composite'},
+  creation_score:{formula:'Avg percentile (league-wide) of: Unassisted FGM%, Creation Load, ISO PPP, Creation Delta',desc:'Shot Creation sub-composite. Gate: min 2.0 drives/g.',source:'Composite'},
+  passing_score:{formula:'Avg percentile (league-wide) of: Pot AST/BP TOV, Pass Quality, AST Conv%, Pass→Score%',desc:'Passing sub-composite. Gate: min 2.0 AST/g.',source:'Composite'},
+  ballhandling_score:{formula:'Avg percentile (league-wide) of: PM Gravity, Drive & Dish%, P&R BH PPP, Transition PPP',desc:'Ball Handling sub-composite. Gate: G/GF position + min 40 touches/g.',source:'Composite'},
+  perimeter_def_score:{formula:'Avg percentile (position-normalized) of: Def Delta 3PT, Disruption/75, Steals, Def Delta Overall',desc:'Perimeter Defense sub-composite.',source:'Composite'},
+  interior_def_score:{formula:'Avg percentile (position-normalized) of: Rim Protection, Def Delta 2PT, DREB%, Blocks, Box Out/75',desc:'Interior Defense sub-composite. Gate: min 50 rim FGA defended.',source:'Composite'},
+  activity_score:{formula:'Avg percentile (position-normalized) of: Motor Score, Hustle Composite, Deflections, Charges Drawn',desc:'Activity sub-composite.',source:'Composite'},
+  rebounding_score:{formula:'Avg percentile (position-normalized) of: DREB%, Box Out/75, Loose Balls/75',desc:'Rebounding sub-composite.',source:'Composite'},
 };
 
 const tooltip   = document.getElementById('metric-tooltip');
@@ -1314,9 +1314,9 @@ function renderHeader() {
     const opt3 = THREE_PT_OPTIONS.find(o=>o.key===sortKey);
     if (opt3) return `3PT EFG+ · ${opt3.label.toUpperCase()}`;
     if (ST.isOverall) {
-      if (!ST.sub) return NAV[ST.cat].label.toUpperCase() + ' OVERALL';
+      if (!ST.sub) return NAV[ST.cat].label.toUpperCase() + ' AVG PERCENTILE';
       const sub = NAV[ST.cat].subs.find(s=>s.key===ST.sub);
-      return (sub?.label||'') + ' OVERALL';
+      return (sub?.label||'') + ' AVG PERCENTILE';
     }
     const sub = ST.sub ? NAV[ST.cat].subs.find(s=>s.key===ST.sub) : null;
     const m   = sub?.metrics.find(m=>m.key===ST.sort);

@@ -28,7 +28,7 @@ load_dotenv()
 DATABASE_URL = os.getenv('DATABASE_URL')
 SEASON      = os.getenv('NBA_SEASON', '2024-25')
 SEASON_TYPE = os.getenv('NBA_SEASON_TYPE', 'Regular Season')
-DELAY       = 1.8
+DELAY       = 3.0
 
 if not DATABASE_URL:
     print("❌ DATABASE_URL not set.")
@@ -54,23 +54,29 @@ LeagueDashPlayerBioStats      = try_import("LeagueDashPlayerBioStats")
 SynergyPlayTypes              = try_import("SynergyPlayTypes")
 TeamPlayerOnOffDetails        = try_import("TeamPlayerOnOffDetails")
 LeagueDashPlayerShotLocations = try_import("LeagueDashPlayerShotLocations")
+LeagueDashPlayerStats         = try_import("LeagueDashPlayerStats")
+PlayerIndex                   = try_import("PlayerIndex")
 
 
 # ── Fetch helpers ─────────────────────────────────────────────
-def fetch(label, fn):
+def fetch(label, fn, retries=3):
     print(f"  Fetching {label}...", end=" ", flush=True)
-    try:
-        time.sleep(DELAY)
-        ep  = fn()
-        dfs = ep.get_data_frames()
-        if dfs and len(dfs[0]) > 0:
-            print(f"✅ {len(dfs[0])} rows")
-            return dfs[0]
-        print("⚠️  empty")
-        return pd.DataFrame()
-    except Exception as e:
-        print(f"❌ {e}")
-        return pd.DataFrame()
+    for attempt in range(retries):
+        try:
+            time.sleep(DELAY * (attempt + 1))
+            ep  = fn()
+            dfs = ep.get_data_frames()
+            if dfs and len(dfs[0]) > 0:
+                print(f"✅ {len(dfs[0])} rows")
+                return dfs[0]
+            print("⚠️  empty")
+            return pd.DataFrame()
+        except Exception as e:
+            if attempt < retries - 1:
+                print(f"⚠️  timeout, retrying ({attempt+2}/{retries})...", end=" ", flush=True)
+            else:
+                print(f"❌ {e}")
+    return pd.DataFrame()
 
 def safe(val, default=None):
     """Convert pandas value to Python native, handling NaN."""
@@ -110,14 +116,21 @@ def parse_minutes(val):
         return None
 
 def normalize_position(pos):
-    """Map raw NBA position to position group."""
+    """Map raw NBA position string to position group."""
     pos = str(pos).strip().upper() if pos else ''
     mapping = {
+        # Abbreviations from some endpoints
         'PG': 'G', 'SG': 'G', 'G': 'G',
         'G-F': 'GF', 'F-G': 'GF',
         'SF': 'F', 'PF': 'F', 'F': 'F',
         'F-C': 'FC', 'C-F': 'FC',
         'C': 'C',
+        # Full words from LeagueDashPlayerBioStats PLAYER_POSITION
+        'GUARD': 'G',
+        'GUARD-FORWARD': 'GF', 'FORWARD-GUARD': 'GF',
+        'FORWARD': 'F',
+        'FORWARD-CENTER': 'FC', 'CENTER-FORWARD': 'FC',
+        'CENTER': 'C',
     }
     return mapping.get(pos, 'F')
 
@@ -159,6 +172,9 @@ def fetch_all(season, season_type):
     data['bio'] = fetch("Player Bio Stats",
         lambda: LeagueDashPlayerBioStats(season=season,
             season_type_all_star=season_type, per_mode_simple="PerGame"))
+
+    data['player_index'] = fetch("Player Index (positions)",
+        lambda: PlayerIndex(league_id="00", season=season))
 
     # Tracking
     for key, measure in [
@@ -228,6 +244,22 @@ def fetch_all(season, season_type):
         lambda: LeagueDashPlayerShotLocations(season=season,
             season_type_all_star=season_type, distance_range="By Zone"))
 
+    # Closest defender shooting
+    # VT = Very Tight 0-2ft, TG = Tight 2-4ft, OP = Open 4-6ft, WO = Wide Open 6ft+
+    LeagueDashPlayerPtShot = try_import("LeagueDashPlayerPtShot")
+    for key, close_def_range in [
+        ('shot_vt', '0-2 Feet - Very Tight'),
+        ('shot_tg', '2-4 Feet - Tight'),
+        ('shot_op', '4-6 Feet - Open'),
+        ('shot_wo', '6+ Feet - Wide Open'),
+    ]:
+        data[key] = fetch("Closest Defender - " + close_def_range,
+            lambda r=close_def_range: LeagueDashPlayerPtShot(
+                season=season,
+                season_type_all_star=season_type,
+                per_mode_simple="Totals",
+                close_def_dist_range_nullable=r))
+
     return data
 
 
@@ -248,108 +280,94 @@ def aggregate_game_logs(df, value_cols, id_cols=None):
     # For counts (GP), sum
     agg = {}
     for col in value_cols:
-        if col in df.columns:
+        if col not in df.columns:
+            continue
+        if col == 'GP':
+            agg[col] = 'sum'
+        else:
             agg[col] = 'mean'
 
-    if 'GP' in df.columns:
-        # Count unique games per player
-        gp = df.groupby('PLAYER_ID')['GAME_ID'].nunique().reset_index()
-        gp.columns = ['PLAYER_ID', 'GP']
-    else:
-        gp = None
+    if not agg:
+        return pd.DataFrame()
 
-    if 'MIN' in df.columns:
-        min_total = df.groupby('PLAYER_ID')['MIN'].apply(
-            lambda x: sum(parse_minutes(v) or 0 for v in x)
-        ).reset_index()
-        min_total.columns = ['PLAYER_ID', 'MIN_TOTAL']
-    else:
-        min_total = None
-
-    result = df.groupby('PLAYER_ID')[
-        [c for c in value_cols if c in df.columns]
-    ].mean().reset_index()
-
-    if gp is not None:
-        result = result.merge(gp, on='PLAYER_ID', how='left')
-    if min_total is not None:
-        result = result.merge(min_total, on='PLAYER_ID', how='left')
-
-    # Add name/team from last game
-    if id_cols:
-        last = df.groupby('PLAYER_ID')[id_cols].last().reset_index()
-        result = result.merge(last, on='PLAYER_ID', how='left')
-
-    return result
+    grouped = df.groupby(id_cols)[list(agg.keys())].agg(agg).reset_index()
+    return grouped
 
 
 # ── Build player rows ─────────────────────────────────────────
 def build_player_rows(data, season, season_type):
-    """
-    Merge all data sources into one dict per player.
-    Returns list of dicts ready for upsert.
-    """
-    # Start with base game logs — every player who played is here
-    base = data.get('base', pd.DataFrame())
+
+    base   = data.get('base',   pd.DataFrame())
+    adv    = data.get('adv',    pd.DataFrame())
+    misc   = data.get('misc',   pd.DataFrame())
+    scoring = data.get('scoring', pd.DataFrame())
+    usage  = data.get('usage',  pd.DataFrame())
+
     if base.empty:
-        print("❌ No base game log data — cannot build rows.")
+        print("  ❌ No base game log data — aborting")
         return [], []
 
-    # Get unique player list from base logs
-    players_df = base.groupby('PLAYER_ID').agg(
-        PLAYER_NAME=('PLAYER_NAME', 'last'),
-        TEAM_ID=('TEAM_ID', 'last'),
-        TEAM_ABBREVIATION=('TEAM_ABBREVIATION', 'last'),
-        GP=('GAME_ID', 'nunique'),
-    ).reset_index()
+    # Build player list from base logs
+    id_cols     = ['PLAYER_ID', 'PLAYER_NAME', 'TEAM_ID', 'TEAM_ABBREVIATION']
+    id_cols     = [c for c in id_cols if c in base.columns]
+    players_df  = base[id_cols].drop_duplicates('PLAYER_ID')
 
     # Aggregate game logs
-    base_agg = base.groupby('PLAYER_ID').agg(
-        PTS=('PTS', 'mean'), AST=('AST', 'mean'), REB=('REB', 'mean'),
-        OREB=('OREB', 'mean'), DREB=('DREB', 'mean'), STL=('STL', 'mean'),
-        BLK=('BLK', 'mean'), TOV=('TOV', 'mean'), PF=('PF', 'mean'),
-        PFD=('PFD', 'mean'), FGM=('FGM', 'mean'), FGA=('FGA', 'mean'),
-        FG_PCT=('FG_PCT', 'mean'), FG3M=('FG3M', 'mean'), FG3A=('FG3A', 'mean'),
-        FG3_PCT=('FG3_PCT', 'mean'), FTM=('FTM', 'mean'), FTA=('FTA', 'mean'),
-        FT_PCT=('FT_PCT', 'mean'), PLUS_MINUS=('PLUS_MINUS', 'mean'),
-    ).reset_index()
+    # GP = count of rows (one row per game), all stats averaged per game
+    base_stat_cols = ['MIN', 'PTS', 'AST', 'REB', 'OREB', 'DREB',
+                      'STL', 'BLK', 'TOV', 'PF', 'PFD',
+                      'FGM', 'FGA', 'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT',
+                      'FTM', 'FTA', 'FT_PCT', 'PLUS_MINUS', 'EFG_PCT']
+    base_stat_cols = [c for c in base_stat_cols if c in base.columns]
+    base_agg = base.groupby('PLAYER_ID')[base_stat_cols].mean().reset_index()
+    # Add GP as row count per player
+    gp_counts = base.groupby('PLAYER_ID').size().reset_index(name='GP')
+    base_agg  = base_agg.merge(gp_counts, on='PLAYER_ID', how='left')
 
-    # Total minutes
-    min_total = base.groupby('PLAYER_ID')['MIN'].apply(
-        lambda x: sum(parse_minutes(v) or 0 for v in x)
-    ).reset_index()
-    min_total.columns = ['PLAYER_ID', 'MIN_TOTAL']
+    # Total minutes (sum, not average)
+    if 'MIN' in base.columns:
+        # MIN may be formatted as "36:24" strings — parse to float first
+        def parse_min(v):
+            try:
+                v = str(v).strip()
+                if ':' in v:
+                    p = v.split(':')
+                    return int(p[0]) + int(p[1]) / 60.0
+                return float(v)
+            except:
+                return 0.0
+        min_series = base['MIN'].apply(parse_min)
+        min_total  = min_series.groupby(base['PLAYER_ID']).sum().reset_index()
+        min_total.columns = ['PLAYER_ID', 'MIN_TOTAL']
+    else:
+        min_total = pd.DataFrame(columns=['PLAYER_ID', 'MIN_TOTAL'])
 
     # Advanced logs
-    adv = data.get('adv', pd.DataFrame())
-    adv_agg = pd.DataFrame()
+    adv_cols = ['OFF_RATING', 'DEF_RATING', 'NET_RATING', 'AST_PCT', 'AST_TO',
+                'AST_RATIO', 'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'TM_TOV_PCT',
+                'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PACE', 'PIE', 'POSS']
+    adv_agg  = pd.DataFrame()
     if not adv.empty:
-        adv_cols = ['OFF_RATING', 'DEF_RATING', 'NET_RATING', 'AST_PCT',
-                    'AST_TO', 'AST_RATIO', 'OREB_PCT', 'DREB_PCT', 'REB_PCT',
-                    'TM_TOV_PCT', 'EFG_PCT', 'TS_PCT', 'USG_PCT', 'PACE', 'PIE', 'POSS']
         adv_cols = [c for c in adv_cols if c in adv.columns]
-        adv_agg = adv.groupby('PLAYER_ID')[adv_cols].mean().reset_index()
+        adv_agg  = adv.groupby('PLAYER_ID')[adv_cols].mean().reset_index()
 
     # Misc logs
-    misc = data.get('misc', pd.DataFrame())
-    misc_agg = pd.DataFrame()
+    misc_cols = ['PTS_OFF_TOV', 'PTS_2ND_CHANCE', 'PTS_FB', 'PTS_PAINT',
+                 'OPP_PTS_OFF_TOV', 'OPP_PTS_PAINT']
+    misc_agg  = pd.DataFrame()
     if not misc.empty:
-        misc_cols = ['PTS_OFF_TOV', 'PTS_2ND_CHANCE', 'PTS_FB', 'PTS_PAINT',
-                     'OPP_PTS_OFF_TOV', 'OPP_PTS_PAINT']
         misc_cols = [c for c in misc_cols if c in misc.columns]
-        misc_agg = misc.groupby('PLAYER_ID')[misc_cols].mean().reset_index()
+        misc_agg  = misc.groupby('PLAYER_ID')[misc_cols].mean().reset_index()
 
     # Scoring logs
-    scoring = data.get('scoring', pd.DataFrame())
-    scoring_agg = pd.DataFrame()
+    scoring_cols = ['PCT_UAST_2PM', 'PCT_UAST_3PM', 'PCT_UAST_FGM', 'PCT_AST_FGM',
+                    'PCT_PTS_PAINT', 'PCT_PTS_3PT', 'PCT_PTS_FT', 'PCT_PTS_2PT_MR']
+    scoring_agg  = pd.DataFrame()
     if not scoring.empty:
-        sc_cols = ['PCT_UAST_2PM', 'PCT_UAST_3PM', 'PCT_UAST_FGM', 'PCT_AST_FGM',
-                   'PCT_PTS_PAINT', 'PCT_PTS_3PT', 'PCT_PTS_FT', 'PCT_PTS_2PT_MR']
-        sc_cols = [c for c in sc_cols if c in scoring.columns]
-        scoring_agg = scoring.groupby('PLAYER_ID')[sc_cols].mean().reset_index()
+        scoring_cols = [c for c in scoring_cols if c in scoring.columns]
+        scoring_agg  = scoring.groupby('PLAYER_ID')[scoring_cols].mean().reset_index()
 
     # Usage logs
-    usage = data.get('usage', pd.DataFrame())
     usage_agg = pd.DataFrame()
     if not usage.empty:
         us_cols = ['PCT_FGA', 'PCT_FTA', 'PCT_AST', 'PCT_TOV']
@@ -469,6 +487,26 @@ def build_player_rows(data, season, season_type):
             syn_sub = df[[c for c in syn_cols if c in df.columns]].rename(columns=rename)
             merged = merged.merge(syn_sub, on='PLAYER_ID', how='left')
 
+    # Closest defender shooting
+    # VT = Very Tight 0-2ft, TG = Tight 2-4ft, OP = Open 4-6ft, WO = Wide Open 6ft+
+    for key, suffix in [
+        ('shot_vt', '_VT'),
+        ('shot_tg', '_TG'),
+        ('shot_op', '_OP'),
+        ('shot_wo', '_WO'),
+    ]:
+        df = data.get(key, pd.DataFrame())
+        if not df.empty:
+            cols_to_keep = ['PLAYER_ID']
+            rename_map = {}
+            for col in ['FGA', 'FGM', 'FG3A', 'FG3M']:
+                if col in df.columns:
+                    cols_to_keep.append(col)
+                    rename_map[col] = f'{col}{suffix}'
+            if len(cols_to_keep) > 1:
+                sub = df[cols_to_keep].rename(columns=rename_map)
+                merged = merged.merge(sub, on='PLAYER_ID', how='left')
+
     print(f"\n  Merged dataset: {len(merged)} players, {len(merged.columns)} columns")
 
     # ── Build player_seasons rows ─────────────────────────────
@@ -482,6 +520,16 @@ def build_player_rows(data, season, season_type):
             pid = safe_int(row.get('PLAYER_ID'))
             if pid:
                 bio_dict[pid] = row.to_dict()
+
+    # Build position lookup from PlayerIndex — more reliable than bio stats
+    pos_index = {}
+    pi = data.get('player_index', pd.DataFrame())
+    if not pi.empty:
+        for _, row in pi.iterrows():
+            pid = safe_int(row.get('PERSON_ID'))
+            pos = str(row.get('POSITION', '')).strip()
+            if pid and pos and pos != 'nan':
+                pos_index[pid] = pos
 
     def g(row, col, default=None):
         """Safe get from merged row."""
@@ -512,7 +560,8 @@ def build_player_rows(data, season, season_type):
         # Bio data
         b = bio_dict.get(pid, {})
         pos_raw    = safe(b.get('PLAYER_HEIGHT_INCHES')) or None
-        position   = safe(b.get('PLAYER_POSITION', b.get('POSITION', ''))) or ''
+        # Prefer PlayerIndex position (reliable) over bio stats (often empty)
+        position   = pos_index.get(pid) or safe(b.get('PLAYER_POSITION', b.get('POSITION', ''))) or ''
         pos_group  = normalize_position(position)
 
         # Player row
@@ -720,6 +769,25 @@ def build_player_rows(data, season, season_type):
             'clutch_ts_pct':     safe_float(row.get('CLUTCH_TS_PCT')),
             'clutch_usg_pct':    safe_float(row.get('CLUTCH_USG_PCT')),
             'clutch_min':        safe_float(row.get('CLUTCH_MIN')),
+
+            # Closest defender shooting
+            # VT = Very Tight 0-2ft, TG = Tight 2-4ft, OP = Open 4-6ft, WO = Wide Open 6ft+
+            'cd_fga_vt':  safe_float(row.get('FGA_VT')),
+            'cd_fgm_vt':  safe_float(row.get('FGM_VT')),
+            'cd_fg3a_vt': safe_float(row.get('FG3A_VT')),
+            'cd_fg3m_vt': safe_float(row.get('FG3M_VT')),
+            'cd_fga_tg':  safe_float(row.get('FGA_TG')),
+            'cd_fgm_tg':  safe_float(row.get('FGM_TG')),
+            'cd_fg3a_tg': safe_float(row.get('FG3A_TG')),
+            'cd_fg3m_tg': safe_float(row.get('FG3M_TG')),
+            'cd_fga_op':  safe_float(row.get('FGA_OP')),
+            'cd_fgm_op':  safe_float(row.get('FGM_OP')),
+            'cd_fg3a_op': safe_float(row.get('FG3A_OP')),
+            'cd_fg3m_op': safe_float(row.get('FG3M_OP')),
+            'cd_fga_wo':  safe_float(row.get('FGA_WO')),
+            'cd_fgm_wo':  safe_float(row.get('FGM_WO')),
+            'cd_fg3a_wo': safe_float(row.get('FG3A_WO')),
+            'cd_fg3m_wo': safe_float(row.get('FG3M_WO')),
         })
 
     return player_rows, season_rows
@@ -738,8 +806,12 @@ def upsert_players(conn, rows):
         ) VALUES %s
         ON CONFLICT (player_id) DO UPDATE SET
             player_name    = EXCLUDED.player_name,
-            position       = EXCLUDED.position,
-            position_group = EXCLUDED.position_group,
+            -- Only overwrite position if the new value is non-empty
+            -- Prevents fetch_season from clobbering positions set by fix_positions.py
+            position       = CASE WHEN EXCLUDED.position IS NOT NULL AND EXCLUDED.position != ''
+                             THEN EXCLUDED.position ELSE players.position END,
+            position_group = CASE WHEN EXCLUDED.position IS NOT NULL AND EXCLUDED.position != ''
+                             THEN EXCLUDED.position_group ELSE players.position_group END,
             height_inches  = EXCLUDED.height_inches,
             weight         = EXCLUDED.weight,
             draft_year     = EXCLUDED.draft_year,
@@ -768,7 +840,6 @@ def upsert_seasons(conn, rows):
     cols = [k for k in rows[0].keys()]
     cur  = conn.cursor()
 
-    # Build dynamic upsert
     col_str     = ', '.join(cols)
     placeholder = ', '.join(['%s'] * len(cols))
     update_str  = ', '.join([f"{c} = EXCLUDED.{c}" for c in cols
@@ -789,77 +860,40 @@ def upsert_seasons(conn, rows):
 
 
 # ── Shot zones ────────────────────────────────────────────────
-# Replace the upsert_shot_zones function in fetch_season.py with this:
-
 def upsert_shot_zones(conn, df, season):
     if df.empty:
         return
 
-    ZONES = [
-        'Restricted Area',
-        'In The Paint (Non-RA)',
-        'Mid-Range',
-        'Corner 3',
-        'Above the Break 3',
-        'Left Corner 3',
-        'Right Corner 3',
-    ]
+    zone_cols = {
+        'Restricted Area':       ('Restricted Area_FGM', 'Restricted Area_FGA', 'Restricted Area_FG_PCT'),
+        'In The Paint (Non-RA)': ('In The Paint (Non-RA)_FGM', 'In The Paint (Non-RA)_FGA', 'In The Paint (Non-RA)_FG_PCT'),
+        'Mid-Range':             ('Mid-Range_FGM', 'Mid-Range_FGA', 'Mid-Range_FG_PCT'),
+        'Left Corner 3':         ('Left Corner 3_FGM', 'Left Corner 3_FGA', 'Left Corner 3_FG_PCT'),
+        'Right Corner 3':        ('Right Corner 3_FGM', 'Right Corner 3_FGA', 'Right Corner 3_FG_PCT'),
+        'Above the Break 3':     ('Above the Break 3_FGM', 'Above the Break 3_FGA', 'Above the Break 3_FG_PCT'),
+    }
 
-    import math
-    from psycopg2.extras import execute_values
-    from datetime import datetime
-
-    def safe_float(val):
-        try:
-            v = float(val)
-            return None if math.isnan(v) else v
-        except:
-            return None
-
-    # League averages per zone
     league_avg = {}
-    for zone in ZONES:
-        try:
-            total_fga = df[(zone, 'FGA')].sum()
-            total_fgm = df[(zone, 'FGM')].sum()
-            league_avg[zone] = float(total_fgm / total_fga) if total_fga > 0 else 0.0
-        except KeyError:
-            league_avg[zone] = 0.0
+    for zone, (fgm_col, fga_col, pct_col) in zone_cols.items():
+        if fga_col in df.columns and fgm_col in df.columns:
+            total_fga = df[fga_col].sum()
+            total_fgm = df[fgm_col].sum()
+            league_avg[zone] = total_fgm / total_fga if total_fga > 0 else 0.44
 
+    cur  = conn.cursor()
     rows = []
     for _, row in df.iterrows():
-        # Get player ID from MultiIndex df
-        pid = None
-        try:
-            pid = int(float(row[('', 'PLAYER_ID')]))
-        except:
-            try:
-                pid = int(float(row.iloc[0]))
-            except:
-                continue
+        pid = safe_int(row.get('PLAYER_ID'))
         if not pid:
             continue
+        for zone, (fgm_col, fga_col, pct_col) in zone_cols.items():
+            fga = safe_int(row.get(fga_col))
+            fgm = safe_int(row.get(fgm_col))
+            pct = safe_float(row.get(pct_col))
+            if fga is not None:
+                rows.append((pid, season, zone, fga, fgm, pct,
+                             league_avg.get(zone), datetime.now()))
 
-        for zone in ZONES:
-            try:
-                fga = safe_float(row[(zone, 'FGA')]) or 0
-                fgm = safe_float(row[(zone, 'FGM')]) or 0
-                pct = safe_float(row[(zone, 'FG_PCT')])
-            except KeyError:
-                continue
-
-            rows.append((
-                pid, season, zone,
-                int(fga), int(fgm), pct,
-                league_avg.get(zone),
-                datetime.now(),
-            ))
-
-    if not rows:
-        print(f"  ⚠️  No shot zone rows built")
-        return
-
-    cur = conn.cursor()
     sql = """
         INSERT INTO player_shot_zones
             (player_id, season, zone, fga, fgm, fg_pct, league_fg_pct, updated_at)
@@ -891,17 +925,14 @@ def main():
     print(f"Season: {season} | Type: {season_type}")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
 
-    # Fetch
     data = fetch_all(season, season_type)
 
-    # Build rows
     print(f"\nBuilding rows...")
     player_rows, season_rows = build_player_rows(data, season, season_type)
     print(f"  {len(player_rows)} players")
     print(f"  {len(season_rows)} season rows")
 
     # Deduplicate — players who changed teams appear multiple times
-    # Keep last entry (most recent team)
     seen_players = {}
     for r in player_rows:
         seen_players[r['player_id']] = r
@@ -915,7 +946,6 @@ def main():
     print(f"  {len(player_rows)} players (after dedup)")
     print(f"  {len(season_rows)} season rows (after dedup)")
 
-    # Write to DB
     print(f"\nWriting to database...")
     conn = psycopg2.connect(DATABASE_URL)
 
@@ -933,7 +963,7 @@ def main():
     print(f"   {len(season_rows)} season rows")
     print(f"Finished: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"{'='*60}\n")
-    print(f"Next step: python backend/ingest/compute_metrics.py")
+    print(f"Next step: python backend/ingest/compute_metrics.py --season {season}")
 
 
 if __name__ == "__main__":
