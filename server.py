@@ -206,27 +206,6 @@ def index():
 def health():
     return jsonify({'status': 'ok', 'season': DEFAULT_SEASON})
 
-
-@app.route('/api/migrate')
-def migrate():
-    """One-time migration — adds new columns to player_metrics.
-    Hit this once in the browser, then remove this route."""
-    try:
-        conn = get_conn()
-        cur  = conn.cursor()
-        cur.execute("""
-            ALTER TABLE player_metrics
-              ADD COLUMN IF NOT EXISTS productive_drive_rate NUMERIC,
-              ADD COLUMN IF NOT EXISTS ft_ast_per75          NUMERIC
-        """)
-        conn.commit()
-        cur.close()
-        conn.close()
-        return jsonify({'status': 'ok', 'message': 'Columns added. Remove this route now.'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-
 @app.route('/api/players')
 def get_players():
     sort        = request.args.get('sort', 'playmaker_score')
