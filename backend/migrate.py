@@ -48,6 +48,7 @@ migrations = [
     ("player_metrics", "drive_foul_rate",     "REAL"),  # drive_pf / drives
     ("player_metrics", "tov_pct",             "REAL"),  # tov / (fga + 0.44*fta + tov)
     ("player_metrics", "ast_pts_created_pg",  "REAL"),  # ast_pts_created / gp
+    ("player_metrics", "drive_pts_per_drive",  "REAL"),  # drive_pts / drives
 ]
 
 print(f"\nRunning migrations...")

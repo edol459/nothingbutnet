@@ -200,6 +200,10 @@ def compute_player_metrics(p):
     # Drive foul rate — how often drives result in fouls drawn
     drive_foul_rate = div(drive_pf, drives) if drives > 0 else None
 
+    # Drive pts per drive — scoring efficiency on drives
+    drive_pts_raw = s(p.get('drive_pts'))
+    drive_pts_per_drive = div(drive_pts_raw, drives) if drives > 0 else None
+
     # TOV% — standard turnover rate formula
     tov_pct = div(tov_pg, fga + 0.44 * fta + tov_pg) if (fga + fta + tov_pg) > 0 else None
 
@@ -301,6 +305,7 @@ def compute_player_metrics(p):
 
         # New derived
         'drive_foul_rate':     r(drive_foul_rate, 4),
+        'drive_pts_per_drive': r(drive_pts_per_drive, 4),
         'tov_pct':             r(tov_pct, 4),
         'ast_pts_created_pg':  r(ast_pts_created_pg, 2),
 
@@ -359,10 +364,18 @@ def compute_composites(metrics_list, seasons_map):
             return safe(metrics_by_pid.get(pid, {}).get(col))
         return safe(seasons_map.get(pid, {}).get(col))
 
+    # VW metrics — zero means no volume, treat same as NULL
+    VW_METRICS = {'all3_efg_vw', 'midrange_efg_vw', 'corner3_efg_vw',
+                  'above_break3_efg_vw', 'paint_efg_vw'}
+
     def percentile_map(pids, col, src):
         """Return {pid: 0-100 percentile} for a metric over a set of players."""
         vals = [(pid, get_val(pid, col, src)) for pid in pids]
-        vals = [(pid, v) for pid, v in vals if v is not None]
+        # For VW metrics, treat zero as NULL (zero = no meaningful volume)
+        if col in VW_METRICS:
+            vals = [(pid, v) for pid, v in vals if v is not None and v != 0.0]
+        else:
+            vals = [(pid, v) for pid, v in vals if v is not None]
         if not vals: return {}
         sorted_vals = sorted(vals, key=lambda x: x[1])
         n = len(sorted_vals)
@@ -403,10 +416,12 @@ def compute_composites(metrics_list, seasons_map):
     ]
     ALL_METRICS_POS = [
         # Finishing (position-normalized)
-        ('paint_efg_vw',        'm'),
-        ('paint_scoring_rate',  'm'),
-        ('post_ppp',            's'),
-        ('drive_foul_rate',     'm'),
+        ('paint_efg_vw',          'm'),
+        ('paint_scoring_rate',    'm'),
+        ('post_ppp',              's'),
+        ('drive_foul_rate',       'm'),
+        ('drive_pts_per_drive',   'm'),
+        ('pnr_roll_ppp',          's'),
         # Perimeter defense (position-normalized)
         ('def_delta_3pt',        'm'),
         ('def_delta_overall',    'm'),
@@ -414,6 +429,7 @@ def compute_composites(metrics_list, seasons_map):
         ('contested_shots',      's'),
         ('def_iso_ppp',          's'),
         ('def_pnr_bh_ppp',       's'),
+        ('stl',                  's'),
         # Interior defense (position-normalized)
         ('rim_protection_score', 'm'),
         ('def_delta_2pt',        'm'),
@@ -429,8 +445,25 @@ def compute_composites(metrics_list, seasons_map):
         ('reb_pct',              's'),
     ]
 
+    # Gate spotup_efg_pct: only count players above league average C&S EFG%
+    # Below-average catch-and-shoot just gets NULL — not being a C&S threat
+    # shouldn't penalize a pull-up specialist like Curry.
+    # League avg C&S EFG% ~ 0.535 (stable year-over-year)
+    LG_CS_EFG_AVG = 0.535
+    for pid in all_qualifying:
+        ps = seasons_map.get(pid, {})
+        spotup = ps.get('spotup_efg_pct')
+        if spotup is not None and float(spotup) < LG_CS_EFG_AVG:
+            seasons_map[pid]['_spotup_orig'] = spotup
+            seasons_map[pid]['spotup_efg_pct'] = None
+
     pct_lg = {col: percentile_map(all_qualifying, col, src)
               for col, src in ALL_METRICS_LG}
+
+    # Restore
+    for pid in all_qualifying:
+        if '_spotup_orig' in seasons_map.get(pid, {}):
+            seasons_map[pid]['spotup_efg_pct'] = seasons_map[pid].pop('_spotup_orig')
 
     pct_pos = {}
     for col, src in ALL_METRICS_POS:
@@ -499,21 +532,27 @@ def compute_composites(metrics_list, seasons_map):
         # paint_efg_vw and drive_foul_rate are volume-weighted so low-volume players
         # naturally score low without needing a gate. post_ppp requires min touches
         # via avg_pct NULL-skipping. Removing gate allows guards to get finishing scores.
+        # FINISHING — position-normalized
+        # paint_efg_vw, paint_scoring_rate: rim efficiency
+        # drive_pts_per_drive: scoring on drives
+        # drive_foul_rate: drawing fouls at rim
+        # pnr_roll_ppp: roll man finishing
+        # post_ppp: post scoring
         ('finishing_score', None,
-         [('paint_efg_vw',        'm'),
-          ('paint_scoring_rate',  'm'),
-          ('post_ppp',            's'),
-          ('drive_foul_rate',     'm')],
+         [('paint_efg_vw',          'm'),
+          ('paint_scoring_rate',    'm'),
+          ('drive_pts_per_drive',   'm'),
+          ('drive_foul_rate',       'm'),
+          ('pnr_roll_ppp',          's'),
+          ('post_ppp',              's')],
          'pos'),
 
         # SHOOTING — league-wide, min FGA gate
-        # All three metrics are purely perimeter-based — no rim shooting included.
-        # spotup_efg_pct: catch-and-shoot quality (everyone has this data)
-        # all3_efg_vw: 3PT volume-weighted delta (volume penalizes low-attempt bigs)
-        # midrange_efg_vw: mid-range volume-weighted delta (KD, Booker, SGA)
-        # ts_pct excluded: rewards rim finishers, not a perimeter shooting metric.
-        # NULLs skipped in avg_pct so a player needs at least 1 qualifying metric,
-        # but the FGA gate + volume-weighting on VW metrics naturally suppresses bigs.
+        # Three pure shooting skills (no creation element):
+        # spotup_efg_pct:  catch & shoot quality
+        # all3_efg_vw:     3PT volume-weighted delta
+        # midrange_efg_vw: mid-range volume-weighted delta
+        # Requires 2 of 3 non-NULL (min_metrics=2 enforced in loop)
         ('shooting_score', 'shooting',
          [('spotup_efg_pct',  's'),
           ('all3_efg_vw',     'm'),
@@ -523,6 +562,9 @@ def compute_composites(metrics_list, seasons_map):
         # CREATION — league-wide, drives/g gate
         # Captures: self-creation frequency, ISO efficiency, pull-up shooting,
         #           drive finishing, usage volume, turnover penalty
+        # CREATION — league-wide, drives/g gate
+        # Captures: self-creation rate, ISO efficiency, pull-up shooting,
+        #           drive finishing, usage volume, TOV penalty
         ('creation_score', 'creation',
          [('pct_uast_fgm',    's'),
           ('iso_ppp',         's'),
@@ -550,8 +592,7 @@ def compute_composites(metrics_list, seasons_map):
           ('ball_handler_load',   'm'),
           ('drive_and_dish_rate', 'm'),
           ('pnr_bh_ppp',          's'),
-          ('transition_ppp',      's'),
-          ('avg_drib_per_touch',  's')],
+          ('transition_ppp',      's')],
          'lg'),
 
         # PERIMETER DEFENSE — position-normalized, no gate
@@ -564,7 +605,8 @@ def compute_composites(metrics_list, seasons_map):
          [('def_delta_3pt',       'm'),
           ('def_delta_overall',   'm'),
           ('def_disruption_rate', 'm'),
-          ('contested_shots',     's')],
+          ('contested_shots',     's'),
+          ('stl',                 's')],
          'pos'),
 
         # INTERIOR DEFENSE — position-normalized, rim FGA gate
@@ -590,7 +632,6 @@ def compute_composites(metrics_list, seasons_map):
         ('rebounding_score', None,
          [('dreb_pct',    's'),
           ('oreb_pct',    's'),
-          ('reb_pct',     's'),
           ('box_out_rate','m')],
          'pos'),
     ]
@@ -621,15 +662,23 @@ def compute_composites(metrics_list, seasons_map):
             continue
 
         # Sub-composites
-        # shooting_score requires at least 2 of 3 perimeter metrics non-NULL
-        # to prevent bigs with only spotup data from ranking as shooters
         for comp_name, gate_key, cols_srcs, pct_key in SUB_COMPOSITES:
             if gate_key and not passes_gate(pid, gate_key):
                 m[comp_name] = None
                 continue
             pct_maps = pct_lg if pct_key == 'lg' else pct_pos
             min_m = 2 if comp_name == 'shooting_score' else 1
-            m[comp_name] = avg_pct(pid, cols_srcs, pct_maps, min_metrics=min_m)
+            score = avg_pct(pid, cols_srcs, pct_maps, min_metrics=min_m)
+
+            # Finishing requires paint presence — paint_efg_vw or paint_scoring_rate
+            # must be non-NULL, otherwise player has no rim activity
+            if comp_name == 'finishing_score' and score is not None:
+                has_paint = (pct_pos.get('paint_efg_vw', {}).get(pid) is not None or
+                             pct_pos.get('paint_scoring_rate', {}).get(pid) is not None)
+                if not has_paint:
+                    score = None
+
+            m[comp_name] = score
 
         # Category composites
         for comp_name, sub_names in CAT_COMPOSITES:

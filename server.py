@@ -76,9 +76,9 @@ BASE_COLS = """
     -- Tracking (season totals used in some category views)
     ps.pull_up_efg_pct, ps.cs_efg_pct,
     ps.pull_up_fga, ps.cs_fga,
-    ps.iso_ppp, ps.pnr_bh_ppp, ps.transition_ppp,
+    ps.iso_ppp, ps.pnr_bh_ppp, ps.pnr_roll_ppp, ps.transition_ppp,
     ps.def_iso_ppp, ps.def_pnr_bh_ppp,
-    ps.drives, ps.drive_fga, ps.drive_fg_pct, ps.drive_passes, ps.drive_tov,
+    ps.drives, ps.drive_fga, ps.drive_fg_pct, ps.drive_pts, ps.drive_pf, ps.drive_passes, ps.drive_tov,
     ps.passes_made, ps.potential_ast, ps.ast_pts_created, ps.secondary_ast,
     ps.touches, ps.time_of_poss,
 
@@ -133,7 +133,6 @@ BASE_COLS = """
     pm.hustle_pctile,
     pm.ts_pct_pctile,
     pm.net_rating_pctile,
-    pm.finishing_score,
     pm.shooting_score,
     pm.creation_score,
     pm.passing_score,
@@ -173,6 +172,7 @@ def get_sort_col(sort_key):
         'paint_scoring_rate', 'potential_ast_per75', 'ast_conversion_rate',
         'playmaking_gravity', 'secondary_ast_per75', 'pass_to_score_pct',
         'ball_handler_load', 'drive_and_dish_rate', 'pot_ast_per_tov',
+        'drive_foul_rate', 'drive_pts_per_drive',
         'pass_quality_index', 'def_delta_overall', 'def_delta_2pt', 'def_delta_3pt',
         'rim_protection_score', 'def_disruption_rate', 'box_out_rate',
         'screen_assist_rate', 'loose_ball_rate', 'hustle_composite', 'motor_score',
