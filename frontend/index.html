@@ -474,6 +474,7 @@ td.c-primary{min-width:140px}
       <div class="sd-row"><span class="sd-row-label">Passing — min AST/g</span><div class="sd-row-input"><input type="number" id="sd-ast-pg" value="2.0" min="0" max="10" step="0.5"><span class="sd-row-unit">AST/g</span></div></div>
       <div class="sd-row"><span class="sd-row-label">Ball Handling — min Touches/g</span><div class="sd-row-input"><input type="number" id="sd-touches-pg" value="40" min="0" max="120" step="5"><span class="sd-row-unit">TCH/g</span></div></div>
       <div class="sd-row"><span class="sd-row-label">Creation — min Drives/g</span><div class="sd-row-input"><input type="number" id="sd-drives-pg" value="2.0" min="0" max="20" step="0.5"><span class="sd-row-unit">DRV/g</span></div></div>
+      <div class="sd-row"><span class="sd-row-label">Finishing — min Paint FGA/g</span><div class="sd-row-input"><input type="number" id="sd-paint-fga" value="2.0" min="0" max="15" step="0.5"><span class="sd-row-unit">FGA/g</span></div></div>
       <div class="sd-row"><span class="sd-row-label">Interior Def — min Rim FGA def.</span><div class="sd-row-input"><input type="number" id="sd-rim-fga" value="50" min="0" max="300" step="10"><span class="sd-row-unit">FGA</span></div></div>
       <div class="sd-row"><span class="sd-row-label">3-Pointers — min 3PT FGA/g</span><div class="sd-row-input"><input type="number" id="sd-3pt-fga" value="1.5" min="0" max="15" step="0.5"><span class="sd-row-unit">FGA/g</span></div></div>
     </div>
@@ -509,7 +510,7 @@ td.c-primary{min-width:140px}
 </div>
 
 <script>
-const API = window.location.origin;
+const API = 'http://localhost:5000';
 const DEFAULTS = {
   minMin:       1000,
   paint:        2.0,
@@ -521,6 +522,7 @@ const DEFAULTS = {
   minAstPg:     2.0,
   minTouchesPg: 40.0,
   minDrivesPg:  2.0,
+  minPaintFga:  2.0,
   minRimFga:    50.0,
   min3ptFga:    1.5,
 };
@@ -587,8 +589,9 @@ const NAV = {
           { key:'ast_conversion_rate', label:'AST Conv %',       fmt:'pct', badge:'CONV'  },
           { key:'pot_ast_per_tov',     label:'Pot AST / BP TOV', fmt:'2f',  badge:'P/BPT' },
           { key:'pass_quality_index',  label:'Pass Quality',     fmt:'3f',  badge:'PQ'    },
-          { key:'pass_to_score_pct',   label:'Pass→Score %',     fmt:'pct', badge:'P2S'   },
           { key:'secondary_ast_per75', label:'Sec AST / 75',     fmt:'2f',  badge:'SEC'   },
+          { key:'ft_ast_per75',        label:'FT AST / 75',      fmt:'2f',  badge:'FTA'   },
+          { key:'pass_to_score_pct',   label:'Pass→Score %',     fmt:'pct', badge:'P2S'   },
         ],
         cols:['ast','ast_to','ast_pct','potential_ast_per75','pot_ast_per_tov'],
       },
@@ -596,10 +599,11 @@ const NAV = {
         key:'ballhandling', label:'Ball Handling',
         overall: { key:'ballhandling_score', label:'Ball Handling Avg Percentile', fmt:'1f', isOverall:true },
         metrics: [
-          { key:'playmaking_gravity',  label:'PM Gravity',       fmt:'2f',  badge:'GRAV'  },
-          { key:'drive_and_dish_rate', label:'Drive & Dish %',   fmt:'pct', badge:'D&D'   },
-          { key:'pnr_bh_ppp',          label:'P&R BH PPP',       fmt:'2f',  badge:'PNR'   },
-          { key:'transition_ppp',      label:'Transition PPP',   fmt:'2f',  badge:'TRANS' },
+          { key:'playmaking_gravity',   label:'PM Gravity',        fmt:'2f',  badge:'GRAV'  },
+          { key:'productive_drive_rate',label:'Productive Drive %', fmt:'pct', badge:'PDR'   },
+          { key:'pnr_bh_ppp',           label:'P&R BH PPP',        fmt:'2f',  badge:'PNR'   },
+          { key:'transition_ppp',       label:'Transition PPP',    fmt:'2f',  badge:'TRANS' },
+          { key:'drive_and_dish_rate',  label:'Drive & Dish %',    fmt:'pct', badge:'D&D'   },
         ],
         cols:['ast','ast_to','usg_pct','playmaking_gravity'],
       },
@@ -801,6 +805,8 @@ const COL_DEF = {
   midrange_fga_pg:{label:'MID/G',fmt:'1f',cls:''},
   iso_ppp:{label:'ISO',fmt:'2f',cls:''},
   playmaking_gravity:{label:'GRAV',fmt:'2f',cls:''},
+  productive_drive_rate:{label:'PDR%',fmt:'pct',cls:''},
+  ft_ast_per75:{label:'FTA/75',fmt:'2f',cls:''},
   motor_score:{label:'MOTR',fmt:'2f',cls:''},
   box_out_rate:{label:'BOX/75',fmt:'2f',cls:''},
   pct_uast_fgm:{label:'UAST%',fmt:'pct',cls:''},
@@ -828,6 +834,7 @@ const ST = {
   minAstPg:     2.0,
   minTouchesPg: 40.0,
   minDrivesPg:  2.0,
+  minPaintFga:  2.0,
   minRimFga:    50.0,
   min3ptFga:    1.5,
 };
@@ -900,6 +907,8 @@ const METRIC_INFO = {
   pnr_roll_ppp:{formula:'Roll Man Points Per Possession',desc:'Efficiency as the roll man in pick-and-roll.',source:'Synergy'},
   post_ppp:{formula:'Post Up Points Per Possession',desc:'Scoring efficiency on post-up plays.',source:'Synergy'},
   drive_and_dish_rate:{formula:'Drive Passes / (Drive FGA + Drive TOV + Drive Passes)',desc:'On drives, how often a player passes rather than shooting or turning it over.',source:'Computed'},
+  productive_drive_rate:{formula:'(Drive FGM + Drive Passes) / Drives',desc:'Productive drive rate — drives that result in a made basket OR a pass. Credits both finishing and playmaking equally. Only penalises wasted drives (turnovers, missed shots with no dish).',source:'Computed'},
+  ft_ast_per75:{formula:'(FT AST / GP) × (75 / Poss/G)',desc:'Free-throw assists per 75 possessions. Captures post passers and PnR passers whose playmaking value shows up at the free-throw line rather than in standard assists.',source:'Computed'},
   pnr_bh_ppp:{formula:'PnR PTS / PnR Poss',desc:'Points per possession as ball handler in pick-and-roll.',source:'Synergy'},
   transition_ppp:{formula:'Trans PTS / Trans Poss',desc:'Points per possession in transition.',source:'Synergy'},
   def_delta_overall:{formula:'Normal Opp FG% − Actual Opp FG%',desc:'How much a player reduces opponent FG% vs their normal shooting.',source:'Defender Shooting'},
@@ -1349,6 +1358,7 @@ async function fetchPlayers() {
     min_ast_pg:     ST.minAstPg,
     min_touches_pg: ST.minTouchesPg,
     min_drives_pg:  ST.minDrivesPg,
+    min_paint_fga:  ST.minPaintFga,
     min_rim_fga:    ST.minRimFga,
     min_3pt_fga:    ST.min3ptFga,
   });
@@ -1448,6 +1458,7 @@ function openSettings(){
   document.getElementById('sd-ast-pg').value     = ST.minAstPg;
   document.getElementById('sd-touches-pg').value = ST.minTouchesPg;
   document.getElementById('sd-drives-pg').value  = ST.minDrivesPg;
+  document.getElementById('sd-paint-fga').value  = ST.minPaintFga;
   document.getElementById('sd-rim-fga').value    = ST.minRimFga;
   document.getElementById('sd-3pt-fga').value    = ST.min3ptFga;
   document.getElementById('sd-paint').value      = DEFAULTS.paint;
@@ -1467,6 +1478,7 @@ document.getElementById('sd-reset').addEventListener('click',()=>{
   document.getElementById('sd-ast-pg').value   = DEFAULTS.minAstPg;
   document.getElementById('sd-touches-pg').value = DEFAULTS.minTouchesPg;
   document.getElementById('sd-drives-pg').value  = DEFAULTS.minDrivesPg;
+  document.getElementById('sd-paint-fga').value  = DEFAULTS.minPaintFga;
   document.getElementById('sd-rim-fga').value    = DEFAULTS.minRimFga;
   document.getElementById('sd-3pt-fga').value    = DEFAULTS.min3ptFga;
   document.getElementById('sd-paint').value    = DEFAULTS.paint;
@@ -1477,6 +1489,7 @@ document.getElementById('sd-apply').addEventListener('click',()=>{
   ST.minAstPg      = parseFloat(document.getElementById('sd-ast-pg').value)   || 0;
   ST.minTouchesPg  = parseFloat(document.getElementById('sd-touches-pg').value)|| 0;
   ST.minDrivesPg   = parseFloat(document.getElementById('sd-drives-pg').value) || 0;
+  ST.minPaintFga   = parseFloat(document.getElementById('sd-paint-fga').value) || 0;
   ST.minRimFga     = parseFloat(document.getElementById('sd-rim-fga').value)   || 0;
   ST.min3ptFga     = parseFloat(document.getElementById('sd-3pt-fga').value)   || 0;
   document.getElementById('min-min').value = ST.minMin;
@@ -1486,6 +1499,7 @@ document.getElementById('sd-apply').addEventListener('click',()=>{
     ST.minAstPg !== DEFAULTS.minAstPg ||
     ST.minTouchesPg !== DEFAULTS.minTouchesPg ||
     ST.minDrivesPg !== DEFAULTS.minDrivesPg ||
+    ST.minPaintFga !== DEFAULTS.minPaintFga ||
     ST.minRimFga !== DEFAULTS.minRimFga ||
     ST.min3ptFga !== DEFAULTS.min3ptFga;
   document.getElementById('filter-btn').classList.toggle('active', isNonDefault);

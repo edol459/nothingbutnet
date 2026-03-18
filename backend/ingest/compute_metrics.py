@@ -204,6 +204,21 @@ def compute_player_metrics(p):
     drive_pts_raw = s(p.get('drive_pts'))
     drive_pts_per_drive = div(drive_pts_raw, drives) if drives > 0 else None
 
+    # Productive drive rate — drives resulting in a made basket OR a pass
+    # Credits scoring AND playmaking equally; only penalises wasted drives
+    # (turnovers, missed shots with no dish)
+    drive_fgm_raw = s(p.get('drive_fgm'))
+    if drives > 0:
+        productive_drive_rate = div(drive_fgm_raw + drive_passes_pg, drives)
+    else:
+        productive_drive_rate = None
+
+    # FT assist rate — free-throw assists per 75 possessions
+    # Captures post passers and PnR passers that pass_quality_index undersells
+    ft_ast_raw   = s(p.get('ft_ast'))
+    ft_ast_pg    = ft_ast_raw / gp if gp > 0 else 0
+    ft_ast_per75 = ft_ast_pg * per75 if ft_ast_pg > 0 else None
+
     # TOV% — standard turnover rate formula
     tov_pct = div(tov_pg, fga + 0.44 * fta + tov_pg) if (fga + fta + tov_pg) > 0 else None
 
@@ -304,9 +319,11 @@ def compute_player_metrics(p):
         'open_fg_making':      r(open_fg_making, 4),
 
         # New derived
-        'drive_foul_rate':     r(drive_foul_rate, 4),
-        'drive_pts_per_drive': r(drive_pts_per_drive, 4),
-        'tov_pct':             r(tov_pct, 4),
+        'drive_foul_rate':        r(drive_foul_rate, 4),
+        'drive_pts_per_drive':    r(drive_pts_per_drive, 4),
+        'productive_drive_rate':  r(productive_drive_rate, 4),
+        'ft_ast_per75':           r(ft_ast_per75, 3),
+        'tov_pct':                r(tov_pct, 4),
         'ast_pts_created_pg':  r(ast_pts_created_pg, 2),
 
         # Playmaking
@@ -400,16 +417,17 @@ def compute_composites(metrics_list, seasons_map):
         # Passing (league-wide)
         ('pot_ast_per_tov',     'm'),
         ('pass_quality_index',  'm'),
-        ('ast_pct',             's'),
         ('secondary_ast_per75', 'm'),
         ('ast_pts_created_pg',  'm'),
+        ('ft_ast_per75',        'm'),
         # Ball handling (league-wide)
-        ('playmaking_gravity',  'm'),
-        ('ball_handler_load',   'm'),
-        ('drive_and_dish_rate', 'm'),
-        ('pnr_bh_ppp',          's'),
-        ('transition_ppp',      's'),
-        ('avg_drib_per_touch',  's'),
+        ('playmaking_gravity',    'm'),
+        ('ball_handler_load',     'm'),
+        ('drive_and_dish_rate',   'm'),
+        ('productive_drive_rate', 'm'),
+        ('pnr_bh_ppp',            's'),
+        ('transition_ppp',        's'),
+        ('avg_drib_per_touch',    's'),
         # Needed for inverted maps
         ('def_iso_ppp',         's'),
         ('def_pnr_bh_ppp',      's'),
@@ -457,6 +475,20 @@ def compute_composites(metrics_list, seasons_map):
             seasons_map[pid]['_spotup_orig'] = spotup
             seasons_map[pid]['spotup_efg_pct'] = None
 
+    # Gate pnr_bh_ppp: require >= 30 PnR BH FGA for a meaningful sample
+    for pid in all_qualifying:
+        ps = seasons_map.get(pid, {})
+        if not pnr_bh_qualified(pid):
+            seasons_map[pid]['_pnr_bh_orig'] = ps.get('pnr_bh_ppp')
+            seasons_map[pid]['pnr_bh_ppp'] = None
+
+    # Gate transition_ppp: require >= 20 transition FGA for a meaningful sample
+    for pid in all_qualifying:
+        ps = seasons_map.get(pid, {})
+        if not transition_qualified(pid):
+            seasons_map[pid]['_trans_orig'] = ps.get('transition_ppp')
+            seasons_map[pid]['transition_ppp'] = None
+
     pct_lg = {col: percentile_map(all_qualifying, col, src)
               for col, src in ALL_METRICS_LG}
 
@@ -464,6 +496,10 @@ def compute_composites(metrics_list, seasons_map):
     for pid in all_qualifying:
         if '_spotup_orig' in seasons_map.get(pid, {}):
             seasons_map[pid]['spotup_efg_pct'] = seasons_map[pid].pop('_spotup_orig')
+        if '_pnr_bh_orig' in seasons_map.get(pid, {}):
+            seasons_map[pid]['pnr_bh_ppp'] = seasons_map[pid].pop('_pnr_bh_orig')
+        if '_trans_orig' in seasons_map.get(pid, {}):
+            seasons_map[pid]['transition_ppp'] = seasons_map[pid].pop('_trans_orig')
 
     pct_pos = {}
     for col, src in ALL_METRICS_POS:
@@ -515,13 +551,24 @@ def compute_composites(metrics_list, seasons_map):
         if gate_key == 'creation':
             return s(ps.get('drives'), 0) / gp >= 2.0
         if gate_key == 'passing':
-            return s(ps.get('ast'), 0) >= 2.0           # per-game avg
+            # Require meaningful passing volume at compute level too
+            # (server gate of 2.0 AST/g is a display gate only)
+            return (s(ps.get('ast'), 0) >= 2.0 and
+                    s(ps.get('potential_ast'), 0) / gp >= 3.0)
         if gate_key == 'ballhandling':
             return (pos_g in ('G', 'GF') and
                     s(ps.get('touches'), 0) / gp >= 40.0)
         if gate_key == 'interior_def':
             return s(ps.get('def_rim_fga'), 0) >= 50   # season total
         return True  # no gate
+
+    def pnr_bh_qualified(pid):
+        """Min 30 PnR BH FGA for pnr_bh_ppp to count in percentile."""
+        return s(seasons_map.get(pid, {}).get('pnr_bh_fga'), 0) >= 30
+
+    def transition_qualified(pid):
+        """Min 20 transition FGA for transition_ppp to count in percentile."""
+        return s(seasons_map.get(pid, {}).get('transition_fga'), 0) >= 20
 
     # ── Sub-composite definitions ─────────────────────────────
     # (output_col, gate_key, [(metric_col, src), ...], pct_map_key)
@@ -574,25 +621,31 @@ def compute_composites(metrics_list, seasons_map):
           ('tov_pct_inv',     'm')],
          'lg'),
 
-        # PASSING — league-wide, AST/g gate
-        # Captures: decision quality, pass value, volume, ball movement, pts created
+        # PASSING — league-wide, AST/g + potential_ast gate
+        # Removed: ast_pct (too correlated with raw AST, adds no new signal)
+        #          ast_pts_created_pg (redundant with pass_quality_index which
+        #          already normalises by pass volume)
+        # Added:   ft_ast_per75 (captures post/PnR passers whose value shows up
+        #          at the free-throw line rather than in direct assists)
         ('passing_score', 'passing',
          [('pot_ast_per_tov',    'm'),
           ('pass_quality_index', 'm'),
-          ('ast_pct',            's'),
           ('secondary_ast_per75','m'),
-          ('ast_pts_created_pg', 'm')],
+          ('ft_ast_per75',       'm')],
          'lg'),
 
         # BALL HANDLING — league-wide, G/GF + touches gate
-        # Captures: gravity/efficiency, usage time, drive+dish decisions,
-        #           PnR BH efficiency, transition offense, dribble creation style
+        # Removed: ball_handler_load (gate variable, not a quality signal)
+        #          drive_and_dish_rate (penalises scoring guards who finish drives)
+        # Added:   productive_drive_rate — (drive_fgm + drive_passes) / drives
+        #          credits scoring AND playmaking on drives equally
+        # pnr_bh_ppp gated to pnr_bh_fga >= 30 in percentile_map call below
+        # transition_ppp gated to transition_fga >= 20 in percentile_map call below
         ('ballhandling_score', 'ballhandling',
-         [('playmaking_gravity',  'm'),
-          ('ball_handler_load',   'm'),
-          ('drive_and_dish_rate', 'm'),
-          ('pnr_bh_ppp',          's'),
-          ('transition_ppp',      's')],
+         [('playmaking_gravity',    'm'),
+          ('productive_drive_rate', 'm'),
+          ('pnr_bh_ppp',            's'),
+          ('transition_ppp',        's')],
          'lg'),
 
         # PERIMETER DEFENSE — position-normalized, no gate
@@ -686,9 +739,15 @@ def compute_composites(metrics_list, seasons_map):
             available = [v for v in sub_vals if v is not None]
 
             if comp_name == 'playmaker_score':
-                # Require BOTH passing and ball handling — no partial credit
-                m[comp_name] = (round(sum(sub_vals) / len(sub_vals), 1)
-                                if all(v is not None for v in sub_vals) else None)
+                # Require passing_score — it's the core of playmaking.
+                # Ballhandling_score (G/GF only) is a bonus when available.
+                # This allows elite passing bigs (Jokic, Draymond) to rank
+                # rather than being NULL'd for not qualifying as ball handlers.
+                passing_val = safe(m.get('passing_score'))
+                if passing_val is None:
+                    m[comp_name] = None
+                else:
+                    m[comp_name] = round(sum(available) / len(available), 1) if available else None
             elif comp_name == 'creator_score':
                 # Require creation_score — pure shooters without creation don't rank
                 # on overall scoring. Finishing is optional (not all scorers post up).
