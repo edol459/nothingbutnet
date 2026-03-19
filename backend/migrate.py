@@ -48,7 +48,15 @@ migrations = [
     ("player_metrics", "drive_foul_rate",     "REAL"),  # drive_pf / drives
     ("player_metrics", "tov_pct",             "REAL"),  # tov / (fga + 0.44*fta + tov)
     ("player_metrics", "ast_pts_created_pg",  "REAL"),  # ast_pts_created / gp
-    ("player_metrics", "drive_pts_per_drive",  "REAL"),  # drive_pts / drives
+    ("player_metrics", "drive_pts_per_drive", "REAL"),  # drive_pts / drives
+    # ── playmaking refactor additions ───────────────────────────────────────
+    ("player_metrics", "ft_ast_per75",        "REAL"),  # ft assists per 75 poss
+    ("player_metrics", "drive_ast_per75",     "REAL"),  # drive assists per 75 poss
+    ("player_metrics", "drive_passes_per75",  "REAL"),  # drive passes per 75 poss (proxy for pot ast from drives)
+    ("player_metrics", "lost_ball_tov_pg",    "REAL"),  # live-ball turnovers per game (inverted in BH composite)
+    # ── turnover type columns (player_seasons) ───────────────────────────────
+    ("player_seasons", "bad_pass_tov",        "REAL"),  # bad-pass turnovers (season total) — fixes pot_ast_per_tov
+    ("player_seasons", "lost_ball_tov",       "REAL"),  # lost-ball turnovers (season total) — dribbling/handling TOVs
 ]
 
 print(f"\nRunning migrations...")
@@ -68,4 +76,4 @@ conn.close()
 
 print(f"{'─'*50}")
 print(f"\n✅ Migration complete.")
-print(f"\nNext step: python backend/ingest/fetch_season.py --season 2024-25")
+print(f"\nNext step: python backend/ingest/compute_metrics.py")

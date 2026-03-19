@@ -214,6 +214,14 @@ def fetch_all(season, season_type):
         lambda: LeagueHustleStatsPlayer(season=season,
             season_type_all_star=season_type, per_mode_time="Totals"))
 
+    # Turnover types — bad pass and lost ball (live dribbling turnovers)
+    # Source: LeagueDashPlayerStats Misc — exposes BAD_PASS and LOST_BALL columns
+    data['tov_types'] = fetch("Turnover Types",
+        lambda: LeagueDashPlayerStats(season=season,
+            season_type_all_star=season_type,
+            per_mode_simple="Totals",
+            measure_type_detailed_defense="Misc"))
+
     # Clutch
     data['clutch'] = fetch("Clutch Stats",
         lambda: LeagueDashPlayerClutch(season=season,
@@ -446,6 +454,15 @@ def build_player_rows(data, season, season_type):
                      'BOX_OUTS', 'OFF_BOXOUTS', 'DEF_BOXOUTS']
         hust_cols = [c for c in hust_cols if c in hustle.columns]
         merged = merged.merge(hustle[hust_cols], on='PLAYER_ID', how='left')
+
+    # Turnover types
+    tov_types = data.get('tov_types', pd.DataFrame())
+    if not tov_types.empty:
+        tov_cols = {'BAD_PASS': 'BAD_PASS_TOV', 'LOST_BALL': 'LOST_BALL_TOV'}
+        cols_present = [c for c in tov_cols if c in tov_types.columns]
+        if cols_present:
+            tov_sub = tov_types[['PLAYER_ID'] + cols_present].rename(columns=tov_cols)
+            merged = merged.merge(tov_sub, on='PLAYER_ID', how='left')
 
     # Clutch
     clutch = data.get('clutch', pd.DataFrame())
@@ -747,6 +764,10 @@ def build_player_rows(data, season, season_type):
             'box_outs':        safe_float(row.get('BOX_OUTS')),
             'off_box_outs':    safe_float(row.get('OFF_BOXOUTS')),
             'def_box_outs':    safe_float(row.get('DEF_BOXOUTS')),
+
+            # Turnover types
+            'bad_pass_tov':  safe_float(row.get('BAD_PASS_TOV')),
+            'lost_ball_tov': safe_float(row.get('LOST_BALL_TOV')),
 
             # Synergy
             'iso_ppp':        safe_float(row.get('ISO_PPP')),

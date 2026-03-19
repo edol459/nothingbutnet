@@ -180,6 +180,7 @@ def compute_player_metrics(p):
     ast_pts_created_pg = ast_pts_created / gp if gp > 0 else 0
     drive_passes_pg    = drive_passes    / gp if gp > 0 else drive_passes
     drive_ast_pg       = drive_ast_raw   / gp if gp > 0 else 0
+    drive_pg           = drives          / gp if gp > 0 else 0
 
     potential_ast_per75 = potential_ast_pg * per75 if potential_ast_pg > 0 else None
     ast_conversion_rate = div(ast_pg, potential_ast_pg)
@@ -189,30 +190,34 @@ def compute_player_metrics(p):
     pass_to_score_pct   = div(ast_pg, passes_made_pg) if passes_made_pg > 0 else None
     ball_handler_load   = div(time_of_poss, min_pg)
     # Gate drive_and_dish_rate: require >= 2.0 drives/g to avoid 1-drive-1-pass = 100% outliers
-    drive_pg            = drives / gp if gp > 0 else 0
     drive_total         = drive_fga + drive_tov + drive_passes_pg
     drive_and_dish_rate = div(drive_passes_pg, drive_total) if drive_pg >= 2.0 else None
     pass_quality_index  = div(ast_pts_created_pg, passes_made_pg)
-    # Drive AST per 75 — assists generated specifically off drives, pace-adjusted
-    # Captures on-ball creators who make plays for teammates out of penetration
-    drive_ast_per75     = drive_ast_pg * per75 if drive_ast_pg > 0 and drive_pg >= 2.0 else None
 
-    # Drive passes per 75 — passes made out of drives, pace-adjusted
-    # Best available proxy for "potential assists from drives" since the NBA API
-    # does not break out potential AST by play type. Every drive pass is a potential
-    # assist attempt; high values = player consistently finds teammates off penetration
-    drive_passes_per75  = drive_passes_pg * per75 if drive_passes_pg > 0 and drive_pg >= 2.0 else None
-
+    # Gate pot_ast_per_tov: require >= 3.0 potential AST/g to prevent low-volume
+    # passers with near-zero bad-pass TOVs producing extreme outlier values
+    # bad_pass_tov is a season total from LeagueDashPlayerStats Misc
     bad_pass_total = safe(p.get('bad_pass_tov'))
-    # Gate pot_ast_per_tov: require >= 3.0 potential AST/g to prevent near-zero
-    # denominator outliers (low-volume passers with 0 bad pass TOVs)
+    bad_pass_pg    = bad_pass_total / gp if bad_pass_total is not None and gp > 0 else None
     if potential_ast_pg >= 3.0:
-        if bad_pass_total is not None and bad_pass_total > 0 and gp > 0:
-            pot_ast_per_tov = div(potential_ast_pg, bad_pass_total / gp)
+        if bad_pass_pg is not None and bad_pass_pg > 0:
+            pot_ast_per_tov = div(potential_ast_pg, bad_pass_pg)
         else:
             pot_ast_per_tov = div(potential_ast_pg, tov_pg) if tov_pg and tov_pg > 0 else None
     else:
         pot_ast_per_tov = None
+
+    # Lost ball turnovers per game — live-ball turnovers from dribbling/handling
+    # (total TOV - bad_pass_tov). Lower = better ball security while handling.
+    # Used inverted in ball handling composite.
+    lost_ball_total  = safe(p.get('lost_ball_tov'))
+    if lost_ball_total is not None and gp > 0:
+        lost_ball_tov_pg = lost_ball_total / gp
+    elif bad_pass_total is not None and gp > 0:
+        # Fallback: imply lost ball from total TOV minus bad pass TOV
+        lost_ball_tov_pg = max(0.0, tov_pg - (bad_pass_total / gp))
+    else:
+        lost_ball_tov_pg = None
 
     # ── New derived metrics ───────────────────────────────────
     # Drive foul rate — how often drives result in fouls drawn
@@ -222,21 +227,18 @@ def compute_player_metrics(p):
     drive_pts_raw = s(p.get('drive_pts'))
     drive_pts_per_drive = div(drive_pts_raw, drives) if drives > 0 else None
 
-    # Productive drive rate — drives resulting in a made basket OR a pass
-    # Credits scoring AND playmaking equally; only penalises wasted drives
-    # (turnovers, missed shots with no dish)
-    # Same 2.0 drives/g gate as drive_and_dish_rate to prevent small-sample outliers
-    drive_fgm_raw = s(p.get('drive_fgm'))
-    if drive_pg >= 2.0:
-        productive_drive_rate = div(drive_fgm_raw + drive_passes_pg, drives)
-    else:
-        productive_drive_rate = None
-
     # FT assist rate — free-throw assists per 75 possessions
     # Captures post passers and PnR passers that pass_quality_index undersells
     ft_ast_raw   = s(p.get('ft_ast'))
     ft_ast_pg    = ft_ast_raw / gp if gp > 0 else 0
     ft_ast_per75 = ft_ast_pg * per75 if ft_ast_pg > 0 else None
+
+    # Drive AST per 75 — assists generated off drives, pace-adjusted
+    drive_ast_per75 = drive_ast_pg * per75 if drive_ast_pg > 0 and drive_pg >= 2.0 else None
+
+    # Drive passes per 75 — best available proxy for potential assists from drives
+    # Every drive pass is a potential assist attempt; gated at drives/g >= 2.0
+    drive_passes_per75 = drive_passes_pg * per75 if drive_passes_pg > 0 and drive_pg >= 2.0 else None
 
     # TOV% — standard turnover rate formula
     tov_pct = div(tov_pg, fga + 0.44 * fta + tov_pg) if (fga + fta + tov_pg) > 0 else None
@@ -338,12 +340,13 @@ def compute_player_metrics(p):
         'open_fg_making':      r(open_fg_making, 4),
 
         # New derived
-        'drive_foul_rate':        r(drive_foul_rate, 4),
-        'drive_pts_per_drive':    r(drive_pts_per_drive, 4),
-        'productive_drive_rate':  r(productive_drive_rate, 4),
-        'ft_ast_per75':           r(ft_ast_per75, 3),
-        'tov_pct':                r(tov_pct, 4),
-        'ast_pts_created_pg':  r(ast_pts_created_pg, 2),
+        'drive_foul_rate':      r(drive_foul_rate, 4),
+        'drive_pts_per_drive':  r(drive_pts_per_drive, 4),
+        'ft_ast_per75':         r(ft_ast_per75, 3),
+        'drive_ast_per75':      r(drive_ast_per75, 3),
+        'drive_passes_per75':   r(drive_passes_per75, 3),
+        'tov_pct':              r(tov_pct, 4),
+        'ast_pts_created_pg':   r(ast_pts_created_pg, 2),
 
         # Playmaking
         'potential_ast_per75':  r(potential_ast_per75, 3),
@@ -355,8 +358,7 @@ def compute_player_metrics(p):
         'drive_and_dish_rate':  r(drive_and_dish_rate),
         'pot_ast_per_tov':      r(pot_ast_per_tov, 3),
         'pass_quality_index':   r(pass_quality_index, 4),
-        'drive_ast_per75':      r(drive_ast_per75, 3),
-        'drive_passes_per75':   r(drive_passes_per75, 3),
+        'lost_ball_tov_pg':     r(lost_ball_tov_pg, 3),
 
         # Defense
         'def_delta_overall':    r(def_delta_overall),
@@ -438,19 +440,16 @@ def compute_composites(metrics_list, seasons_map):
         # Passing (league-wide)
         ('pot_ast_per_tov',     'm'),
         ('pass_quality_index',  'm'),
+        ('ast_pct',             's'),
         ('secondary_ast_per75', 'm'),
-        ('ast_pts_created_pg',  'm'),
         ('ft_ast_per75',        'm'),
         ('drive_ast_per75',     'm'),
         ('drive_passes_per75',  'm'),
         # Ball handling (league-wide)
-        ('playmaking_gravity',    'm'),
-        ('ball_handler_load',     'm'),
-        ('drive_and_dish_rate',   'm'),
-        ('productive_drive_rate', 'm'),
-        ('pnr_bh_ppp',            's'),
-        ('transition_ppp',        's'),
-        ('avg_drib_per_touch',    's'),
+        ('playmaking_gravity',  'm'),
+        ('pnr_bh_ppp',          's'),
+        ('transition_ppp',      's'),
+        ('lost_ball_tov_pg',    'm'),
         # Needed for inverted maps
         ('def_iso_ppp',         's'),
         ('def_pnr_bh_ppp',      's'),
@@ -486,18 +485,15 @@ def compute_composites(metrics_list, seasons_map):
         ('reb_pct',              's'),
     ]
 
-    # Gate spotup_efg_pct: only count players above league average C&S EFG%
-    # Below-average catch-and-shoot just gets NULL — not being a C&S threat
-    # shouldn't penalize a pull-up specialist like Curry.
-    # League avg C&S EFG% ~ 0.535 (stable year-over-year)
+    # Gate spotup_efg_pct: only above-average C&S shooters get a percentile
     LG_CS_EFG_AVG = 0.535
 
     def pnr_bh_qualified(pid):
-        """Min 30 PnR BH FGA for pnr_bh_ppp to count in percentile."""
+        """Min 30 PnR BH FGA for a meaningful sample."""
         return s(seasons_map.get(pid, {}).get('pnr_bh_fga'), 0) >= 30
 
     def transition_qualified(pid):
-        """Min 20 transition FGA for transition_ppp to count in percentile."""
+        """Min 20 transition FGA for a meaningful sample."""
         return s(seasons_map.get(pid, {}).get('transition_fga'), 0) >= 20
 
     for pid in all_qualifying:
@@ -506,17 +502,9 @@ def compute_composites(metrics_list, seasons_map):
         if spotup is not None and float(spotup) < LG_CS_EFG_AVG:
             seasons_map[pid]['_spotup_orig'] = spotup
             seasons_map[pid]['spotup_efg_pct'] = None
-
-    # Gate pnr_bh_ppp: require >= 30 PnR BH FGA for a meaningful sample
-    for pid in all_qualifying:
-        ps = seasons_map.get(pid, {})
         if not pnr_bh_qualified(pid):
             seasons_map[pid]['_pnr_bh_orig'] = ps.get('pnr_bh_ppp')
             seasons_map[pid]['pnr_bh_ppp'] = None
-
-    # Gate transition_ppp: require >= 20 transition FGA for a meaningful sample
-    for pid in all_qualifying:
-        ps = seasons_map.get(pid, {})
         if not transition_qualified(pid):
             seasons_map[pid]['_trans_orig'] = ps.get('transition_ppp')
             seasons_map[pid]['transition_ppp'] = None
@@ -524,7 +512,7 @@ def compute_composites(metrics_list, seasons_map):
     pct_lg = {col: percentile_map(all_qualifying, col, src)
               for col, src in ALL_METRICS_LG}
 
-    # Restore
+    # Restore all gated values
     for pid in all_qualifying:
         if '_spotup_orig' in seasons_map.get(pid, {}):
             seasons_map[pid]['spotup_efg_pct'] = seasons_map[pid].pop('_spotup_orig')
@@ -543,6 +531,9 @@ def compute_composites(metrics_list, seasons_map):
     # Inverted metrics: lower raw = better = higher percentile
     # tov_pct — lower turnover rate is better
     pct_lg['tov_pct_inv'] = {pid: round(100 - v, 1) for pid, v in pct_lg['tov_pct'].items()}
+
+    # lost_ball_tov_pg — fewer live-ball turnovers = better ball security
+    pct_lg['lost_ball_tov_pg_inv'] = {pid: round(100 - v, 1) for pid, v in pct_lg['lost_ball_tov_pg'].items()}
 
     # def_iso_ppp, def_pnr_bh_ppp — lower PPP allowed = better
     # Build both league-wide and position-normalized inverted maps
@@ -579,20 +570,20 @@ def compute_composites(metrics_list, seasons_map):
         if gate_key == 'finishing':
             return s(ps.get('paint_touches'), 0) / gp >= 3.0
         if gate_key == 'shooting':
-            return s(ps.get('fga'), 0) >= 3.0          # per-game avg
+            return s(ps.get('fga'), 0) >= 3.0
         if gate_key == 'creation':
             return s(ps.get('drives'), 0) / gp >= 2.0
         if gate_key == 'passing':
-            # Require meaningful passing volume at compute level too
-            # (server gate of 2.0 AST/g is a display gate only)
             return (s(ps.get('ast'), 0) >= 2.0 and
-                    s(ps.get('potential_ast'), 0) / gp >= 3.0)
+                    s(ps.get('potential_ast'), 0) / gp >= 3.0 and
+                    gp >= 30)
         if gate_key == 'ballhandling':
             return (pos_g in ('G', 'GF') and
                     s(ps.get('touches'), 0) / gp >= 40.0 and
-                    s(ps.get('drives'), 0) / gp >= 4.0)
+                    s(ps.get('drives'), 0) / gp >= 4.0 and
+                    gp >= 30)
         if gate_key == 'interior_def':
-            return s(ps.get('def_rim_fga'), 0) >= 50   # season total
+            return s(ps.get('def_rim_fga'), 0) >= 50
         return True  # no gate
 
     # ── Sub-composite definitions ─────────────────────────────
@@ -647,32 +638,30 @@ def compute_composites(metrics_list, seasons_map):
          'lg'),
 
         # PASSING — league-wide, AST/g + potential_ast gate
-        # Removed: ast_pct (too correlated with raw AST, adds no new signal)
-        #          ast_pts_created_pg (redundant with pass_quality_index which
-        #          already normalises by pass volume)
-        # Added:   ft_ast_per75 (captures post/PnR passers whose value shows up
-        #          at the free-throw line rather than in direct assists)
+        # Removed: ast_pts_created_pg (redundant with pass_quality_index)
+        # ast_pct re-added: normalizes assists by teammate FGM while on floor,
+        # discounting players whose raw AST inflates on bad teams or by role.
+        # Now distinct from ast_pts_created_pg which was the original overlap.
         ('passing_score', 'passing',
-         [('pot_ast_per_tov',     'm'),
-          ('pass_quality_index',  'm'),
-          ('secondary_ast_per75', 'm'),
-          ('ft_ast_per75',        'm'),
-          ('drive_ast_per75',     'm'),
-          ('drive_passes_per75',  'm')],
+         [('pot_ast_per_tov',    'm'),
+          ('pass_quality_index', 'm'),
+          ('ast_pct',            's'),
+          ('secondary_ast_per75','m'),
+          ('ft_ast_per75',       'm'),
+          ('drive_ast_per75',    'm'),
+          ('drive_passes_per75', 'm')],
          'lg'),
 
-        # BALL HANDLING — league-wide, G/GF + touches + drives gate
-        # Removed: ball_handler_load (gate variable, not a quality signal)
-        #          drive_and_dish_rate (penalises scoring guards)
-        #          productive_drive_rate (low variance — nearly everyone who drives
-        #          scores high, so it inflates percentiles without differentiating)
-        # Anchor: playmaking_gravity (pts created per unit of possession time)
-        # Bonus:  pnr_bh_ppp and transition_ppp when sample qualifies
-        # Requires playmaking_gravity non-NULL + min 2 metrics total
+        # BALL HANDLING — league-wide, G/GF + touches + drives + GP gate
+        # Removed: ball_handler_load, drive_and_dish_rate, tov_pct_inv (too punishing
+        #          for high-usage creators), ast_to (covered by pot_ast_per_tov in passing)
+        # lost_ball_tov_pg_inv: live-ball turnovers from dribbling/handling (inverted)
+        # — directly measures ball security while handling, not passing decisions
         ('ballhandling_score', 'ballhandling',
-         [('playmaking_gravity', 'm'),
-          ('pnr_bh_ppp',         's'),
-          ('transition_ppp',     's')],
+         [('playmaking_gravity',    'm'),
+          ('pnr_bh_ppp',            's'),
+          ('transition_ppp',        's'),
+          ('lost_ball_tov_pg_inv',  'm')],
          'lg'),
 
         # PERIMETER DEFENSE — position-normalized, no gate
@@ -758,7 +747,7 @@ def compute_composites(metrics_list, seasons_map):
                 if not has_paint:
                     score = None
 
-            # Ball handling requires playmaking_gravity as the anchor metric —
+            # Ball handling requires playmaking_gravity as the anchor —
             # if a player has no gravity score they shouldn't rank as a ball handler
             if comp_name == 'ballhandling_score' and score is not None:
                 if pct_lg.get('playmaking_gravity', {}).get(pid) is None:
@@ -772,10 +761,9 @@ def compute_composites(metrics_list, seasons_map):
             available = [v for v in sub_vals if v is not None]
 
             if comp_name == 'playmaker_score':
-                # Require passing_score — it's the core of playmaking.
-                # Ballhandling_score (G/GF only) is a bonus when available.
-                # This allows elite passing bigs (Jokic, Draymond) to rank
-                # rather than being NULL'd for not qualifying as ball handlers.
+                # Require passing_score — core of playmaking.
+                # ballhandling_score (G/GF only) averages in when available,
+                # allowing elite passing bigs (Jokic, Draymond) to rank.
                 passing_val = safe(m.get('passing_score'))
                 if passing_val is None:
                     m[comp_name] = None
@@ -1060,30 +1048,8 @@ def spot_check(conn, season, season_type):
               f"{r['playmaker_score'] or 0:>6.1f} {r['creator_score'] or 0:>6.1f} "
               f"{r['pot_ast_per_tov'] or 0:>8.2f} {r['pass_quality_index'] or 0:>7.3f}")
 
-    print(f"\nBall Handling gate debug (top scorers + suspicious players):")
-    print("─" * 100)
-    cur.execute("""
-        SELECT p.player_name, p.position_group, ps.gp,
-               ps.drives / NULLIF(ps.gp, 0) AS drives_pg,
-               ps.touches / NULLIF(ps.gp, 0) AS touches_pg,
-               pm.ballhandling_score, pm.playmaking_gravity,
-               ps.pnr_bh_ppp, ps.transition_ppp
-        FROM player_metrics pm
-        JOIN player_seasons ps ON pm.player_id = ps.player_id AND pm.season = ps.season AND pm.season_type = ps.season_type
-        JOIN players p ON pm.player_id = p.player_id
-        WHERE pm.season = %s AND pm.season_type = %s AND ps.min >= %s
-          AND pm.ballhandling_score IS NOT NULL
-        ORDER BY pm.ballhandling_score DESC NULLS LAST LIMIT 20
-    """, (season, season_type, MIN_MINUTES_TOTAL))
-    print(f"{'Player':<22} {'POS':<4} {'GP':>4} {'DRV/G':>6} {'TCH/G':>7} {'BH_SCORE':>9} {'GRAV':>6} {'PNR':>6} {'TRANS':>6}")
-    print("─" * 100)
-    for r in cur.fetchall():
-        print(f"{r['player_name']:<22} {r['position_group'] or '':<4} "
-              f"{int(r['gp'] or 0):>4} "
-              f"{float(r['drives_pg'] or 0):>6.1f} {float(r['touches_pg'] or 0):>7.1f} "
-              f"{r['ballhandling_score'] or 0:>9.1f} "
-              f"{r['playmaking_gravity'] or 0:>6.2f} "
-              f"{r['pnr_bh_ppp'] or 0:>6.3f} {r['transition_ppp'] or 0:>6.3f}")
+    print(f"\nTop 10 Defenders:")
+    print("─" * 70)
     cur.execute("""
         SELECT p.player_name, p.position_group, ps.stl, ps.blk,
                pm.defender_score, pm.def_delta_overall, pm.rim_protection_score

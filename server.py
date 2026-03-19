@@ -107,10 +107,10 @@ BASE_COLS = """
     pm.drive_and_dish_rate,
     pm.pot_ast_per_tov,
     pm.pass_quality_index,
-    pm.productive_drive_rate,
     pm.ft_ast_per75,
     pm.drive_ast_per75,
     pm.drive_passes_per75,
+    pm.lost_ball_tov_pg,
     pm.def_delta_overall,
     pm.def_delta_2pt,
     pm.def_delta_3pt,
@@ -177,7 +177,7 @@ def get_sort_col(sort_key):
         'playmaking_gravity', 'secondary_ast_per75', 'pass_to_score_pct',
         'ball_handler_load', 'drive_and_dish_rate', 'pot_ast_per_tov',
         'drive_foul_rate', 'drive_pts_per_drive',
-        'productive_drive_rate', 'ft_ast_per75', 'drive_ast_per75', 'drive_passes_per75',
+        'ft_ast_per75', 'drive_ast_per75', 'drive_passes_per75', 'lost_ball_tov_pg',
         'pass_quality_index', 'def_delta_overall', 'def_delta_2pt', 'def_delta_3pt',
         'rim_protection_score', 'def_disruption_rate', 'box_out_rate',
         'screen_assist_rate', 'loose_ball_rate', 'hustle_composite', 'motor_score',
@@ -201,7 +201,10 @@ def get_sort_col(sort_key):
 
 @app.route('/')
 def index():
-    return app.send_static_file('index.html')
+    resp = app.make_response(app.send_static_file('index.html'))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
 
 
 @app.route('/api/health')
@@ -212,16 +215,16 @@ def health():
 @app.route('/api/migrate')
 def migrate():
     """One-time migration — adds new columns to player_metrics.
-    Hit this once in the browser, then remove this route."""
+    Hit once in browser, then remove this route."""
     try:
         conn = get_conn()
         cur  = conn.cursor()
         cur.execute("""
             ALTER TABLE player_metrics
-              ADD COLUMN IF NOT EXISTS productive_drive_rate NUMERIC,
-              ADD COLUMN IF NOT EXISTS ft_ast_per75          NUMERIC,
-              ADD COLUMN IF NOT EXISTS drive_ast_per75       NUMERIC,
-              ADD COLUMN IF NOT EXISTS drive_passes_per75    NUMERIC
+              ADD COLUMN IF NOT EXISTS ft_ast_per75        NUMERIC,
+              ADD COLUMN IF NOT EXISTS drive_ast_per75     NUMERIC,
+              ADD COLUMN IF NOT EXISTS drive_passes_per75  NUMERIC,
+              ADD COLUMN IF NOT EXISTS lost_ball_tov_pg    NUMERIC
         """)
         conn.commit()
         cur.close()
@@ -229,6 +232,44 @@ def migrate():
         return jsonify({'status': 'ok', 'message': 'Columns added. Remove this route now.'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/diag/tov')
+def diag_tov():
+    """Diagnostic — check bad_pass_tov and lost_ball_tov population in DB."""
+    try:
+        conn = get_conn()
+        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Which seasons have bad_pass_tov data
+        cur.execute("""
+            SELECT season, season_type,
+                   COUNT(*) FILTER (WHERE bad_pass_tov > 0)  AS bp_populated,
+                   COUNT(*) FILTER (WHERE lost_ball_tov > 0) AS lb_populated,
+                   COUNT(*) AS total
+            FROM player_seasons
+            GROUP BY season, season_type
+            ORDER BY season DESC
+        """)
+        seasons = [dict(r) for r in cur.fetchall()]
+
+        # Sample players with data
+        cur.execute("""
+            SELECT p.player_name, ps.season, ps.season_type,
+                   ps.bad_pass_tov, ps.lost_ball_tov, ps.tov, ps.gp
+            FROM player_seasons ps
+            JOIN players p ON ps.player_id = p.player_id
+            WHERE ps.bad_pass_tov > 0
+            ORDER BY ps.season DESC, ps.bad_pass_tov DESC
+            LIMIT 20
+        """)
+        sample = [dict(r) for r in cur.fetchall()]
+
+        cur.close()
+        conn.close()
+        return jsonify({'seasons': seasons, 'sample': sample})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/players')
@@ -248,11 +289,10 @@ def get_players():
     min_ast_pg      = float(request.args.get('min_ast_pg',      2.0))
     min_touches_pg  = float(request.args.get('min_touches_pg',  40.0))
     min_drives_pg   = float(request.args.get('min_drives_pg',   2.0))
-    # min_paint_fga removed — finishing_score gating is handled in compute_metrics.py
+    # min_paint_fga removed — finishing_score gating handled in compute_metrics.py
     min_rim_fga     = float(request.args.get('min_rim_fga',     50.0))
     min_3pt_fga     = float(request.args.get('min_3pt_fga',     1.5))
-    # Ball handling gate drives threshold — matches compute_metrics.py ballhandling gate
-    min_bh_drives_pg = 4.0
+    min_bh_drives_pg = 4.0  # ball handling drives gate — matches compute_metrics.py
 
     sort_col  = get_sort_col(sort)
     direction = 'DESC' if sort_dir != 'asc' else 'ASC'
@@ -280,8 +320,8 @@ def get_players():
         CASE WHEN ps.ast >= {min_ast_pg}
              THEN pm.passing_score      ELSE NULL END AS passing_score,
         CASE WHEN ps.touches / NULLIF(ps.gp, 0) >= {min_touches_pg}
-             AND ps.drives  / NULLIF(ps.gp, 0) >= {min_bh_drives_pg}
-             AND p.position_group IN ('G','GF')
+             AND  ps.drives  / NULLIF(ps.gp, 0) >= {min_bh_drives_pg}
+             AND  p.position_group IN ('G','GF')
              THEN pm.ballhandling_score ELSE NULL END AS ballhandling_score,
         pm.perimeter_def_score,
         CASE WHEN ps.def_rim_fga >= {min_rim_fga}
