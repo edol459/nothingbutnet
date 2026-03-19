@@ -208,14 +208,17 @@ def compute_player_metrics(p):
         pot_ast_per_tov = None
 
     # Lost ball turnovers per game — live-ball turnovers from dribbling/handling
-    # (total TOV - bad_pass_tov). Lower = better ball security while handling.
-    # Used inverted in ball handling composite.
-    lost_ball_total  = safe(p.get('lost_ball_tov'))
+    # Cascading fallbacks so this is never NULL for a qualifying ball handler:
+    # 1. Use direct lost_ball_tov from PBP if available
+    # 2. Imply from total TOV - bad_pass_tov if bad pass data available
+    # 3. Use total TOV as worst-case proxy (still meaningful for ranking)
+    lost_ball_total = safe(p.get('lost_ball_tov'))
     if lost_ball_total is not None and gp > 0:
         lost_ball_tov_pg = lost_ball_total / gp
     elif bad_pass_total is not None and gp > 0:
-        # Fallback: imply lost ball from total TOV minus bad pass TOV
         lost_ball_tov_pg = max(0.0, tov_pg - (bad_pass_total / gp))
+    elif tov_pg > 0:
+        lost_ball_tov_pg = tov_pg  # worst-case: treat all TOVs as live-ball
     else:
         lost_ball_tov_pg = None
 
@@ -578,10 +581,18 @@ def compute_composites(metrics_list, seasons_map):
                     s(ps.get('potential_ast'), 0) / gp >= 3.0 and
                     gp >= 30)
         if gate_key == 'ballhandling':
+            # ball_handler_load = time_of_poss / min_pg — primary ball handlers
+            # typically hold the ball 8%+ of their floor time (top guards ~12-15%)
+            # This excludes catch-and-attack wings who drive occasionally but
+            # don't run the offense (Nesmith, Bey, Oubre type players)
+            top = s(ps.get('time_of_poss'), 0)
+            mpg = s(ps.get('min_per_game'), 0)
+            bh_load = top / mpg if mpg > 0 else 0
             return (pos_g in ('G', 'GF') and
                     s(ps.get('touches'), 0) / gp >= 40.0 and
                     s(ps.get('drives'), 0) / gp >= 4.0 and
-                    gp >= 30)
+                    gp >= 30 and
+                    bh_load >= 0.08)
         if gate_key == 'interior_def':
             return s(ps.get('def_rim_fga'), 0) >= 50
         return True  # no gate
@@ -736,7 +747,7 @@ def compute_composites(metrics_list, seasons_map):
                 m[comp_name] = None
                 continue
             pct_maps = pct_lg if pct_key == 'lg' else pct_pos
-            min_m = 2 if comp_name in ('shooting_score', 'passing_score') else 1
+            min_m = 2 if comp_name in ('shooting_score', 'passing_score', 'ballhandling_score') else 1
             score = avg_pct(pid, cols_srcs, pct_maps, min_metrics=min_m)
 
             # Finishing requires paint presence — paint_efg_vw or paint_scoring_rate

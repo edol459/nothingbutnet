@@ -234,8 +234,39 @@ def migrate():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@app.route('/api/diag/tov')
-def diag_tov():
+@app.route('/api/diag/bh')
+def diag_bh():
+    """Diagnostic — show ball handling gate values for top scorers."""
+    try:
+        conn = get_conn()
+        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT p.player_name, p.position_group,
+                   ps.gp, ps.min_per_game,
+                   ps.touches, ps.drives,
+                   ps.time_of_poss,
+                   ps.touches  / NULLIF(ps.gp, 0)           AS touches_pg,
+                   ps.drives   / NULLIF(ps.gp, 0)           AS drives_pg,
+                   ps.time_of_poss / NULLIF(ps.min_per_game, 0) AS bh_load,
+                   pm.ballhandling_score,
+                   pm.playmaking_gravity,
+                   pm.lost_ball_tov_pg
+            FROM player_metrics pm
+            JOIN player_seasons ps ON pm.player_id = ps.player_id
+                AND pm.season = ps.season AND pm.season_type = ps.season_type
+            JOIN players p ON pm.player_id = p.player_id
+            WHERE pm.season = %s AND pm.season_type = %s
+              AND ps.min >= 1000
+              AND pm.ballhandling_score IS NOT NULL
+            ORDER BY pm.ballhandling_score DESC NULLS LAST
+            LIMIT 25
+        """, (DEFAULT_SEASON, DEFAULT_SEASON_TYPE))
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return jsonify({'top_ball_handlers': rows})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
     """Diagnostic — check bad_pass_tov and lost_ball_tov population in DB."""
     try:
         conn = get_conn()
@@ -321,6 +352,7 @@ def get_players():
              THEN pm.passing_score      ELSE NULL END AS passing_score,
         CASE WHEN ps.touches / NULLIF(ps.gp, 0) >= {min_touches_pg}
              AND  ps.drives  / NULLIF(ps.gp, 0) >= {min_bh_drives_pg}
+             AND  ps.time_of_poss / NULLIF(ps.min_per_game, 0) >= 0.08
              AND  p.position_group IN ('G','GF')
              THEN pm.ballhandling_score ELSE NULL END AS ballhandling_score,
         pm.perimeter_def_score,
