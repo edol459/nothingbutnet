@@ -499,10 +499,12 @@ def compute_composites(metrics_list, seasons_map):
     LG_CS_EFG_AVG = 0.535
 
     def pnr_bh_qualified(pid):
-        return s(seasons_map.get(pid, {}).get('pnr_bh_fga'), 0) >= 50
+        # pnr_bh_fga is stored as a per-game average
+        return s(seasons_map.get(pid, {}).get('pnr_bh_fga'), 0) >= 3.0
 
     def transition_qualified(pid):
-        return s(seasons_map.get(pid, {}).get('transition_fga'), 0) >= 50
+        # transition_fga is stored as a per-game average
+        return s(seasons_map.get(pid, {}).get('transition_fga'), 0) >= 2.0
 
     for pid in all_qualifying:
         ps = seasons_map.get(pid, {})
@@ -701,7 +703,7 @@ def compute_composites(metrics_list, seasons_map):
                 continue
             pct_maps = pct_lg if pct_key == 'lg' else pct_pos
             if comp_name == 'decision_making_score':
-                min_m = 3
+                min_m = 2
             elif comp_name in ('shooting_score', 'passing_score',
                                'creation_score', 'shot_creation_score'):
                 min_m = 2

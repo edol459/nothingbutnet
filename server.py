@@ -228,7 +228,43 @@ def health():
     return jsonify({'status': 'ok', 'season': DEFAULT_SEASON})
 
 
-@app.route('/api/diag/dm')
+@app.route('/api/diag/finishing')
+def diag_finishing():
+    """Diagnostic — check drive_pts, drive_pf, post_ppp population."""
+    try:
+        conn = get_conn()
+        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT
+              COUNT(*) AS total,
+              COUNT(drive_pts)  AS has_drive_pts,
+              COUNT(drive_pf)   AS has_drive_pf,
+              COUNT(post_ppp)   AS has_post_ppp,
+              COUNT(drives)     AS has_drives
+            FROM player_seasons
+            WHERE season = %s AND season_type = %s AND min >= 1000
+        """, (DEFAULT_SEASON, DEFAULT_SEASON_TYPE))
+        counts = dict(cur.fetchone())
+
+        cur.execute("""
+            SELECT p.player_name,
+                   ps.drives, ps.drive_pts, ps.drive_pf, ps.post_ppp,
+                   pm.drive_pts_per_drive, pm.drive_foul_rate
+            FROM player_seasons ps
+            JOIN players p ON ps.player_id = p.player_id
+            LEFT JOIN player_metrics pm ON ps.player_id = pm.player_id
+                AND ps.season = pm.season AND ps.season_type = pm.season_type
+            WHERE ps.season = %s AND ps.season_type = %s AND ps.min >= 1000
+            ORDER BY ps.drives DESC NULLS LAST
+            LIMIT 10
+        """, (DEFAULT_SEASON, DEFAULT_SEASON_TYPE))
+        sample = [dict(r) for r in cur.fetchall()]
+
+        cur.close()
+        conn.close()
+        return jsonify({'counts': counts, 'sample': sample})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 def diag_dm():
     """Diagnostic — PnR BH and transition FGA distribution for playmaking-qualified players."""
     try:
