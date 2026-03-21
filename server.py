@@ -145,6 +145,7 @@ BASE_COLS = """
     pm.passing_score,
     pm.creation_score,
     pm.decision_making_score,
+    pm.gravity_creation,
     pm.perimeter_def_score,
     pm.interior_def_score,
     pm.activity_score,
@@ -154,6 +155,7 @@ BASE_COLS = """
     ps.gravity_offball_perimeter,
     ps.leverage_creation,
     ps.leverage_full,
+    ps.leverage_shooting,
     ps.sq_avg_shot_quality,
     ps.sq_fg_pct_above_expected,
     pm.paint_efg,
@@ -197,6 +199,7 @@ def get_sort_col(sort_key):
         'hustle_score',
         'finishing_score', 'shooting_score', 'shot_creation_score',
         'passing_score', 'creation_score', 'decision_making_score',
+        'gravity_creation',
         'perimeter_def_score', 'interior_def_score',
         'activity_score', 'rebounding_score',
         'paint_efg', 'paint_efg_delta', 'paint_fga_pg', 'paint_efg_vw',
@@ -207,7 +210,7 @@ def get_sort_col(sort_key):
     }
     ps_cols = {
         'gravity_score', 'gravity_onball_perimeter', 'gravity_offball_perimeter',
-        'leverage_creation', 'leverage_full',
+        'leverage_creation', 'leverage_full', 'leverage_shooting',
         'sq_avg_shot_quality', 'sq_fg_pct_above_expected',
         'post_ppp', 'iso_ppp', 'pnr_bh_ppp', 'pnr_roll_ppp', 'transition_ppp',
     }
@@ -231,7 +234,57 @@ def health():
     return jsonify({'status': 'ok', 'season': DEFAULT_SEASON})
 
 
-@app.route('/api/diag/finishing')
+@app.route('/api/diag/gravity')
+def diag_gravity():
+    """Diagnostic — check raw gravity values from player_seasons."""
+    try:
+        conn = get_conn()
+        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT p.player_name, p.position_group,
+                   ps.gravity_score,
+                   ps.gravity_onball_perimeter,
+                   ps.gravity_offball_perimeter,
+                   ps.gravity_onball_interior,
+                   ps.gravity_offball_interior,
+                   ps.min_per_game,
+                   pm.gravity_creation
+            FROM player_seasons ps
+            JOIN players p ON ps.player_id = p.player_id
+            LEFT JOIN player_metrics pm ON ps.player_id = pm.player_id
+                AND ps.season = pm.season AND ps.season_type = pm.season_type
+            WHERE ps.season = %s AND ps.season_type = %s
+              AND ps.gravity_score IS NOT NULL
+              AND ps.min >= 1000
+            ORDER BY ps.gravity_score DESC
+            LIMIT 20
+        """, (DEFAULT_SEASON, DEFAULT_SEASON_TYPE))
+        rows = [dict(r) for r in cur.fetchall()]
+
+        # Also get Jokic specifically
+        cur.execute("""
+            SELECT p.player_name, p.position_group,
+                   ps.gravity_score,
+                   ps.gravity_onball_perimeter,
+                   ps.gravity_offball_perimeter,
+                   ps.gravity_onball_interior,
+                   ps.gravity_offball_interior,
+                   ps.min_per_game,
+                   pm.gravity_creation
+            FROM player_seasons ps
+            JOIN players p ON ps.player_id = p.player_id
+            LEFT JOIN player_metrics pm ON ps.player_id = pm.player_id
+                AND ps.season = pm.season AND ps.season_type = pm.season_type
+            WHERE ps.season = %s AND ps.season_type = %s
+              AND LOWER(p.player_name) LIKE %s
+        """, (DEFAULT_SEASON, DEFAULT_SEASON_TYPE, '%joki%'))
+        jokic = [dict(r) for r in cur.fetchall()]
+
+        cur.close()
+        conn.close()
+        return jsonify({'top20': rows, 'jokic': jokic})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 def diag_finishing():
     """Diagnostic — check drive_pts, drive_pf, post_ppp population."""
     try:
@@ -392,35 +445,43 @@ def get_players():
 
     where_str = ' AND '.join(where)
 
-    # Unified playmaking gate — same for all three sub-composites
-    pm_gate = f"""ps.ast >= {min_ast_pg}
+    # Passing gate — all positions
+    passing_gate = f"""ps.ast >= {min_ast_pg}
+             AND ps.potential_ast / NULLIF(ps.gp, 0) >= 3.0
+             AND ps.gp >= 30"""
+
+    # Creation gate — all positions, touches volume
+    creation_gate = f"""ps.potential_ast / NULLIF(ps.gp, 0) >= 3.0
              AND ps.touches / NULLIF(ps.gp, 0) >= {min_touches_pg}
-             AND ps.drives  / NULLIF(ps.gp, 0) >= {min_bh_drives_pg}
-             AND ps.gp >= 30
-             AND ps.potential_ast / NULLIF(ps.gp, 0) >= 3.0"""
+             AND ps.gp >= 30"""
+
+    # Ball handling gate — drives volume
+    bh_gate = f"""ps.drives / NULLIF(ps.gp, 0) >= {min_bh_drives_pg}
+             AND ps.touches / NULLIF(ps.gp, 0) >= {min_touches_pg}
+             AND ps.gp >= 30"""
 
     sub_expr = f"""
         pm.finishing_score,
         pm.shooting_score,
         CASE WHEN ps.drives / NULLIF(ps.gp, 0) >= {min_drives_pg}
-             THEN pm.shot_creation_score  ELSE NULL END AS shot_creation_score,
-        CASE WHEN {pm_gate}
-             THEN pm.passing_score        ELSE NULL END AS passing_score,
-        CASE WHEN {pm_gate}
-             THEN pm.creation_score       ELSE NULL END AS creation_score,
-        CASE WHEN {pm_gate}
+             THEN pm.shot_creation_score   ELSE NULL END AS shot_creation_score,
+        CASE WHEN {passing_gate}
+             THEN pm.passing_score         ELSE NULL END AS passing_score,
+        CASE WHEN {creation_gate}
+             THEN pm.creation_score        ELSE NULL END AS creation_score,
+        CASE WHEN {bh_gate}
              THEN pm.decision_making_score ELSE NULL END AS decision_making_score,
         pm.perimeter_def_score,
         CASE WHEN ps.def_rim_fga >= {min_rim_fga}
-             THEN pm.interior_def_score   ELSE NULL END AS interior_def_score,
+             THEN pm.interior_def_score    ELSE NULL END AS interior_def_score,
         pm.activity_score,
         pm.rebounding_score,
         CASE WHEN pm.all3_fga_pg >= {min_3pt_fga}
-             THEN pm.all3_efg_vw          ELSE NULL END AS all3_efg_vw_gated,
+             THEN pm.all3_efg_vw           ELSE NULL END AS all3_efg_vw_gated,
         CASE WHEN pm.corner3_fga_pg >= {min_3pt_fga} * 0.33
-             THEN pm.corner3_efg_vw       ELSE NULL END AS corner3_efg_vw_gated,
+             THEN pm.corner3_efg_vw        ELSE NULL END AS corner3_efg_vw_gated,
         CASE WHEN pm.above_break3_fga_pg >= {min_3pt_fga}
-             THEN pm.above_break3_efg_vw  ELSE NULL END AS above_break3_efg_vw_gated
+             THEN pm.above_break3_efg_vw   ELSE NULL END AS above_break3_efg_vw_gated
     """
 
     try:

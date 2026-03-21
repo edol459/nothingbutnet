@@ -369,6 +369,17 @@ def compute_player_metrics(p):
         'lost_ball_tov_pg':     r(lost_ball_tov_pg, 3),
         'bad_pass_tov_pg':      r(bad_pass_tov_pg, 3),
 
+        # Position-split gravity: on-ball perimeter for guards/wings, interior for bigs
+        # Multiplied by min_per_game to get a per-minute normalized value (like GV-MP on NBA.com)
+        # gravity_score (overall) kept for display; gravity_creation used in composite
+        'gravity_creation':     r(
+            (s(p.get('gravity_onball_perimeter')) * min_pg
+             if pos_group in ('G', 'GF', 'F') and s(p.get('gravity_onball_perimeter')) and min_pg
+             else s(p.get('gravity_onball_interior')) * min_pg
+             if s(p.get('gravity_onball_interior')) and min_pg
+             else None),
+            3),
+
         # Defense
         'def_delta_overall':    r(def_delta_overall),
         'def_delta_2pt':        r(def_delta_2pt),
@@ -435,10 +446,11 @@ def compute_composites(metrics_list, seasons_map):
     # League-wide maps (scoring, playmaking categories)
     ALL_METRICS_LG = [
         # Shooting (league-wide)
-        ('ts_pct',              's'),
-        ('spotup_efg_pct',      's'),
-        ('all3_efg_vw',         'm'),
-        ('midrange_efg_vw',     'm'),
+        ('ts_pct',                    's'),
+        ('spotup_efg_pct',            's'),
+        ('all3_efg_vw',               'm'),
+        ('midrange_efg_vw',           'm'),
+        ('sq_fg_pct_above_expected',  's'),
         # Shot creation / scoring creation (league-wide)
         ('pct_uast_fgm',        's'),
         ('iso_ppp',             's'),
@@ -446,19 +458,20 @@ def compute_composites(metrics_list, seasons_map):
         ('drive_fg_pct',        's'),
         ('usg_pct',             's'),
         ('tov_pct',             'm'),
+        ('leverage_shooting',   's'),
         # Passing (league-wide)
         ('pot_ast_per_tov',     'm'),
         ('ast_pct',             's'),
         ('pass_quality_index',  'm'),
         ('ft_ast_per75',        'm'),
         # Playmaking creation (league-wide)
-        ('gravity_score',       's'),
+        ('gravity_creation',    'm'),
         ('leverage_creation',   's'),
         ('drive_ast_per75',     'm'),
         ('secondary_ast_per75', 'm'),
-        # Decision making (league-wide)
-        ('lost_ball_tov_pg',    'm'),
         ('transition_ppp',      's'),
+        # Ball handling (league-wide)
+        ('lost_ball_tov_pg',    'm'),
         ('pnr_bh_ppp',          's'),
         # Needed for inverted maps
         ('def_iso_ppp',         's'),
@@ -576,13 +589,21 @@ def compute_composites(metrics_list, seasons_map):
             return s(ps.get('fga'), 0) >= 3.0
         if gate_key == 'shot_creation':
             return s(ps.get('drives'), 0) / gp >= 2.0
-        if gate_key == 'playmaking':
-            # Single unified gate for all three playmaking sub-composites
+        if gate_key == 'passing':
             return (s(ps.get('ast'), 0) >= 2.0 and
-                    gp >= 30 and
                     s(ps.get('potential_ast'), 0) / gp >= 3.0 and
+                    gp >= 30)
+        if gate_key == 'pm_creation':
+            # Open to all positions — gravity, leverage, and passing creation
+            # don't require guard-style driving
+            return (s(ps.get('potential_ast'), 0) / gp >= 3.0 and
                     s(ps.get('touches'), 0) / gp >= 40.0 and
-                    s(ps.get('drives'), 0) / gp >= 4.0)
+                    gp >= 30)
+        if gate_key == 'ball_handling':
+            # Ball security and execution — requires meaningful drive volume
+            return (s(ps.get('drives'), 0) / gp >= 4.0 and
+                    s(ps.get('touches'), 0) / gp >= 40.0 and
+                    gp >= 30)
         if gate_key == 'interior_def':
             return s(ps.get('def_rim_fga'), 0) >= 50
         return True  # no gate
@@ -601,43 +622,50 @@ def compute_composites(metrics_list, seasons_map):
          'pos'),
 
         # SHOOTING — league-wide, min FGA gate
+        # sq_fg_pct_above_expected: shot making quality independent of shot selection
+        # (only 130 players covered — NULL-skipped naturally via avg_pct)
         ('shooting_score', 'shooting',
-         [('spotup_efg_pct',  's'),
-          ('all3_efg_vw',     'm'),
-          ('midrange_efg_vw', 'm')],
+         [('spotup_efg_pct',           's'),
+          ('all3_efg_vw',              'm'),
+          ('midrange_efg_vw',          'm'),
+          ('sq_fg_pct_above_expected', 's')],
          'lg'),
 
         # SHOT CREATION (scoring) — league-wide, drives/g gate
+        # leverage_shooting: how much shooting presence moves team offense on/off
         ('shot_creation_score', 'shot_creation',
          [('pct_uast_fgm',    's'),
           ('iso_ppp',         's'),
           ('pull_up_efg_pct', 's'),
           ('drive_fg_pct',    's'),
           ('usg_pct',         's'),
-          ('tov_pct_inv',     'm')],
+          ('tov_pct_inv',     'm'),
+          ('leverage_shooting','s')],
          'lg'),
 
-        # PASSING — unified playmaking gate
+        # PASSING — passing gate (all positions)
         # pot_ast_per_tov is required (enforced below) — no passing score without it
-        ('passing_score', 'playmaking',
+        ('passing_score', 'passing',
          [('pot_ast_per_tov',    'm'),
           ('ast_pct',            's'),
           ('pass_quality_index', 'm'),
           ('ft_ast_per75',       'm')],
          'lg'),
 
-        # CREATION — unified playmaking gate
-        ('creation_score', 'playmaking',
-         [('gravity_score',      's'),
+        # CREATION — pot AST/g + touches gate, all positions
+        # gravity_creation: position-split on-ball gravity × min/g (perim for G/GF/F, interior for FC/C)
+        ('creation_score', 'pm_creation',
+         [('gravity_creation',   'm'),
           ('leverage_creation',  's'),
           ('drive_ast_per75',    'm'),
-          ('secondary_ast_per75','m')],
+          ('secondary_ast_per75','m'),
+          ('transition_ppp',     's')],
          'lg'),
 
-        # DECISION MAKING — unified playmaking gate
-        ('decision_making_score', 'playmaking',
+        # BALL HANDLING — drives + touches gate
+        # Ball security and PnR execution
+        ('decision_making_score', 'ball_handling',
          [('lost_ball_tov_pg_inv', 'm'),
-          ('transition_ppp',       's'),
           ('pnr_bh_ppp',           's')],
          'lg'),
 
@@ -703,7 +731,7 @@ def compute_composites(metrics_list, seasons_map):
                 continue
             pct_maps = pct_lg if pct_key == 'lg' else pct_pos
             if comp_name == 'decision_making_score':
-                min_m = 2
+                min_m = 1  # only 2 metrics — lost ball + PnR BH PPP
             elif comp_name in ('shooting_score', 'passing_score',
                                'creation_score', 'shot_creation_score'):
                 min_m = 2
@@ -732,13 +760,15 @@ def compute_composites(metrics_list, seasons_map):
             available = [v for v in sub_vals if v is not None]
 
             if comp_name == 'playmaker_score':
-                # Flat average of all three sub-scores.
-                # Requires all three non-NULL — same gate for all three means
-                # either a player qualifies for all or none.
-                if all(v is not None for v in sub_vals):
-                    m[comp_name] = round(sum(sub_vals) / len(sub_vals), 1)
-                else:
+                # Requires passing_score — the universal playmaking anchor.
+                # creation_score and decision_making_score (ball handler gate)
+                # average in when available — so Jokic ranks on passing alone
+                # while guards get all three averaged.
+                passing_val = safe(m.get('passing_score'))
+                if passing_val is None:
                     m[comp_name] = None
+                else:
+                    m[comp_name] = round(sum(available) / len(available), 1) if available else None
             elif comp_name == 'creator_score':
                 # Require shot_creation_score — pure shooters without self-creation don't rank
                 shot_creation_val = safe(m.get('shot_creation_score'))

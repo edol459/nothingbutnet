@@ -57,6 +57,7 @@ migrations = [
     ("player_metrics", "bad_pass_tov_pg",        "REAL"),
     ("player_metrics", "shot_creation_score",    "REAL"),
     ("player_metrics", "decision_making_score",  "REAL"),
+    ("player_metrics", "gravity_creation",        "REAL"),
     # ── NBA endpoint data (player_seasons) ──────────────────────────────────
     ("player_seasons",  "gravity_score",              "REAL"),
     ("player_seasons",  "gravity_onball_perimeter",   "REAL"),
