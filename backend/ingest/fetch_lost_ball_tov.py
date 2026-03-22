@@ -30,7 +30,7 @@ load_dotenv()
 DATABASE_URL = os.getenv('DATABASE_URL')
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--season',      default=os.getenv('NBA_SEASON', '2025-26'))
+parser.add_argument('--season',      default=os.getenv('NBA_SEASON', '2024-25'))
 parser.add_argument('--season-type', default=os.getenv('NBA_SEASON_TYPE', 'Regular Season'))
 args = parser.parse_args()
 

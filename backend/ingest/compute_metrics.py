@@ -369,14 +369,13 @@ def compute_player_metrics(p):
         'lost_ball_tov_pg':     r(lost_ball_tov_pg, 3),
         'bad_pass_tov_pg':      r(bad_pass_tov_pg, 3),
 
-        # Position-split gravity: on-ball perimeter for guards/wings, interior for bigs
-        # Multiplied by min_per_game to get a per-minute normalized value (like GV-MP on NBA.com)
-        # gravity_score (overall) kept for display; gravity_creation used in composite
+        # gravity_creation: on-ball perimeter gravity × MPG, perimeter players only
+        # Gravity measures defensive shifts toward a perimeter threat — it's meaningless
+        # (and negative) for post-up bigs like Jokic, so NULL for FC/C.
+        # Bigs rank on creation via drive_ast_per75, secondary_ast_per75, transition_ppp.
         'gravity_creation':     r(
             (s(p.get('gravity_onball_perimeter')) * min_pg
-             if pos_group in ('G', 'GF', 'F') and s(p.get('gravity_onball_perimeter')) and min_pg
-             else s(p.get('gravity_onball_interior')) * min_pg
-             if s(p.get('gravity_onball_interior')) and min_pg
+             if pos_group not in ('FC', 'C') and s(p.get('gravity_onball_perimeter')) and min_pg
              else None),
             3),
 
@@ -463,13 +462,10 @@ def compute_composites(metrics_list, seasons_map):
         ('pot_ast_per_tov',     'm'),
         ('ast_pct',             's'),
         ('pass_quality_index',  'm'),
-        ('ft_ast_per75',        'm'),
         # Playmaking creation (league-wide)
-        ('gravity_creation',    'm'),
         ('leverage_creation',   's'),
-        ('drive_ast_per75',     'm'),
-        ('secondary_ast_per75', 'm'),
-        ('transition_ppp',      's'),
+        ('ast_pts_created_pg',  'm'),
+        ('ft_ast_per75',        'm'),
         # Ball handling (league-wide)
         ('lost_ball_tov_pg',    'm'),
         ('pnr_bh_ppp',          's'),
@@ -493,6 +489,10 @@ def compute_composites(metrics_list, seasons_map):
         ('def_iso_ppp',          's'),
         ('def_pnr_bh_ppp',       's'),
         ('stl',                  's'),
+        ('leverage_defense',     's'),
+        # Overall defense signals
+        ('def_ws',               's'),
+        ('matchup_def_fg_pct',   's'),  # will be inverted — lower FG% allowed = better
         # Interior defense (position-normalized)
         ('rim_protection_score', 'm'),
         ('def_delta_2pt',        'm'),
@@ -512,15 +512,20 @@ def compute_composites(metrics_list, seasons_map):
     LG_CS_EFG_AVG = 0.535
 
     def pnr_bh_qualified(pid):
-        # pnr_bh_fga is stored as a per-game average
         return s(seasons_map.get(pid, {}).get('pnr_bh_fga'), 0) >= 3.0
 
     def transition_qualified(pid):
-        # transition_fga is stored as a per-game average
         return s(seasons_map.get(pid, {}).get('transition_fga'), 0) >= 2.0
+
+    # Compute median gravity_score across qualifying players for above-median gate
+    gravity_vals = [s(seasons_map.get(pid, {}).get('gravity_score'))
+                    for pid in all_qualifying
+                    if s(seasons_map.get(pid, {}).get('gravity_score')) is not None]
+    gravity_median = sorted(gravity_vals)[len(gravity_vals) // 2] if gravity_vals else 0
 
     for pid in all_qualifying:
         ps = seasons_map.get(pid, {})
+        gp = max(s(ps.get('gp'), 1), 1)
         spotup = ps.get('spotup_efg_pct')
         if spotup is not None and float(spotup) < LG_CS_EFG_AVG:
             seasons_map[pid]['_spotup_orig'] = spotup
@@ -531,6 +536,18 @@ def compute_composites(metrics_list, seasons_map):
         if not transition_qualified(pid):
             seasons_map[pid]['_trans_orig'] = ps.get('transition_ppp')
             seasons_map[pid]['transition_ppp'] = None
+        # paint_scoring_rate: require ≥ 10 paint touches/g
+        if s(ps.get('paint_touches'), 0) / gp < 10.0:
+            seasons_map[pid]['_psr_orig'] = ps.get('paint_scoring_rate')
+            seasons_map[pid]['paint_scoring_rate'] = None
+        # pnr_roll_ppp: require ≥ 2 roll man possessions/g
+        if s(ps.get('pnr_roll_poss'), 0) / gp < 2.0:
+            seasons_map[pid]['_roll_orig'] = ps.get('pnr_roll_ppp')
+            seasons_map[pid]['pnr_roll_ppp'] = None
+        # post_ppp: require ≥ 2 post possessions/g
+        if s(ps.get('post_poss'), 0) / gp < 2.0:
+            seasons_map[pid]['_post_orig'] = ps.get('post_ppp')
+            seasons_map[pid]['post_ppp'] = None
 
     pct_lg = {col: percentile_map(all_qualifying, col, src)
               for col, src in ALL_METRICS_LG}
@@ -543,27 +560,50 @@ def compute_composites(metrics_list, seasons_map):
             seasons_map[pid]['pnr_bh_ppp'] = seasons_map[pid].pop('_pnr_bh_orig')
         if '_trans_orig' in seasons_map.get(pid, {}):
             seasons_map[pid]['transition_ppp'] = seasons_map[pid].pop('_trans_orig')
+        if '_psr_orig' in seasons_map.get(pid, {}):
+            seasons_map[pid]['paint_scoring_rate'] = seasons_map[pid].pop('_psr_orig')
+        if '_roll_orig' in seasons_map.get(pid, {}):
+            seasons_map[pid]['pnr_roll_ppp'] = seasons_map[pid].pop('_roll_orig')
+        if '_post_orig' in seasons_map.get(pid, {}):
+            seasons_map[pid]['post_ppp'] = seasons_map[pid].pop('_post_orig')
 
-    pct_pos = {}
-    for col, src in ALL_METRICS_POS:
-        merged_pos = {}
-        for pos_g, pids in pos_groups.items():
-            merged_pos.update(percentile_map(pids, col, src))
-        pct_pos[col] = merged_pos
+    # ── TEMPORARY: league-wide only (no position normalization) ──
+    # To restore position normalization, remove the override below and
+    # uncomment the position-normalized pct_pos build.
+    USE_POS_NORM = False
+
+    if USE_POS_NORM:
+        pct_pos = {}
+        for col, src in ALL_METRICS_POS:
+            merged_pos = {}
+            for pos_g, pids in pos_groups.items():
+                merged_pos.update(percentile_map(pids, col, src))
+            pct_pos[col] = merged_pos
+    else:
+        # Use league-wide percentiles for all metrics — no position normalization
+        pct_pos = {col: percentile_map(all_qualifying, col, src)
+                   for col, src in ALL_METRICS_POS}
 
     # Inverted metrics: lower raw = better = higher percentile
     pct_lg['tov_pct_inv']         = {pid: round(100 - v, 1) for pid, v in pct_lg['tov_pct'].items()}
     pct_lg['lost_ball_tov_pg_inv'] = {pid: round(100 - v, 1) for pid, v in pct_lg['lost_ball_tov_pg'].items()}
 
+    # matchup_def_fg_pct — lower FG% allowed = better
+    if 'matchup_def_fg_pct' in pct_pos:
+        pct_pos['matchup_def_fg_pct_inv'] = {pid: round(100 - v, 1) for pid, v in pct_pos['matchup_def_fg_pct'].items()}
+
     # def_iso_ppp, def_pnr_bh_ppp — lower PPP allowed = better
     for col in ['def_iso_ppp', 'def_pnr_bh_ppp']:
         pct_lg[f'{col}_inv']  = {pid: round(100 - v, 1) for pid, v in pct_lg[col].items()}
-        inv_pos = {}
-        for pos_g, pids in pos_groups.items():
-            raw_pos = percentile_map(pids, col, 's')
-            for pid, v in raw_pos.items():
-                inv_pos[pid] = round(100 - v, 1)
-        pct_pos[f'{col}_inv'] = inv_pos
+        if USE_POS_NORM:
+            inv_pos = {}
+            for pos_g, pids in pos_groups.items():
+                raw_pos = percentile_map(pids, col, 's')
+                for pid, v in raw_pos.items():
+                    inv_pos[pid] = round(100 - v, 1)
+            pct_pos[f'{col}_inv'] = inv_pos
+        else:
+            pct_pos[f'{col}_inv'] = {pid: round(100 - v, 1) for pid, v in pct_pos[col].items()}
 
     def avg_pct(pid, cols_srcs, pct_maps, min_metrics=1):
         """Average percentile across metrics, skipping NULLs.
@@ -648,18 +688,15 @@ def compute_composites(metrics_list, seasons_map):
         ('passing_score', 'passing',
          [('pot_ast_per_tov',    'm'),
           ('ast_pct',            's'),
-          ('pass_quality_index', 'm'),
-          ('ft_ast_per75',       'm')],
+          ('pass_quality_index', 'm')],
          'lg'),
 
         # CREATION — pot AST/g + touches gate, all positions
-        # gravity_creation: position-split on-ball gravity × min/g (perim for G/GF/F, interior for FC/C)
+        # Style-agnostic: measures how much scoring you create regardless of method
         ('creation_score', 'pm_creation',
-         [('gravity_creation',   'm'),
-          ('leverage_creation',  's'),
-          ('drive_ast_per75',    'm'),
-          ('secondary_ast_per75','m'),
-          ('transition_ppp',     's')],
+         [('leverage_creation',  's'),
+          ('ast_pts_created_pg', 'm'),
+          ('ft_ast_per75',       'm')],
          'lg'),
 
         # BALL HANDLING — drives + touches gate
@@ -679,12 +716,12 @@ def compute_composites(metrics_list, seasons_map):
          'pos'),
 
         # INTERIOR DEFENSE — position-normalized, rim FGA gate
+        # box_out_rate moved to rebounding composite
         ('interior_def_score', 'interior_def',
          [('rim_protection_score', 'm'),
           ('def_delta_2pt',        'm'),
           ('dreb_pct',             's'),
-          ('blk',                  's'),
-          ('box_out_rate',         'm')],
+          ('blk',                  's')],
          'pos'),
 
         # ACTIVITY — position-normalized, no gate
@@ -695,6 +732,7 @@ def compute_composites(metrics_list, seasons_map):
          'pos'),
 
         # REBOUNDING — position-normalized, no gate
+        # box_out_rate moved here from interior defense
         ('rebounding_score', None,
          [('dreb_pct',    's'),
           ('oreb_pct',    's'),
@@ -704,7 +742,6 @@ def compute_composites(metrics_list, seasons_map):
 
     # ── Category composite definitions ────────────────────────
     CAT_COMPOSITES = [
-        # creator_score now uses shot_creation_score (renamed from creation_score)
         ('creator_score',   ['finishing_score', 'shooting_score', 'shot_creation_score']),
         ('playmaker_score', ['passing_score', 'creation_score', 'decision_making_score']),
         ('defender_score',  ['perimeter_def_score', 'interior_def_score']),
@@ -731,7 +768,7 @@ def compute_composites(metrics_list, seasons_map):
                 continue
             pct_maps = pct_lg if pct_key == 'lg' else pct_pos
             if comp_name == 'decision_making_score':
-                min_m = 1  # only 2 metrics — lost ball + PnR BH PPP
+                min_m = 2  # require both lost_ball_tov_pg_inv AND pnr_bh_ppp
             elif comp_name in ('shooting_score', 'passing_score',
                                'creation_score', 'shot_creation_score'):
                 min_m = 2
@@ -762,20 +799,30 @@ def compute_composites(metrics_list, seasons_map):
             if comp_name == 'playmaker_score':
                 # Requires passing_score — the universal playmaking anchor.
                 # creation_score and decision_making_score (ball handler gate)
-                # average in when available — so Jokic ranks on passing alone
-                # while guards get all three averaged.
+                # average in when available.
                 passing_val = safe(m.get('passing_score'))
                 if passing_val is None:
                     m[comp_name] = None
                 else:
                     m[comp_name] = round(sum(available) / len(available), 1) if available else None
             elif comp_name == 'creator_score':
-                # Require shot_creation_score — pure shooters without self-creation don't rank
+                # Require shot_creation_score
                 shot_creation_val = safe(m.get('shot_creation_score'))
                 if shot_creation_val is None:
                     m[comp_name] = None
                 else:
                     m[comp_name] = round(sum(available) / len(available), 1) if available else None
+            elif comp_name == 'defender_score':
+                # Also average in leverage_defense, def_ws, and matchup FG% allowed (inverted)
+                for extra_col in ['leverage_defense', 'def_ws']:
+                    pct = pct_pos.get(extra_col, {}).get(pid)
+                    if pct is not None:
+                        available = available + [pct]
+                # matchup_def_fg_pct: lower is better — use inverted percentile
+                matchup_pct = pct_pos.get('matchup_def_fg_pct_inv', {}).get(pid)
+                if matchup_pct is not None:
+                    available = available + [matchup_pct]
+                m[comp_name] = round(sum(available) / len(available), 1) if available else None
             else:
                 m[comp_name] = round(sum(available) / len(available), 1) if available else None
 

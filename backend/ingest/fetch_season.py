@@ -219,8 +219,21 @@ def fetch_all(season, season_type):
     data['tov_types'] = fetch("Turnover Types",
         lambda: LeagueDashPlayerStats(season=season,
             season_type_all_star=season_type,
-            per_mode_simple="Totals",
+            per_mode_detailed="Totals",
             measure_type_detailed_defense="Misc"))
+
+    # Source: LeagueDashPlayerStats Defense — exposes DEF_WS
+    data['adv_dash'] = fetch("Defense Dash Stats",
+        lambda: LeagueDashPlayerStats(season=season,
+            season_type_all_star=season_type,
+            per_mode_detailed="PerGame",
+            measure_type_detailed_defense="Defense"))
+
+    # Matchup data — DEF_FG_PCT (opponent FG% when guarded by this defender)
+    data['matchups'] = fetch("Matchup Defense",
+        lambda: LeagueSeasonMatchups(season=season,
+            season_type_playoffs=season_type,
+            per_mode_simple="Totals"))
 
     # Clutch
     data['clutch'] = fetch("Clutch Stats",
@@ -455,6 +468,36 @@ def build_player_rows(data, season, season_type):
         hust_cols = [c for c in hust_cols if c in hustle.columns]
         merged = merged.merge(hustle[hust_cols], on='PLAYER_ID', how='left')
 
+    # Matchup defense — aggregate DEF_FG_PCT weighted by partial possessions per defender
+    matchups = data.get('matchups', pd.DataFrame())
+    if not matchups.empty:
+        if 'DEF_PLAYER_ID' in matchups.columns and 'MATCHUP_FGA' in matchups.columns and 'MATCHUP_FGM' in matchups.columns:
+            mu = matchups[['DEF_PLAYER_ID', 'MATCHUP_FGA', 'MATCHUP_FGM']].copy()
+            mu['DEF_PLAYER_ID'] = mu['DEF_PLAYER_ID'].astype(int)
+            agg = mu.groupby('DEF_PLAYER_ID').agg(
+                MATCHUP_FGA=('MATCHUP_FGA', 'sum'),
+                MATCHUP_FGM=('MATCHUP_FGM', 'sum'),
+            ).reset_index()
+            agg['MATCHUP_DEF_FG_PCT'] = agg.apply(
+                lambda r: r['MATCHUP_FGM'] / r['MATCHUP_FGA'] if r['MATCHUP_FGA'] >= 50 else None, axis=1)
+            agg = agg[['DEF_PLAYER_ID', 'MATCHUP_DEF_FG_PCT']].rename(columns={'DEF_PLAYER_ID': 'PLAYER_ID'})
+            merged = merged.merge(agg, on='PLAYER_ID', how='left')
+        else:
+            print(f"  matchup: missing expected columns, found: {list(matchups.columns)}")
+
+    # Advanced dash (DEF_WS, OFF_WS, WIN_SHARES)
+    adv_dash = data.get('adv_dash', pd.DataFrame())
+    if not adv_dash.empty:
+        # Try all possible win shares column names
+        ws_candidates = ['DEF_WS', 'OFF_WS', 'WS', 'WS_48', 'WIN_SHARES', 'DEF_WIN_SHARES']
+        found = [c for c in ws_candidates if c in adv_dash.columns]
+        print(f"  Win shares columns found: {found}")
+        adv_dash_cols = ['PLAYER_ID'] + found
+        if len(found) > 0:
+            merged = merged.merge(adv_dash[adv_dash_cols], on='PLAYER_ID', how='left')
+    else:
+        print("  adv_dash is empty")
+
     # Turnover types
     tov_types = data.get('tov_types', pd.DataFrame())
     if not tov_types.empty:
@@ -477,8 +520,8 @@ def build_player_rows(data, season, season_type):
     synergy_map = [
         ('syn_iso_off',    'ISO_PPP',        'ISO_EFG_PCT',    'ISO_FGA',     'ISO_TOV_PCT'),
         ('syn_pnr_off',    'PNR_BH_PPP',     None,             'PNR_BH_FGA',  None),
-        ('syn_pnr_roll',   'PNR_ROLL_PPP',   None,             None,          None),
-        ('syn_post_off',   'POST_PPP',        None,             None,          None),
+        ('syn_pnr_roll',   'PNR_ROLL_PPP',   None,             'PNR_ROLL_POSS', None),
+        ('syn_post_off',   'POST_PPP',        None,             'POST_POSS',     None),
         ('syn_spotup',     'SPOTUP_PPP',      'SPOTUP_EFG_PCT', None,          None),
         ('syn_transition', 'TRANSITION_PPP',  None,             'TRANSITION_FGA', None),
         ('syn_iso_def',    'DEF_ISO_PPP',     None,             None,          None),
@@ -496,6 +539,10 @@ def build_player_rows(data, season, season_type):
             if fga_col and 'FGA' in df.columns:
                 syn_cols.append('FGA')
                 rename['FGA'] = fga_col
+            elif fga_col and 'POSS' in df.columns:
+                # Roll man and post use POSS not FGA
+                syn_cols.append('POSS')
+                rename['POSS'] = fga_col
             if tov_col and 'TOV_POSS_PCT' in df.columns:
                 syn_cols.append('TOV_POSS_PCT')
                 rename['TOV_POSS_PCT'] = tov_col
@@ -632,6 +679,13 @@ def build_player_rows(data, season, season_type):
             'fta':         safe_float(row.get('FTA')),
             'ft_pct':      safe_float(row.get('FT_PCT')),
             'plus_minus':  safe_float(row.get('PLUS_MINUS')),
+
+            # Advanced win shares
+            'def_ws':      safe_float(row.get('DEF_WS')),
+            'off_ws':      safe_float(row.get('OFF_WS')),
+            'ws':          safe_float(row.get('WS')),
+            'ws_48':       safe_float(row.get('WS_48')),
+            'matchup_def_fg_pct': safe_float(row.get('MATCHUP_DEF_FG_PCT')),
 
             # Advanced
             'off_rating':  safe_float(row.get('OFF_RATING')),
@@ -777,7 +831,9 @@ def build_player_rows(data, season, season_type):
             'pnr_bh_ppp':     safe_float(row.get('PNR_BH_PPP')),
             'pnr_bh_fga':     safe_float(row.get('PNR_BH_FGA')),
             'pnr_roll_ppp':   safe_float(row.get('PNR_ROLL_PPP')),
+            'pnr_roll_poss':  safe_float(row.get('PNR_ROLL_POSS')),
             'post_ppp':       safe_float(row.get('POST_PPP')),
+            'post_poss':      safe_float(row.get('POST_POSS')),
             'spotup_ppp':     safe_float(row.get('SPOTUP_PPP')),
             'spotup_efg_pct': safe_float(row.get('SPOTUP_EFG_PCT')),
             'transition_ppp': safe_float(row.get('TRANSITION_PPP')),
@@ -859,7 +915,6 @@ def upsert_seasons(conn, rows):
         return
 
     cols = [k for k in rows[0].keys()]
-    cur  = conn.cursor()
 
     col_str     = ', '.join(cols)
     placeholder = ', '.join(['%s'] * len(cols))
@@ -873,11 +928,18 @@ def upsert_seasons(conn, rows):
             updated_at = NOW()
     """
 
-    values = [tuple(r[c] for c in cols) for r in rows]
-    cur.executemany(sql, values)
-    conn.commit()
-    cur.close()
-    print(f"  ✅ Upserted {len(rows)} season rows")
+    CHUNK = 25
+    total = 0
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i:i+CHUNK]
+        values = [tuple(r[c] for c in cols) for r in chunk]
+        cur = conn.cursor()
+        cur.executemany(sql, values)
+        conn.commit()
+        cur.close()
+        total += len(chunk)
+        print(f"  ... {total}/{len(rows)} season rows written", end='\r')
+    print(f"  ✅ Upserted {len(rows)} season rows          ")
 
 
 # ── Shot zones ────────────────────────────────────────────────
