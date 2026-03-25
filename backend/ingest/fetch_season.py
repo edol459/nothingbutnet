@@ -26,7 +26,7 @@ from psycopg2.extras import execute_values
 load_dotenv()
 
 DATABASE_URL = os.getenv('DATABASE_URL')
-SEASON      = os.getenv('NBA_SEASON', '2024-25')
+SEASON      = os.getenv('NBA_SEASON', '2025-26')
 SEASON_TYPE = os.getenv('NBA_SEASON_TYPE', 'Regular Season')
 DELAY       = 3.0
 
@@ -545,6 +545,9 @@ def build_player_rows(data, season, season_type):
             if fga_col and 'FGA' in df.columns:
                 syn_cols.append('FGA')
                 rename['FGA'] = fga_col
+                if key == 'syn_pnr_off' and 'POSS' in df.columns:
+                    syn_cols.append('POSS')
+                    rename['POSS'] = 'PNR_BH_POSS'
             elif fga_col and 'POSS' in df.columns:
                 # Roll man and post use POSS not FGA
                 syn_cols.append('POSS')
@@ -836,6 +839,7 @@ def build_player_rows(data, season, season_type):
             'iso_tov_pct':    safe_float(row.get('ISO_TOV_PCT')),
             'pnr_bh_ppp':     safe_float(row.get('PNR_BH_PPP')),
             'pnr_bh_fga':     safe_float(row.get('PNR_BH_FGA')),
+            'pnr_bh_poss':    safe_float(row.get('PNR_BH_POSS')),
             'pnr_roll_ppp':   safe_float(row.get('PNR_ROLL_PPP')),
             'pnr_roll_poss':  safe_float(row.get('PNR_ROLL_POSS')),
             'post_ppp':       safe_float(row.get('POST_PPP')),

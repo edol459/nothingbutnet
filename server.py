@@ -268,6 +268,33 @@ def win_correlations():
         return jsonify({'error': str(e), 'weights': {}}), 500
 
 
+@app.route('/api/player-percentiles')
+def player_percentiles():
+    """Return pre-computed per-stat percentiles for every player.
+    Used by the Builder so it matches backend composite methodology exactly."""
+    import json as json_mod
+    season = request.args.get('season', DEFAULT_SEASON)
+    safe_season = season.replace('-', '_')
+    data_dir = os.path.join(os.path.dirname(__file__), 'backend', 'ingest', 'data')
+    path = os.path.join(data_dir, f'player_percentiles_{safe_season}.json')
+    if not os.path.exists(path):
+        # Try fallback season
+        for name in os.listdir(data_dir) if os.path.exists(data_dir) else []:
+            if name.startswith('player_percentiles_') and name.endswith('.json'):
+                path = os.path.join(data_dir, name)
+                break
+        else:
+            return jsonify({'percentiles': {}, 'season': season})
+    try:
+        with open(path) as f:
+            data = json_mod.load(f)
+        resp = jsonify(data)
+        resp.headers['Cache-Control'] = 'public, max-age=3600'
+        return resp
+    except Exception as e:
+        return jsonify({'error': str(e), 'percentiles': {}}), 500
+
+
 @app.route('/api/health')
 def health():
     return jsonify({'status': 'ok', 'season': DEFAULT_SEASON})
@@ -733,6 +760,100 @@ def compare_players():
         return jsonify({'players': rows, 'season': season})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/composite-weights')
+def composite_weights():
+    """
+    Return per-sub-composite and per-category win-correlation weights.
+    Used by the frontend to show methodology tooltips on composite scores.
+
+    Response shape:
+    {
+      "season": "2024-25",
+      "n_players": 287,
+      "min_minutes_corr": 500,
+      "subcomp_weights": {
+        "finishing_score": {
+          "paint_efg_vw": {"weight": 1.0, "r": 0.312},
+          "drive_pts_per_drive": {"weight": 0.73, "r": 0.241},
+          ...
+        },
+        ...
+      },
+      "catcomp_weights": {
+        "creator_score": {
+          "finishing_score": {"weight": 1.0, "r": 0.38},
+          ...
+        },
+        ...
+      }
+    }
+    """
+    import json as json_mod
+    season = request.args.get('season', DEFAULT_SEASON)
+    safe_season = season.replace('-', '_')
+    data_dir = os.path.join(os.path.dirname(__file__), 'backend', 'ingest', 'data')
+    path = os.path.join(data_dir, f'win_correlations_{safe_season}.json')
+
+    if not os.path.exists(path):
+        # Try adjacent season as fallback
+        for other in ['2025_26', '2024_25', '2023_24']:
+            fb = os.path.join(data_dir, f'win_correlations_{other}.json')
+            if os.path.exists(fb):
+                path = fb
+                break
+        else:
+            return jsonify({
+                'season': season,
+                'n_players': 0,
+                'min_minutes_corr': 500,
+                'subcomp_weights': {},
+                'catcomp_weights': {},
+            })
+
+    try:
+        with open(path) as f:
+            data = json_mod.load(f)
+
+        correlations    = data.get('correlations', {})
+        subcomp_raw     = data.get('subcomp_weights', {})
+        catcomp_raw     = data.get('catcomp_weights', {})
+
+        # Enrich: attach the raw r value alongside the weight for tooltip display
+        subcomp_weights = {}
+        for comp_name, stat_weights in subcomp_raw.items():
+            subcomp_weights[comp_name] = {
+                stat: {
+                    'weight': w,
+                    'r': correlations.get(stat),
+                }
+                for stat, w in stat_weights.items()
+            }
+
+        catcomp_weights = {}
+        for cat_name, sub_weights in catcomp_raw.items():
+            catcomp_weights[cat_name] = {
+                sub: {
+                    'weight': w,
+                    'r': correlations.get(sub),
+                }
+                for sub, w in sub_weights.items()
+            }
+
+        resp = jsonify({
+            'season':           data.get('season', season),
+            'season_type':      data.get('season_type', 'Regular Season'),
+            'n_players':        data.get('n_players', 0),
+            'min_minutes_corr': data.get('min_minutes_corr', 500),
+            'subcomp_weights':  subcomp_weights,
+            'catcomp_weights':  catcomp_weights,
+        })
+        resp.headers['Cache-Control'] = 'public, max-age=3600'
+        return resp
+
+    except Exception as e:
+        return jsonify({'error': str(e), 'subcomp_weights': {}, 'catcomp_weights': {}}), 500
 
 
 if __name__ == '__main__':

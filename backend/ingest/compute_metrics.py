@@ -6,6 +6,11 @@ python backend/ingest/compute_metrics.py
 Computes derived metrics and percentile-based composites
 for all players in a given season.
 
+Composite scores use win-correlation weights:
+  - Pearson r(stat, net_pts100) computed across 500+ min players
+  - Weights normalized min-max within each sub-composite (best predictor = 1.0, worst = 0.1)
+  - Same weights reused by the Builder's Impact Mode
+
 Usage:
     python backend/ingest/compute_metrics.py
     python backend/ingest/compute_metrics.py --season 2023-24
@@ -14,6 +19,7 @@ Usage:
 import os
 import sys
 import math
+import json
 import argparse
 from datetime import datetime
 from dotenv import load_dotenv
@@ -33,6 +39,7 @@ if not DATABASE_URL:
 
 # ── Constants ─────────────────────────────────────────────────
 MIN_MINUTES_TOTAL  = 1000
+MIN_MINUTES_CORR   = 500   # lower threshold for correlation pool only
 MIN_FGA_PER_GAME   = 2.0
 MIN_PULL_UP_FGA    = 50
 MIN_CS_FGA         = 50
@@ -40,15 +47,80 @@ MIN_DEF_FGA        = 150
 MIN_RIM_FGA        = 20
 RIM_XFG_BASELINE   = 0.650
 
-# League average EFG% by defender distance — stable year-over-year estimates
-LG_CONTESTED_EFG   = 0.398   # 0-4ft (very tight + tight combined)
-LG_OPEN_EFG        = 0.548   # 4ft+ (open + wide open combined)
+LG_CONTESTED_EFG   = 0.398
+LG_OPEN_EFG        = 0.548
 
 ZONE_MIN_FGA_PG = {
     'paint':        2.0,
     'midrange':     1.0,
     'corner3':      0.5,
     'above_break3': 1.5,
+}
+
+# ── Sub-composite stat definitions ────────────────────────────
+# Maps sub-composite name → raw stat keys that feed it.
+# Keys must match what compute_player_metrics() puts in the metrics dict
+# OR what seasons_map contains, and what the cols_srcs lists use.
+# For inverted stats (e.g. tov_pct used as tov_pct_inv), use the BASE key.
+SUBCOMP_STATS = {
+    'finishing_score': [
+        'paint_efg_vw', 'paint_scoring_rate', 'drive_pts_per_drive',
+        'drive_foul_rate', 'pnr_roll_ppp', 'post_ppp', 'transition_ppp',
+    ],
+    'shooting_score': [
+        'all3_efg_vw', 'midrange_efg_vw', 'sq_fg_pct_above_expected',
+    ],
+    'shot_creation_score': [
+        'pct_uast_fgm', 'iso_ppp', 'pull_up_efg_pct', 'drive_fg_pct',
+        'usg_pct', 'tov_pct', 'leverage_shooting',
+    ],
+    'passing_score': [
+        'pot_ast_per_tov', 'ast_pct', 'pass_quality_index',
+    ],
+    'creation_score': [
+        'leverage_creation', 'ast_pts_created_pg', 'ft_ast_per75',
+    ],
+    'decision_making_score': [
+        'lost_ball_tov_pg', 'pnr_bh_ppp',
+    ],
+    'perimeter_def_score': [
+        'def_delta_3pt', 'def_delta_overall', 'def_disruption_rate',
+        'contested_shots', 'stl', 'def_spotup_ppp',
+    ],
+    'interior_def_score': [
+        'rim_protection_score', 'def_delta_2pt', 'dreb_pct', 'blk',
+        'def_post_ppp', 'def_pnr_roll_ppp',
+    ],
+    'activity_score': [
+        'motor_score', 'hustle_composite', 'screen_assist_rate',
+    ],
+    'rebounding_score': [
+        'dreb_pct', 'oreb_pct', 'box_out_rate',
+    ],
+}
+
+# Category composites: maps category → sub-composite keys
+CATCOMP_STATS = {
+    'creator_score':   ['finishing_score', 'shooting_score', 'shot_creation_score'],
+    'playmaker_score': ['passing_score', 'creation_score', 'decision_making_score'],
+    'defender_score':  ['perimeter_def_score', 'interior_def_score'],
+    'hustle_score':    ['activity_score', 'rebounding_score'],
+}
+
+# Stats where lower raw value = better; flip sign before weighting
+LOWER_BETTER = {
+    'tov_pct', 'lost_ball_tov_pg', 'bad_pass_tov_pg',
+    'def_iso_ppp', 'def_pnr_bh_ppp', 'def_post_ppp',
+    'def_spotup_ppp', 'def_pnr_roll_ppp', 'matchup_def_fg_pct',
+}
+
+# Inverted col name → base stat key (for weight lookup)
+INVERT_MAP = {
+    'tov_pct_inv':          'tov_pct',
+    'lost_ball_tov_pg_inv': 'lost_ball_tov_pg',
+    'def_spotup_ppp_inv':   'def_spotup_ppp',
+    'def_post_ppp_inv':     'def_post_ppp',
+    'def_pnr_roll_ppp_inv': 'def_pnr_roll_ppp',
 }
 
 
@@ -67,6 +139,164 @@ def safe(val, default=None):
 
 def s(val, default=0.0):
     return safe(val, default)
+
+
+# ── Pearson correlation ───────────────────────────────────────
+def pearson(xs, ys):
+    n = len(xs)
+    if n < 10:
+        return None
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    dx  = sum((x - mx) ** 2 for x in xs) ** 0.5
+    dy  = sum((y - my) ** 2 for y in ys) ** 0.5
+    if dx == 0 or dy == 0:
+        return None
+    return round(num / (dx * dy), 4)
+
+
+# ── Win correlation computation ───────────────────────────────
+def compute_win_correlations(metrics_list, seasons_map, season, season_type):
+    """
+    Compute Pearson r(stat, net_pts100) for every stat that feeds a composite.
+    Uses players with 500+ min AND net_pts100 data.
+
+    Returns:
+        raw_correlations: {stat_key: r}  (signed, lower-better flipped positive)
+        subcomp_weights:  {comp_name: {stat_key: weight 0.1-1.0}}
+        catcomp_weights:  {cat_name:  {sub_key:  weight 0.1-1.0}}
+        flat_weights:     {stat_key:  weight}  (global, for Builder compat)
+    """
+    pid_to_metrics = {m['player_id']: m for m in metrics_list}
+
+    # Pool: 500+ min AND has net_pts100
+    qualifying_pids = [
+        pid for pid, ps in seasons_map.items()
+        if float(ps.get('min') or 0) >= MIN_MINUTES_CORR
+        and ps.get('net_pts100') is not None
+    ]
+    print(f"  Correlation pool: {len(qualifying_pids)} players "
+          f"(≥{MIN_MINUTES_CORR} min, net_pts100 available)")
+
+    net_map = {pid: float(seasons_map[pid]['net_pts100']) for pid in qualifying_pids}
+
+    def get_val(pid, key):
+        m  = pid_to_metrics.get(pid, {})
+        ps = seasons_map.get(pid, {})
+        v  = m.get(key) if key in m else ps.get(key)
+        if v is None:
+            return None
+        try:
+            f = float(v)
+            return None if math.isnan(f) else f
+        except (TypeError, ValueError):
+            return None
+
+    # All unique stat keys across sub-composites + category composites
+    all_stat_keys = set()
+    for keys in SUBCOMP_STATS.values():
+        all_stat_keys.update(keys)
+    for keys in CATCOMP_STATS.values():
+        all_stat_keys.update(keys)   # sub-composite score keys
+
+    # Compute raw Pearson correlations
+    raw_correlations = {}
+    for key in all_stat_keys:
+        pairs = [
+            (get_val(pid, key), net_map[pid])
+            for pid in qualifying_pids
+            if get_val(pid, key) is not None
+        ]
+        if len(pairs) < 10:
+            continue
+        xs, ys = zip(*pairs)
+        r = pearson(list(xs), list(ys))
+        if r is not None:
+            # Flip sign for lower-is-better stats so |r| always means "predicts winning"
+            if key in LOWER_BETTER:
+                r = -r
+            raw_correlations[key] = r
+
+    # ── Sub-composite weights = raw |r| ──────────────────────
+    # Weight IS the absolute Pearson r — no normalization.
+    # Stats with no correlation data fall back to weight=1.0.
+    subcomp_weights = {}
+    for comp_name, stat_keys in SUBCOMP_STATS.items():
+        weights = {}
+        for k in stat_keys:
+            if k in raw_correlations:
+                weights[k] = round(abs(raw_correlations[k]), 4)
+            else:
+                weights[k] = None
+        subcomp_weights[comp_name] = weights
+
+    # catcomp_weights kept for API compat but unused in scoring
+    catcomp_weights = {}
+
+    # ── Global normalized weights (Builder UI only) ────────────
+    all_abs = [abs(v) for v in raw_correlations.values()]
+    if all_abs:
+        g_min = min(all_abs)
+        g_max = max(all_abs)
+        g_rng = g_max - g_min if g_max != g_min else 1.0
+        flat_weights = {
+            k: round(0.1 + 0.9 * (abs(v) - g_min) / g_rng, 4)
+            for k, v in raw_correlations.items()
+        }
+    else:
+        flat_weights = {}
+
+    # ── Save JSON ─────────────────────────────────────────────
+    out_dir  = os.path.join(os.path.dirname(__file__), 'data')
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(
+        out_dir, f'win_correlations_{season.replace("-","_")}.json'
+    )
+    output = {
+        'season':           season,
+        'season_type':      season_type,
+        'n_players':        len(qualifying_pids),
+        'min_minutes_corr': MIN_MINUTES_CORR,
+        'correlations':     raw_correlations,
+        'weights':          flat_weights,         # Builder Impact Mode
+        'subcomp_weights':  subcomp_weights,      # composite scoring
+        'catcomp_weights':  catcomp_weights,      # category scoring
+    }
+    with open(out_path, 'w') as f:
+        json.dump(output, f, indent=2)
+
+    print(f"  Correlations computed for {len(raw_correlations)} stats")
+    print(f"  Saved → {out_path}")
+
+    # ── Sanity-check printout ─────────────────────────────────
+    print(f"\n{'='*70}")
+    print(f"  Sub-composite weights (|r| with net_pts100, normalized within group)")
+    print(f"  1.0 = strongest win predictor in that group | 0.1 = weakest")
+    print(f"{'='*70}")
+    for comp_name, weights in subcomp_weights.items():
+        print(f"\n  {comp_name}:")
+        print(f"  {'Stat':<32} {'raw r':>7}  {'weight':>7}  {'n pairs':>8}")
+        print(f"  {'─'*55}")
+        for k, w in sorted(weights.items(), key=lambda x: -x[1]):
+            r = raw_correlations.get(k)
+            pairs_count = sum(
+                1 for pid in qualifying_pids
+                if (pid_to_metrics.get(pid, {}).get(k) is not None
+                    or seasons_map.get(pid, {}).get(k) is not None)
+            )
+            r_str = f"{r:+.3f}" if r is not None else "   n/a"
+            print(f"  {k:<32} {r_str:>7}  {w:>7.4f}  {pairs_count:>8}")
+
+    print(f"\n  Category composite weights (sub-score → category):")
+    for cat_name, weights in catcomp_weights.items():
+        print(f"  {cat_name}:")
+        for k, w in sorted(weights.items(), key=lambda x: -x[1]):
+            r = raw_correlations.get(k)
+            r_str = f"{r:+.3f}" if r is not None else "   n/a"
+            print(f"    {k:<38} r={r_str}  w={w:.4f}")
+
+    return raw_correlations, subcomp_weights, catcomp_weights, flat_weights
 
 
 # ── Load season data ──────────────────────────────────────────
@@ -96,12 +326,12 @@ def compute_player_metrics(p):
     poss_pg = poss if poss and poss > 0 else 75.0
     per75   = 75.0 / poss_pg if poss_pg > 0 else 1.0
 
-    pts  = s(p.get('pts'))
-    fga  = s(p.get('fga'))
-    fta  = s(p.get('fta'))
-    fgm  = s(p.get('fgm'))
-    fg3m = s(p.get('fg3m'))
-    fg3a = s(p.get('fg3a'))
+    pts    = s(p.get('pts'))
+    fga    = s(p.get('fga'))
+    fta    = s(p.get('fta'))
+    fgm    = s(p.get('fgm'))
+    fg3m   = s(p.get('fg3m'))
+    fg3a   = s(p.get('fg3a'))
     tov_pg = s(p.get('tov'))
 
     # ── Shooting ──────────────────────────────────────────────
@@ -109,8 +339,7 @@ def compute_player_metrics(p):
     ts_pct_computed = div(pts, ts_denom)
     ft_rate         = div(fta, fga)
     efg_pct         = s(p.get('efg_pct'))
-    # Keep for legacy/sidebar use
-    shot_quality_delta = None  # removed — not true shot quality, use contested/open_fg_making instead
+    shot_quality_delta = None  # legacy placeholder
 
     pu_efg     = s(p.get('pull_up_efg_pct'))
     cs_efg     = s(p.get('cs_efg_pct'))
@@ -125,9 +354,7 @@ def compute_player_metrics(p):
     paint_touches      = s(p.get('paint_touches'))
     paint_scoring_rate = div(pts_paint, paint_touches)
 
-    # ── Shot making vs expectation (contested / open) ─────────
-    # Contested = Very Tight (0-2ft) + Tight (2-4ft)
-    # Open      = Open (4-6ft) + Wide Open (6ft+)
+    # ── Shot making vs expectation ────────────────────────────
     def _efg(fgm_, fg3m_, fga_):
         if not fga_ or fga_ == 0: return None
         return (fgm_ + 0.5 * fg3m_) / fga_
@@ -189,46 +416,31 @@ def compute_player_metrics(p):
     secondary_ast_per75 = secondary_ast_pg * per75 if secondary_ast_pg > 0 else None
     pass_to_score_pct   = div(ast_pg, passes_made_pg) if passes_made_pg > 0 else None
     ball_handler_load   = div(time_of_poss, min_pg)
-    # Gate drive_and_dish_rate: require >= 2.0 drives/g
     drive_total         = drive_fga + drive_tov + drive_passes_pg
     drive_and_dish_rate = div(drive_passes_pg, drive_total) if drive_pg >= 2.0 else None
     pass_quality_index  = div(ast_pts_created_pg, passes_made_pg)
+    drive_ast_per75     = drive_ast_pg * per75 if drive_ast_pg > 0 and drive_pg >= 2.0 else None
+    drive_passes_per75  = drive_passes_pg * per75 if drive_passes_pg > 0 and drive_pg >= 2.0 else None
 
-    # Drive AST per 75 — assists generated off drives, pace-adjusted
-    drive_ast_per75 = drive_ast_pg * per75 if drive_ast_pg > 0 and drive_pg >= 2.0 else None
-
-    # Drive passes per 75 — display only, not in any composite
-    drive_passes_per75 = drive_passes_pg * per75 if drive_passes_pg > 0 and drive_pg >= 2.0 else None
-
-    # FT assist rate per 75 — captures post/PnR passers
     ft_ast_raw   = s(p.get('ft_ast'))
     ft_ast_pg    = ft_ast_raw / gp if gp > 0 else 0
     ft_ast_per75 = ft_ast_pg * per75 if ft_ast_pg > 0 else None
 
-    # pot_ast_per_tov — uses bad_pass_tov specifically (not total TOV)
-    # bad_pass_tov is a season total from PBP aggregation
     bad_pass_total = safe(p.get('bad_pass_tov'))
     bad_pass_pg    = bad_pass_total / gp if bad_pass_total is not None and gp > 0 else None
     if potential_ast_pg >= 3.0:
         if bad_pass_pg is not None and bad_pass_pg > 0:
             pot_ast_per_tov = div(potential_ast_pg, bad_pass_pg)
         else:
-            # Fallback to total TOV if bad_pass_tov not yet populated
             pot_ast_per_tov = div(potential_ast_pg, tov_pg) if tov_pg and tov_pg > 0 else None
     else:
         pot_ast_per_tov = None
 
-    # bad_pass_tov and lost_ball_tov — normalized per 100 touches
-    # Raw per-game unfairly rewards low-usage players who rarely handle the ball.
-    # Per 100 touches accounts for how much a player actually has the ball,
-    # so a high-usage PG with 0.5 bad passes/g over 70 touches is properly
-    # compared to a wing with 0.2 bad passes/g over 20 touches.
     touches_pg = s(p.get('touches'), 0) / gp if gp > 0 else 0
 
     bad_pass_tov_pg = (bad_pass_pg / touches_pg * 100
                        if bad_pass_pg is not None and touches_pg > 0 else None)
 
-    # Lost ball turnovers — also per 100 touches
     lost_ball_total = safe(p.get('lost_ball_tov'))
     if lost_ball_total is not None and gp > 0:
         lost_ball_raw_pg = lost_ball_total / gp
@@ -242,16 +454,11 @@ def compute_player_metrics(p):
     lost_ball_tov_pg = (lost_ball_raw_pg / touches_pg * 100
                         if lost_ball_raw_pg is not None and touches_pg > 0 else None)
 
-    # ── New derived metrics ───────────────────────────────────
-    # Drive foul rate — how often drives result in fouls drawn
     drive_foul_rate     = div(drive_pf, drives) if drive_pg >= 2.0 else None
-
-    # Drive pts per drive — scoring efficiency on drives
-    drive_pts_raw = s(p.get('drive_pts'))
+    drive_pts_raw       = s(p.get('drive_pts'))
     drive_pts_per_drive = div(drive_pts_raw, drives) if drive_pg >= 2.0 else None
+    tov_pct             = div(tov_pg, fga + 0.44 * fta + tov_pg) if (fga + fta + tov_pg) > 0 else None
 
-    # TOV% — standard turnover rate formula
-    tov_pct = div(tov_pg, fga + 0.44 * fta + tov_pg) if (fga + fta + tov_pg) > 0 else None
     d_fg_pct_overall = s(p.get('d_fg_pct_overall'))
     normal_fg_pct    = s(p.get('normal_fg_pct'))
     d_fga_overall    = s(p.get('d_fga_overall'))
@@ -266,8 +473,8 @@ def compute_player_metrics(p):
     def_delta_2pt     = (ns_fg2_pct - d_fg_pct_2pt)       if d_fga_2pt >= MIN_DEF_FGA * 0.6 and ns_fg2_pct > 0 else None
     def_delta_3pt     = (ns_fg3_pct - d_fg_pct_3pt)       if d_fga_3pt >= MIN_DEF_FGA * 0.4 and ns_fg3_pct > 0 else None
 
-    def_rim_fga    = s(p.get('def_rim_fga'))
-    def_rim_fg_pct = s(p.get('def_rim_fg_pct'))
+    def_rim_fga       = s(p.get('def_rim_fga'))
+    def_rim_fg_pct    = s(p.get('def_rim_fg_pct'))
     rim_protection_score = (RIM_XFG_BASELINE - def_rim_fg_pct) * def_rim_fga * 2 if def_rim_fga >= MIN_RIM_FGA else None
 
     stl         = s(p.get('stl'))
@@ -278,7 +485,6 @@ def compute_player_metrics(p):
     box_outs_pg  = s(p.get('box_outs')) / gp if gp > 0 else 0
     box_out_rate = box_outs_pg * per75 if box_outs_pg > 0 else None
 
-    # ── Hustle ────────────────────────────────────────────────
     screen_ast_pts = s(p.get('screen_ast_pts')) / gp if gp > 0 else 0
     loose_balls    = s(p.get('loose_balls'))    / gp if gp > 0 else 0
     dist_miles_off = s(p.get('dist_miles_off'))
@@ -296,7 +502,6 @@ def compute_player_metrics(p):
     if min_total >= MIN_MINUTES_TOTAL and (dist_miles_off + dist_miles_def) > 0 and min_pg > 0:
         motor_score = ((dist_miles_off + dist_miles_def) / min_pg) * 36
 
-    # ── Role ──────────────────────────────────────────────────
     post_touches  = s(p.get('post_touches'))
     elbow_touches = s(p.get('elbow_touches'))
 
@@ -305,7 +510,6 @@ def compute_player_metrics(p):
     dribble_pressure_idx = avg_drib_per_touch if avg_drib_per_touch > 0 else None
     cs_fga_rate          = div(cs_fga_tot, fga) if fga >= MIN_FGA_PER_GAME * gp else None
 
-    # ── BPM ───────────────────────────────────────────────────
     ast_pct  = s(p.get('ast_pct'))
     reb_pct  = s(p.get('reb_pct'))
     stl_pct  = stl / poss_pg if poss_pg > 0 else 0
@@ -337,63 +541,45 @@ def compute_player_metrics(p):
         'season_type': p['season_type'],
         'league':      p.get('league', 'NBA'),
 
-        # Shooting
         'ts_pct_computed':     r(ts_pct_computed),
         'ft_rate':             r(ft_rate),
         'creation_premium':    r(creation_premium),
         'paint_scoring_rate':  r(paint_scoring_rate),
-
-        # New shot making
         'contested_fg_making': r(contested_fg_making, 4),
         'open_fg_making':      r(open_fg_making, 4),
-
-        # New derived
-        'drive_foul_rate':      r(drive_foul_rate, 4),
-        'drive_pts_per_drive':  r(drive_pts_per_drive, 4),
-        'tov_pct':              r(tov_pct, 4),
-        'ast_pts_created_pg':   r(ast_pts_created_pg, 2),
-
-        # Playmaking
-        'potential_ast_per75':  r(potential_ast_per75, 3),
-        'ast_conversion_rate':  r(ast_conversion_rate),
-        'playmaking_gravity':   r(playmaking_gravity),
-        'secondary_ast_per75':  r(secondary_ast_per75, 3),
-        'pass_to_score_pct':    r(pass_to_score_pct),
-        'ball_handler_load':    r(ball_handler_load),
-        'drive_and_dish_rate':  r(drive_and_dish_rate),
-        'pot_ast_per_tov':      r(pot_ast_per_tov, 3),
-        'pass_quality_index':   r(pass_quality_index, 4),
-        'ft_ast_per75':         r(ft_ast_per75, 3),
-        'drive_ast_per75':      r(drive_ast_per75, 3),
-        'drive_passes_per75':   r(drive_passes_per75, 3),
-        'lost_ball_tov_pg':     r(lost_ball_tov_pg, 3),
-        'bad_pass_tov_pg':      r(bad_pass_tov_pg, 3),
-
-        # gravity_creation: on-ball perimeter gravity × MPG, perimeter players only
-        # Gravity measures defensive shifts toward a perimeter threat — it's meaningless
-        # (and negative) for post-up bigs like Jokic, so NULL for FC/C.
-        # Bigs rank on creation via drive_ast_per75, secondary_ast_per75, transition_ppp.
-        'gravity_creation':     r(
+        'drive_foul_rate':     r(drive_foul_rate, 4),
+        'drive_pts_per_drive': r(drive_pts_per_drive, 4),
+        'tov_pct':             r(tov_pct, 4),
+        'ast_pts_created_pg':  r(ast_pts_created_pg, 2),
+        'potential_ast_per75': r(potential_ast_per75, 3),
+        'ast_conversion_rate': r(ast_conversion_rate),
+        'playmaking_gravity':  r(playmaking_gravity),
+        'secondary_ast_per75': r(secondary_ast_per75, 3),
+        'pass_to_score_pct':   r(pass_to_score_pct),
+        'ball_handler_load':   r(ball_handler_load),
+        'drive_and_dish_rate': r(drive_and_dish_rate),
+        'pot_ast_per_tov':     r(pot_ast_per_tov, 3),
+        'pass_quality_index':  r(pass_quality_index, 4),
+        'ft_ast_per75':        r(ft_ast_per75, 3),
+        'drive_ast_per75':     r(drive_ast_per75, 3),
+        'drive_passes_per75':  r(drive_passes_per75, 3),
+        'lost_ball_tov_pg':    r(lost_ball_tov_pg, 3),
+        'bad_pass_tov_pg':     r(bad_pass_tov_pg, 3),
+        'gravity_creation':    r(
             (s(p.get('gravity_onball_perimeter')) * min_pg
              if pos_group not in ('FC', 'C') and s(p.get('gravity_onball_perimeter')) and min_pg
              else None),
             3),
-
-        # Defense
         'def_delta_overall':    r(def_delta_overall),
         'def_delta_2pt':        r(def_delta_2pt),
         'def_delta_3pt':        r(def_delta_3pt),
         'rim_protection_score': r(rim_protection_score, 3),
         'def_disruption_rate':  r(def_disruption_rate, 3),
         'box_out_rate':         r(box_out_rate, 3),
-
-        # Hustle
         'screen_assist_rate':   r(screen_assist_rate, 3),
         'loose_ball_rate':      r(loose_ball_rate, 3),
         'hustle_composite':     r(hustle_composite, 3),
         'motor_score':          r(motor_score, 3),
-
-        # Role / misc
         'creation_load':        r(creation_load),
         'dribble_pressure_idx': r(dribble_pressure_idx, 3),
         'cs_fga_rate':          r(cs_fga_rate),
@@ -402,35 +588,39 @@ def compute_player_metrics(p):
 
 
 # ── Composite computation ─────────────────────────────────────
-def compute_composites(metrics_list, seasons_map):
+def compute_composites(metrics_list, seasons_map, season, season_type,
+                       subcomp_weights=None, catcomp_weights=None):
+    """
+    Compute all sub-composite and category composite scores.
+    Weights are applied as normalized win-correlation multipliers.
 
-    # Build position groups for position-normalized percentiles
+    subcomp_weights: {comp_name: {stat_key: weight 0.1-1.0}}
+    catcomp_weights: {cat_name:  {sub_key:  weight 0.1-1.0}}
+    Falls back to flat (equal-weight) average if weights are None/empty.
+    """
+    subcomp_weights = subcomp_weights or {}
+    catcomp_weights = catcomp_weights or {}
+
     pos_groups = {}
     for m in metrics_list:
         pid   = m['player_id']
         ps    = seasons_map.get(pid, {})
         pos_g = ps.get('position_group', 'F')
-        min_t = s(ps.get('min'), 0)
-        if min_t < MIN_MINUTES_TOTAL: continue
         pos_groups.setdefault(pos_g, []).append(pid)
 
     all_qualifying = [pid for pids in pos_groups.values() for pid in pids]
     metrics_by_pid = {m['player_id']: m for m in metrics_list}
 
     def get_val(pid, col, src):
-        """Get metric value from metrics dict (src='m') or seasons dict (src='s')."""
         if src == 'm':
             return safe(metrics_by_pid.get(pid, {}).get(col))
         return safe(seasons_map.get(pid, {}).get(col))
 
-    # VW metrics — zero means no volume, treat same as NULL
     VW_METRICS = {'all3_efg_vw', 'midrange_efg_vw', 'corner3_efg_vw',
                   'above_break3_efg_vw', 'paint_efg_vw'}
 
     def percentile_map(pids, col, src):
-        """Return {pid: 0-100 percentile} for a metric over a set of players."""
         vals = [(pid, get_val(pid, col, src)) for pid in pids]
-        # For VW metrics, treat zero as NULL (zero = no meaningful volume)
         if col in VW_METRICS:
             vals = [(pid, v) for pid, v in vals if v is not None and v != 0.0]
         else:
@@ -441,129 +631,80 @@ def compute_composites(metrics_list, seasons_map):
         return {pid: round((i / (n - 1)) * 100, 1) if n > 1 else 50.0
                 for i, (pid, _) in enumerate(sorted_vals)}
 
-    # ── Pre-compute all percentile maps ───────────────────────
-    # League-wide maps (scoring, playmaking categories)
     ALL_METRICS_LG = [
-        # Win-impact anchors (league-wide) — used to anchor category composites
-        ('net_pts100',    's'),
-        ('o_net_pts100',  's'),
-        ('d_net_pts100',  's'),
+        ('net_pts100',    's'), ('o_net_pts100',  's'), ('d_net_pts100',  's'),
         ('leverage_full', 's'),
-        # Shooting (league-wide)
-        ('ts_pct',                    's'),
-        ('spotup_efg_pct',            's'),
-        ('all3_efg_vw',               'm'),
-        ('midrange_efg_vw',           'm'),
-        ('sq_fg_pct_above_expected',  's'),
-        # Shot creation / scoring creation (league-wide)
-        ('pct_uast_fgm',        's'),
-        ('iso_ppp',             's'),
-        ('pull_up_efg_pct',     's'),
-        ('drive_fg_pct',        's'),
-        ('usg_pct',             's'),
-        ('tov_pct',             'm'),
-        ('leverage_shooting',   's'),
-        # Passing (league-wide)
-        ('pot_ast_per_tov',     'm'),
-        ('ast_pct',             's'),
-        ('pass_quality_index',  'm'),
-        # Playmaking creation (league-wide)
-        ('leverage_creation',   's'),
-        ('ast_pts_created_pg',  'm'),
-        ('ft_ast_per75',        'm'),
-        # Ball handling (league-wide)
-        ('lost_ball_tov_pg',    'm'),
-        ('pnr_bh_ppp',          's'),
-        # Needed for inverted maps
-        ('def_iso_ppp',          's'),
-        ('def_pnr_bh_ppp',       's'),
-        ('def_post_ppp',         's'),
-        ('def_spotup_ppp',       's'),
-        ('def_pnr_roll_ppp',     's'),
-        # Transition offense (position-normalized for finishing)
-        ('transition_ppp',       's'),
+        ('ts_pct', 's'), ('spotup_efg_pct', 's'),
+        ('all3_efg_vw', 'm'), ('midrange_efg_vw', 'm'),
+        ('sq_fg_pct_above_expected', 's'),
+        ('pct_uast_fgm', 's'), ('iso_ppp', 's'), ('pull_up_efg_pct', 's'),
+        ('drive_fg_pct', 's'), ('usg_pct', 's'), ('tov_pct', 'm'),
+        ('leverage_shooting', 's'),
+        ('pot_ast_per_tov', 'm'), ('ast_pct', 's'), ('pass_quality_index', 'm'),
+        ('leverage_creation', 's'), ('ast_pts_created_pg', 'm'), ('ft_ast_per75', 'm'),
+        ('lost_ball_tov_pg', 'm'), ('pnr_bh_ppp', 's'),
+        ('def_iso_ppp', 's'), ('def_pnr_bh_ppp', 's'),
+        ('def_post_ppp', 's'), ('def_spotup_ppp', 's'), ('def_pnr_roll_ppp', 's'),
+        ('transition_ppp', 's'),
     ]
     ALL_METRICS_POS = [
-        # Finishing (position-normalized)
-        ('paint_efg_vw',          'm'),
-        ('paint_scoring_rate',    'm'),
-        ('post_ppp',              's'),
-        ('drive_foul_rate',       'm'),
-        ('drive_pts_per_drive',   'm'),
-        ('pnr_roll_ppp',          's'),
-        # Perimeter defense (position-normalized)
-        ('def_delta_3pt',        'm'),
-        ('def_delta_overall',    'm'),
-        ('def_disruption_rate',  'm'),
-        ('contested_shots',      's'),
-        ('def_iso_ppp',          's'),
-        ('def_pnr_bh_ppp',       's'),
-        ('stl',                  's'),
-        ('leverage_defense',     's'),
-        # Overall defense signals
-        ('def_ws',               's'),
-        ('matchup_def_fg_pct',   's'),  # will be inverted — lower FG% allowed = better
-        # Interior defense (position-normalized)
-        ('rim_protection_score', 'm'),
-        ('def_delta_2pt',        'm'),
-        ('dreb_pct',             's'),
-        ('blk',                  's'),
-        ('box_out_rate',         'm'),
-        # Activity (position-normalized)
-        ('motor_score',          'm'),
-        ('hustle_composite',     'm'),
-        ('screen_assist_rate',   'm'),
-        # Rebounding (position-normalized)
-        ('oreb_pct',             's'),
-        ('reb_pct',              's'),
+        ('paint_efg_vw', 'm'), ('paint_scoring_rate', 'm'),
+        ('post_ppp', 's'), ('drive_foul_rate', 'm'),
+        ('drive_pts_per_drive', 'm'), ('pnr_roll_ppp', 's'),
+        ('def_delta_3pt', 'm'), ('def_delta_overall', 'm'),
+        ('def_disruption_rate', 'm'), ('contested_shots', 's'),
+        ('def_iso_ppp', 's'), ('def_pnr_bh_ppp', 's'),
+        ('stl', 's'), ('leverage_defense', 's'),
+        ('def_ws', 's'), ('matchup_def_fg_pct', 's'),
+        ('rim_protection_score', 'm'), ('def_delta_2pt', 'm'),
+        ('dreb_pct', 's'), ('blk', 's'), ('box_out_rate', 'm'),
+        ('motor_score', 'm'), ('hustle_composite', 'm'), ('screen_assist_rate', 'm'),
+        ('oreb_pct', 's'), ('reb_pct', 's'),
+        ('def_spotup_ppp', 's'), ('def_post_ppp', 's'), ('def_pnr_roll_ppp', 's'),
     ]
 
-    # Gate spotup_efg_pct: only above-average C&S shooters get a percentile
     LG_CS_EFG_AVG = 0.535
 
     def pnr_bh_qualified(pid):
-        return s(seasons_map.get(pid, {}).get('pnr_bh_fga'), 0) >= 3.0
+        ps = seasons_map.get(pid, {})
+        # pnr_bh_poss is stored as a per-game average from the Synergy endpoint
+        return s(ps.get('pnr_bh_poss'), 0) >= 5.0
 
     def transition_qualified(pid):
-        return s(seasons_map.get(pid, {}).get('transition_fga'), 0) >= 2.0
+        ps = seasons_map.get(pid, {})
+        gp = max(s(ps.get('gp'), 1), 1)
+        return s(ps.get('transition_fga'), 0) / gp >= 0.5
 
     def def_playtype_qualified(pid, poss_col, min_poss=1.5):
-        ps  = seasons_map.get(pid, {})
-        gp  = max(s(ps.get('gp'), 1), 1)
-        return s(ps.get(poss_col), 0) / gp >= min_poss
+        ps = seasons_map.get(pid, {})
+        # poss columns from Synergy are per-game values
+        return s(ps.get(poss_col), 0) >= min_poss
 
-    # Compute median gravity_score across qualifying players for above-median gate
-    gravity_vals = [s(seasons_map.get(pid, {}).get('gravity_score'))
-                    for pid in all_qualifying
-                    if s(seasons_map.get(pid, {}).get('gravity_score')) is not None]
-    gravity_median = sorted(gravity_vals)[len(gravity_vals) // 2] if gravity_vals else 0
-
+    # Apply volume gates (NULL non-qualifying players before percentile ranking)
     for pid in all_qualifying:
         ps = seasons_map.get(pid, {})
         gp = max(s(ps.get('gp'), 1), 1)
-        spotup = ps.get('spotup_efg_pct')
-        if spotup is not None and float(spotup) < LG_CS_EFG_AVG:
-            seasons_map[pid]['_spotup_orig'] = spotup
-            seasons_map[pid]['spotup_efg_pct'] = None
+        # spotup_efg_pct / C&S EFG%: display only, not in composite.
+
+        # pull_up_efg_pct: requires pull_up_fga/gp >= 1.5/g to qualify.
+        if s(ps.get('pull_up_fga'), 0) / gp < 1.5:
+            seasons_map[pid]['_pullup_orig'] = ps.get('pull_up_efg_pct')
+            seasons_map[pid]['pull_up_efg_pct'] = None
         if not pnr_bh_qualified(pid):
             seasons_map[pid]['_pnr_bh_orig'] = ps.get('pnr_bh_ppp')
             seasons_map[pid]['pnr_bh_ppp'] = None
         if not transition_qualified(pid):
             seasons_map[pid]['_trans_orig'] = ps.get('transition_ppp')
             seasons_map[pid]['transition_ppp'] = None
-        # paint_scoring_rate: require ≥ 10 paint touches/g
         if s(ps.get('paint_touches'), 0) / gp < 10.0:
             seasons_map[pid]['_psr_orig'] = ps.get('paint_scoring_rate')
             seasons_map[pid]['paint_scoring_rate'] = None
-        # pnr_roll_ppp: require ≥ 2 roll man possessions/g
-        if s(ps.get('pnr_roll_poss'), 0) / gp < 2.0:
+        if s(ps.get('pnr_roll_poss'), 0) < 2.0:  # per-game value from Synergy
             seasons_map[pid]['_roll_orig'] = ps.get('pnr_roll_ppp')
             seasons_map[pid]['pnr_roll_ppp'] = None
-        # post_ppp: require ≥ 2 post possessions/g
-        if s(ps.get('post_poss'), 0) / gp < 2.0:
+        if s(ps.get('post_poss'), 0) < 2.0:  # per-game value from Synergy
             seasons_map[pid]['_post_orig'] = ps.get('post_ppp')
             seasons_map[pid]['post_ppp'] = None
-        # defensive play types — gate at 1.5 poss/g, NULL below threshold
         for ppp_col, poss_col in [
             ('def_post_ppp',     'def_post_poss'),
             ('def_spotup_ppp',   'def_spotup_poss'),
@@ -576,85 +717,67 @@ def compute_composites(metrics_list, seasons_map):
     pct_lg = {col: percentile_map(all_qualifying, col, src)
               for col, src in ALL_METRICS_LG}
 
-    # Restore all gated values
+    # Restore gated values
     for pid in all_qualifying:
-        if '_spotup_orig' in seasons_map.get(pid, {}):
-            seasons_map[pid]['spotup_efg_pct'] = seasons_map[pid].pop('_spotup_orig')
-        if '_pnr_bh_orig' in seasons_map.get(pid, {}):
-            seasons_map[pid]['pnr_bh_ppp'] = seasons_map[pid].pop('_pnr_bh_orig')
-        if '_trans_orig' in seasons_map.get(pid, {}):
-            seasons_map[pid]['transition_ppp'] = seasons_map[pid].pop('_trans_orig')
-        if '_psr_orig' in seasons_map.get(pid, {}):
-            seasons_map[pid]['paint_scoring_rate'] = seasons_map[pid].pop('_psr_orig')
-        if '_roll_orig' in seasons_map.get(pid, {}):
-            seasons_map[pid]['pnr_roll_ppp'] = seasons_map[pid].pop('_roll_orig')
-        if '_post_orig' in seasons_map.get(pid, {}):
-            seasons_map[pid]['post_ppp'] = seasons_map[pid].pop('_post_orig')
+        for orig_key, restore_key in [
+            ('_pullup_orig',   'pull_up_efg_pct'),
+            ('_pnr_bh_orig',    'pnr_bh_ppp'),
+            ('_trans_orig',     'transition_ppp'),
+            ('_psr_orig',       'paint_scoring_rate'),
+            ('_roll_orig',      'pnr_roll_ppp'),
+            ('_post_orig',      'post_ppp'),
+        ]:
+            if orig_key in seasons_map.get(pid, {}):
+                seasons_map[pid][restore_key] = seasons_map[pid].pop(orig_key)
         for ppp_col in ['def_post_ppp', 'def_spotup_ppp', 'def_pnr_roll_ppp']:
             key = f'_{ppp_col}_orig'
             if key in seasons_map.get(pid, {}):
                 seasons_map[pid][ppp_col] = seasons_map[pid].pop(key)
 
-    # ── TEMPORARY: league-wide only (no position normalization) ──
-    # To restore position normalization, remove the override below and
-    # uncomment the position-normalized pct_pos build.
-    USE_POS_NORM = False
+    pct_pos = {col: percentile_map(all_qualifying, col, src)
+               for col, src in ALL_METRICS_POS}
 
-    if USE_POS_NORM:
-        pct_pos = {}
-        for col, src in ALL_METRICS_POS:
-            merged_pos = {}
-            for pos_g, pids in pos_groups.items():
-                merged_pos.update(percentile_map(pids, col, src))
-            pct_pos[col] = merged_pos
-    else:
-        # Use league-wide percentiles for all metrics — no position normalization
-        pct_pos = {col: percentile_map(all_qualifying, col, src)
-                   for col, src in ALL_METRICS_POS}
-
-    # Inverted metrics: lower raw = better = higher percentile
-    pct_lg['tov_pct_inv']         = {pid: round(100 - v, 1) for pid, v in pct_lg['tov_pct'].items()}
+    # Inverted percentile maps (lower raw = better = higher percentile)
+    pct_lg['tov_pct_inv']          = {pid: round(100 - v, 1) for pid, v in pct_lg['tov_pct'].items()}
     pct_lg['lost_ball_tov_pg_inv'] = {pid: round(100 - v, 1) for pid, v in pct_lg['lost_ball_tov_pg'].items()}
-
-    # matchup_def_fg_pct — lower FG% allowed = better
     if 'matchup_def_fg_pct' in pct_pos:
         pct_pos['matchup_def_fg_pct_inv'] = {pid: round(100 - v, 1) for pid, v in pct_pos['matchup_def_fg_pct'].items()}
+    for col in ['def_iso_ppp', 'def_pnr_bh_ppp', 'def_post_ppp', 'def_spotup_ppp', 'def_pnr_roll_ppp']:
+        if col in pct_lg:
+            pct_lg[f'{col}_inv'] = {pid: round(100 - v, 1) for pid, v in pct_lg[col].items()}
+        if col in pct_pos:
+            pct_pos[f'{col}_inv'] = {pid: round(100 - v, 1) for pid, v in pct_pos[col].items()}
 
-    # def_iso_ppp, def_pnr_bh_ppp — lower PPP allowed = better
-    for col in ['def_iso_ppp', 'def_pnr_bh_ppp',
-                'def_post_ppp', 'def_spotup_ppp', 'def_pnr_roll_ppp']:
-        pct_lg[f'{col}_inv'] = {pid: round(100 - v, 1) for pid, v in pct_lg[col].items()} \
-                                if col in pct_lg else {}
-        if USE_POS_NORM:
-            inv_pos = {}
-            for pos_g, pids in pos_groups.items():
-                raw_pos = percentile_map(pids, col, 's')
-                for pid, v in raw_pos.items():
-                    inv_pos[pid] = round(100 - v, 1)
-            pct_pos[f'{col}_inv'] = inv_pos
-        else:
-            if col in pct_pos:
-                pct_pos[f'{col}_inv'] = {pid: round(100 - v, 1)
-                                         for pid, v in pct_pos[col].items()}
-
-    def avg_pct(pid, cols_srcs, pct_maps, min_metrics=1):
-        """Average percentile across metrics, skipping NULLs.
-        min_metrics: minimum non-NULL metrics required to return a score."""
-        vals = []
+    def weighted_avg_pct(pid, cols_srcs, pct_maps, comp_name, min_metrics=1):
+        """
+        Weighted average of percentiles.
+        Resolves inverted col names (e.g. tov_pct_inv) to base key for weight lookup.
+        Falls back to weight=1.0 if no weight found.
+        """
+        comp_w = subcomp_weights.get(comp_name, {})
+        vals_weights = []
         for col, src in cols_srcs:
             pmap = pct_maps.get(col, {})
-            v = pmap.get(pid)
+            v    = pmap.get(pid)
             if v is not None:
-                vals.append(v)
-        if len(vals) < min_metrics:
+                base_col = INVERT_MAP.get(col, col)
+                raw_w = comp_w.get(base_col)
+                w = raw_w if raw_w is not None else 1.0
+                vals_weights.append((v, w))
+        if len(vals_weights) < min_metrics:
             return None
-        return round(sum(vals) / len(vals), 1) if vals else None
+        total_w = sum(w for _, w in vals_weights)
+        if total_w == 0:
+            return None
+        return round(sum(v * w for v, w in vals_weights) / total_w, 1)
 
-    # ── Volume gates ──────────────────────────────────────────
     def passes_gate(pid, gate_key):
-        ps    = seasons_map.get(pid, {})
-        pos_g = ps.get('position_group', 'F')
-        gp    = max(s(ps.get('gp'), 1), 1)
+        """Sub-composite qualifying gates — volume per game only, no GP floor.
+        Storage conventions: ast, fga, pts = per-game averages (no /gp needed).
+        potential_ast, drives, touches, paint_touches, def_rim_fga = season totals (need /gp).
+        """
+        ps = seasons_map.get(pid, {})
+        gp = max(s(ps.get('gp'), 1), 1)
         if gate_key == 'finishing':
             return s(ps.get('paint_touches'), 0) / gp >= 3.0
         if gate_key == 'shooting':
@@ -662,127 +785,68 @@ def compute_composites(metrics_list, seasons_map):
         if gate_key == 'shot_creation':
             return s(ps.get('drives'), 0) / gp >= 2.0
         if gate_key == 'passing':
-            return (s(ps.get('ast'), 0) >= 2.0 and
-                    s(ps.get('potential_ast'), 0) / gp >= 3.0 and
-                    gp >= 30)
+            return (s(ps.get('ast'), 0) >= 1.5 and
+                    s(ps.get('potential_ast'), 0) / gp >= 3.0)
         if gate_key == 'pm_creation':
-            # Open to all positions — gravity, leverage, and passing creation
-            # don't require guard-style driving
             return (s(ps.get('potential_ast'), 0) / gp >= 3.0 and
-                    s(ps.get('touches'), 0) / gp >= 40.0 and
-                    gp >= 30)
+                    s(ps.get('touches'), 0) / gp >= 40.0)
         if gate_key == 'ball_handling':
-            # Ball security and execution — requires meaningful drive volume
             return (s(ps.get('drives'), 0) / gp >= 4.0 and
-                    s(ps.get('touches'), 0) / gp >= 40.0 and
-                    gp >= 30)
+                    s(ps.get('touches'), 0) / gp >= 40.0)
         if gate_key == 'interior_def':
-            return s(ps.get('def_rim_fga'), 0) >= 50
-        return True  # no gate
+            return s(ps.get('def_rim_fga'), 0) / gp >= 2.5
+        return True
 
     # ── Sub-composite definitions ─────────────────────────────
     SUB_COMPOSITES = [
-
-        # FINISHING — position-normalized, no hard gate
-        # transition_ppp: offensive transition finishing — same gate as elsewhere (≥2.0 FGA/g)
         ('finishing_score', None,
-         [('paint_efg_vw',          'm'),
-          ('paint_scoring_rate',    'm'),
-          ('drive_pts_per_drive',   'm'),
-          ('drive_foul_rate',       'm'),
-          ('pnr_roll_ppp',          's'),
-          ('post_ppp',              's'),
-          ('transition_ppp',        's')],
+         [('paint_efg_vw', 'm'), ('paint_scoring_rate', 'm'),
+          ('drive_pts_per_drive', 'm'), ('drive_foul_rate', 'm'),
+          ('pnr_roll_ppp', 's'), ('post_ppp', 's'), ('transition_ppp', 's')],
          'pos'),
 
-        # SHOOTING — league-wide, min FGA gate
-        # sq_fg_pct_above_expected: shot making quality independent of shot selection
-        # (only 130 players covered — NULL-skipped naturally via avg_pct)
         ('shooting_score', 'shooting',
-         [('spotup_efg_pct',           's'),
-          ('all3_efg_vw',              'm'),
-          ('midrange_efg_vw',          'm'),
-          ('sq_fg_pct_above_expected', 's')],
+         [('all3_efg_vw', 'm'),
+          ('midrange_efg_vw', 'm'), ('sq_fg_pct_above_expected', 's')],
          'lg'),
 
-        # SHOT CREATION (scoring) — league-wide, drives/g gate
-        # leverage_shooting: how much shooting presence moves team offense on/off
         ('shot_creation_score', 'shot_creation',
-         [('pct_uast_fgm',    's'),
-          ('iso_ppp',         's'),
-          ('pull_up_efg_pct', 's'),
-          ('drive_fg_pct',    's'),
-          ('usg_pct',         's'),
-          ('tov_pct_inv',     'm'),
-          ('leverage_shooting','s')],
+         [('pct_uast_fgm', 's'), ('iso_ppp', 's'), ('pull_up_efg_pct', 's'),
+          ('drive_fg_pct', 's'), ('usg_pct', 's'), ('tov_pct_inv', 'm'),
+          ('leverage_shooting', 's')],
          'lg'),
 
-        # PASSING — passing gate (all positions)
-        # pot_ast_per_tov is required (enforced below) — no passing score without it
         ('passing_score', 'passing',
-         [('pot_ast_per_tov',    'm'),
-          ('ast_pct',            's'),
-          ('pass_quality_index', 'm')],
+         [('pot_ast_per_tov', 'm'), ('ast_pct', 's'), ('pass_quality_index', 'm')],
          'lg'),
 
-        # CREATION — pot AST/g + touches gate, all positions
-        # Style-agnostic: measures how much scoring you create regardless of method
         ('creation_score', 'pm_creation',
-         [('leverage_creation',  's'),
-          ('ast_pts_created_pg', 'm'),
-          ('ft_ast_per75',       'm')],
+         [('leverage_creation', 's'), ('ast_pts_created_pg', 'm'), ('ft_ast_per75', 'm')],
          'lg'),
 
-        # BALL HANDLING — drives + touches gate
-        # Ball security and PnR execution
         ('decision_making_score', 'ball_handling',
-         [('lost_ball_tov_pg_inv', 'm'),
-          ('pnr_bh_ppp',           's')],
+         [('lost_ball_tov_pg_inv', 'm'), ('pnr_bh_ppp', 's')],
          'lg'),
 
-        # PERIMETER DEFENSE — position-normalized, no gate
         ('perimeter_def_score', None,
-         [('def_delta_3pt',       'm'),
-          ('def_delta_overall',   'm'),
-          ('def_disruption_rate', 'm'),
-          ('contested_shots',     's'),
-          ('stl',                 's'),
-          ('def_spotup_ppp_inv',  's')],
+         [('def_delta_3pt', 'm'), ('def_delta_overall', 'm'),
+          ('def_disruption_rate', 'm'), ('contested_shots', 's'),
+          ('stl', 's'), ('def_spotup_ppp_inv', 's')],
          'pos'),
 
-        # INTERIOR DEFENSE — position-normalized, rim FGA gate
-        # box_out_rate moved to rebounding composite
         ('interior_def_score', 'interior_def',
-         [('rim_protection_score',  'm'),
-          ('def_delta_2pt',         'm'),
-          ('dreb_pct',              's'),
-          ('blk',                   's'),
-          ('def_post_ppp_inv',      's'),
-          ('def_pnr_roll_ppp_inv',  's')],
+         [('rim_protection_score', 'm'), ('def_delta_2pt', 'm'),
+          ('dreb_pct', 's'), ('blk', 's'),
+          ('def_post_ppp_inv', 's'), ('def_pnr_roll_ppp_inv', 's')],
          'pos'),
 
-        # ACTIVITY — position-normalized, no gate
         ('activity_score', None,
-         [('motor_score',        'm'),
-          ('hustle_composite',   'm'),
-          ('screen_assist_rate', 'm')],
+         [('motor_score', 'm'), ('hustle_composite', 'm'), ('screen_assist_rate', 'm')],
          'pos'),
 
-        # REBOUNDING — position-normalized, no gate
-        # box_out_rate moved here from interior defense
         ('rebounding_score', None,
-         [('dreb_pct',    's'),
-          ('oreb_pct',    's'),
-          ('box_out_rate','m')],
+         [('dreb_pct', 's'), ('oreb_pct', 's'), ('box_out_rate', 'm')],
          'pos'),
-    ]
-
-    # ── Category composite definitions ────────────────────────
-    CAT_COMPOSITES = [
-        ('creator_score',   ['finishing_score', 'shooting_score', 'shot_creation_score']),
-        ('playmaker_score', ['passing_score', 'creation_score', 'decision_making_score']),
-        ('defender_score',  ['perimeter_def_score', 'interior_def_score']),
-        ('hustle_score',    ['activity_score', 'rebounding_score']),
     ]
 
     # ── Score each player ─────────────────────────────────────
@@ -790,13 +854,8 @@ def compute_composites(metrics_list, seasons_map):
         pid   = m['player_id']
         min_t = s(seasons_map.get(pid, {}).get('min'), 0)
 
-        if min_t < MIN_MINUTES_TOTAL:
-            for name, _, _, _ in SUB_COMPOSITES:
-                m[name] = None
-            for name, _ in CAT_COMPOSITES:
-                m[name] = None
-            m['three_and_d_score'] = None
-            continue
+        # No minimum-minutes hard cutoff — stat-level volume gates handle eligibility.
+
 
         # Sub-composites
         for comp_name, gate_key, cols_srcs, pct_key in SUB_COMPOSITES:
@@ -804,132 +863,116 @@ def compute_composites(metrics_list, seasons_map):
                 m[comp_name] = None
                 continue
             pct_maps = pct_lg if pct_key == 'lg' else pct_pos
-            if comp_name == 'decision_making_score':
-                min_m = 2  # require both lost_ball_tov_pg_inv AND pnr_bh_ppp
-            elif comp_name in ('shooting_score', 'passing_score',
-                               'creation_score', 'shot_creation_score'):
-                min_m = 2
-            else:
-                min_m = 1
-            score = avg_pct(pid, cols_srcs, pct_maps, min_metrics=min_m)
+            # Require min(2, n_stats-1) so losing one individually-gated
+            # stat never nulls the entire sub-composite.
+            # 2-stat composites need 1; 3+-stat composites need 2.
+            n_stats = len(cols_srcs)
+            min_m = 1 if n_stats <= 2 else 2
 
-            # Finishing requires paint presence
+            score = weighted_avg_pct(pid, cols_srcs, pct_maps, comp_name, min_metrics=min_m)
+
             if comp_name == 'finishing_score' and score is not None:
                 has_paint = (pct_pos.get('paint_efg_vw', {}).get(pid) is not None or
                              pct_pos.get('paint_scoring_rate', {}).get(pid) is not None)
                 if not has_paint:
                     score = None
 
-            # Passing requires pot_ast_per_tov non-NULL — no meaningful
-            # passing score without the decision quality anchor metric
             if comp_name == 'passing_score' and score is not None:
                 if pct_lg.get('pot_ast_per_tov', {}).get(pid) is None:
                     score = None
 
             m[comp_name] = score
 
-        # Category composites — win-impact anchored
-        # Formula: score = anchor_pct × 0.4 + skill_avg × 0.6
-        # Anchors: o_net_pts100 for offense, d_net_pts100 for defense,
-        #          leverage_creation for playmaking, leverage_full for hustle
-        # If anchor unavailable, falls back to pure skill avg
-        def anchored(skill_vals, anchor_pct, anchor_w=0.4):
-            skill = [v for v in skill_vals if v is not None]
-            if not skill:
+        # ── Category composites (win-correlation weighted) ────
+        def flat_cat_score(sub_names):
+            """Flat unweighted average of available sub-composite scores.
+            Sub-composites already encode win-correlation via raw |r| weights."""
+            available = [safe(m.get(sn)) for sn in sub_names if safe(m.get(sn)) is not None]
+            if not available:
                 return None
-            skill_avg = sum(skill) / len(skill)
-            if anchor_pct is not None:
-                return round(anchor_pct * anchor_w + skill_avg * (1 - anchor_w), 1)
-            return round(skill_avg, 1)
+            return round(sum(available) / len(available), 1)
 
-        for comp_name, sub_names in CAT_COMPOSITES:
-            sub_vals  = [safe(m.get(sn)) for sn in sub_names]
-            available = [v for v in sub_vals if v is not None]
+        # Playmaker — best 2 of the 3 available sub-composites.
+        # Requires passing_score (the core signal). If all 3 are present,
+        # the lowest is dropped so ball handling never penalises a player
+        # who simply does not run PnR-BH as their primary role.
+        _pm_all = [(v, n) for n, v in [
+            ('passing',    safe(m.get('passing_score'))),
+            ('creation',   safe(m.get('creation_score'))),
+            ('ball_handling', safe(m.get('decision_making_score'))),
+        ] if v is not None]
+        # Must have passing_score
+        if not any(n == 'passing' for _, n in _pm_all):
+            m['playmaker_score'] = None
+        elif len(_pm_all) == 1:
+            m['playmaker_score'] = round(_pm_all[0][0], 1)
+        else:
+            # Take best 2 by value
+            top2 = sorted(_pm_all, key=lambda x: x[0], reverse=True)[:2]
+            m['playmaker_score'] = round(sum(v for v, _ in top2) / 2, 1)
 
-            if comp_name == 'playmaker_score':
-                passing_val = safe(m.get('passing_score'))
-                if passing_val is None:
-                    m[comp_name] = None
-                else:
-                    anchor = pct_lg.get('leverage_creation', {}).get(pid)
-                    m[comp_name] = anchored(available, anchor)
+        # Creator — requires shot_creation_score
+        # Creator — best 2 of available sub-scores, requires shot_creation_score.
+        # If all 3 qualify, the lowest is dropped so a weak dimension never
+        # penalises a specialist (e.g. a pure shooter with low finishing).
+        _cr_subs = [(safe(m.get(sn)), sn) for sn in
+                    ['shot_creation_score', 'finishing_score', 'shooting_score']]
+        _cr_avail = [(v, n) for v, n in _cr_subs if v is not None]
+        if not any(n == 'shot_creation_score' for _, n in _cr_avail) or len(_cr_avail) < 2:
+            m['creator_score'] = None
+        else:
+            top2 = sorted(_cr_avail, key=lambda x: x[0], reverse=True)[:2]
+            m['creator_score'] = round(sum(v for v, _ in top2) / 2, 1)
 
-            elif comp_name == 'creator_score':
-                shot_creation_val = safe(m.get('shot_creation_score'))
-                if shot_creation_val is None:
-                    m[comp_name] = None
-                else:
-                    anchor = pct_lg.get('o_net_pts100', {}).get(pid)
-                    m[comp_name] = anchored(available, anchor)
+        # Defender — flat average of sub-scores + extra signals, no anchors
+        def_vals = []
+        for sub in ['perimeter_def_score', 'interior_def_score']:
+            v = safe(m.get(sub))
+            if v is not None: def_vals.append(v)
+        for extra_col in ['leverage_defense', 'def_ws']:
+            pct = pct_pos.get(extra_col, {}).get(pid)
+            if pct is not None: def_vals.append(pct)
+        matchup_pct = pct_pos.get('matchup_def_fg_pct_inv', {}).get(pid)
+        if matchup_pct is not None: def_vals.append(matchup_pct)
+        m['defender_score'] = round(sum(def_vals) / len(def_vals), 1) if def_vals else None
 
-            elif comp_name == 'defender_score':
-                # Inject extra signals into available list
-                for extra_col in ['leverage_defense', 'def_ws']:
-                    pct = pct_pos.get(extra_col, {}).get(pid)
-                    if pct is not None:
-                        available = available + [pct]
-                matchup_pct = pct_pos.get('matchup_def_fg_pct_inv', {}).get(pid)
-                if matchup_pct is not None:
-                    available = available + [matchup_pct]
-                anchor = pct_lg.get('d_net_pts100', {}).get(pid)
-                m[comp_name] = anchored(available, anchor)
+        # Hustle
+        m['hustle_score'] = flat_cat_score(['activity_score', 'rebounding_score'])
 
-            elif comp_name == 'hustle_score':
-                anchor = pct_lg.get('leverage_full', {}).get(pid)
-                m[comp_name] = anchored(available, anchor)
-
-            else:
-                m[comp_name] = round(sum(available) / len(available), 1) if available else None
-
-        # Three-and-D bonus score
+        # Three-and-D
         pdef  = safe(m.get('perimeter_def_score'))
         shoot = safe(m.get('shooting_score'))
         m['three_and_d_score'] = (round((pdef + shoot) / 2, 1)
-                                  if (pdef is not None and shoot is not None) else None)
+                                  if pdef is not None and shoot is not None else None)
 
-        # ── Impact Score ─────────────────────────────────────────
-        # Win-impact anchored overall: spine is net_pts100 (luck-adjusted on/off).
-        # Skill composites (creator, playmaker, defender, hustle) explain HOW a
-        # player contributes but can't inflate them above their actual win impact.
-        # Formula: 50% net_pts100 percentile + 50% avg of available cat scores
-        net_pct   = pct_lg.get('net_pts100', {}).get(pid)
+        # ── Impact Score ──────────────────────────────────────
         cat_scores = [safe(m.get(cn)) for cn in
-                      ['creator_score','playmaker_score','defender_score','hustle_score']]
+                      ['creator_score', 'playmaker_score', 'defender_score', 'hustle_score']]
         cat_avail  = [v for v in cat_scores if v is not None]
-        if net_pct is not None and cat_avail:
-            cat_avg = sum(cat_avail) / len(cat_avail)
-            m['impact_score'] = round(net_pct * 0.50 + cat_avg * 0.50, 1)
-        elif net_pct is not None:
-            m['impact_score'] = round(net_pct, 1)
-        elif cat_avail:
-            m['impact_score'] = round(sum(cat_avail) / len(cat_avail), 1)
-        else:
-            m['impact_score'] = None
+        m['impact_score'] = round(sum(cat_avail) / len(cat_avail), 1) if cat_avail else None
 
-    # ── Drawer/sort percentiles ───────────────────────────────
+    # ── Percentile rank columns ───────────────────────────────
     pctile_cols = [
-        ('ts_pct',      'ts_pct',             's',  False),
-        ('usg_pct',     'usg_pct',            's',  False),
-        ('ast_pct',     'ast_pct',            's',  False),
-        ('net_rating',  'net_rating',         's',  False),
-        ('def_delta',   'def_delta_overall',  'm',  False),
-        ('rim_prot',    'rim_protection_score','m', False),
-        ('playmaker',   'playmaker_score',    'm',  False),
-        ('creator',     'creator_score',      'm',  False),
-        ('defender',    'defender_score',     'm',  True),   # position-normalized
-        ('three_and_d', 'three_and_d_score',  'm',  False),
-        ('hustle',      'hustle_score',       'm',  False),
+        ('ts_pct',      'ts_pct',              's', False),
+        ('usg_pct',     'usg_pct',             's', False),
+        ('ast_pct',     'ast_pct',             's', False),
+        ('net_rating',  'net_rating',          's', False),
+        ('def_delta',   'def_delta_overall',   'm', False),
+        ('rim_prot',    'rim_protection_score', 'm', False),
+        ('playmaker',   'playmaker_score',     'm', False),
+        ('creator',     'creator_score',       'm', False),
+        ('defender',    'defender_score',      'm', True),
+        ('three_and_d', 'three_and_d_score',   'm', False),
+        ('hustle',      'hustle_score',        'm', False),
     ]
     for pctile_name, col, src, pos_norm in pctile_cols:
         if pos_norm:
-            # Position-normalized: rank within position group, then merge
             rank_map = {}
             for pos_g, pids in pos_groups.items():
                 grp_vals = []
                 for pid in pids:
-                    min_t = s(seasons_map.get(pid, {}).get('min'), 0)
-                    if min_t < MIN_MINUTES_TOTAL: continue
-                    v = safe(metrics_by_pid.get(pid, {}).get(col)) if src == 'm' else safe(seasons_map.get(pid, {}).get(col))
+                    v = safe(metrics_by_pid.get(pid, {}).get(col)) if src == 'm' \
+                        else safe(seasons_map.get(pid, {}).get(col))
                     if v is not None: grp_vals.append((pid, v))
                 if not grp_vals: continue
                 sorted_grp = sorted(grp_vals, key=lambda x: x[1])
@@ -942,9 +985,7 @@ def compute_composites(metrics_list, seasons_map):
         else:
             all_vals = []
             for m in metrics_list:
-                pid   = m['player_id']
-                min_t = s(seasons_map.get(pid, {}).get('min'), 0)
-                if min_t < MIN_MINUTES_TOTAL: continue
+                pid = m['player_id']
                 v = safe(m.get(col)) if src == 'm' else safe(seasons_map.get(pid, {}).get(col))
                 if v is not None: all_vals.append((pid, v))
             if not all_vals: continue
@@ -981,10 +1022,6 @@ def upsert_metrics(conn, rows):
 
     cleaned = [tuple(clean(r.get(c)) for c in cols) for r in rows]
 
-    # Reconnect per chunk to avoid Railway connection timeouts
-    import os
-    from dotenv import load_dotenv
-    load_dotenv()
     CHUNK = 25
     for i in range(0, len(cleaned), CHUNK):
         batch = cleaned[i:i+CHUNK]
@@ -999,15 +1036,14 @@ def upsert_metrics(conn, rows):
                 break
             except Exception as e:
                 if attempt < 2:
-                    import time
-                    time.sleep(3)
+                    import time; time.sleep(3)
                 else:
                     raise e
         print(f"  ... {min(i+CHUNK, len(cleaned))}/{len(cleaned)}")
     print(f"  ✅ Upserted {len(rows)} metric rows")
 
 
-# ── Zone metrics (shot location EFG+ VW) ─────────────────────
+# ── Zone metrics ──────────────────────────────────────────────
 def compute_zone_metrics(conn, season, season_type):
     from collections import defaultdict
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -1037,7 +1073,7 @@ def compute_zone_metrics(conn, season, season_type):
     league_efg = {}
     for z, t in league.items():
         if t['fga'] > 0:
-            is3 = z in ('Corner 3','Left Corner 3','Right Corner 3','Above the Break 3')
+            is3 = z in ('Corner 3', 'Left Corner 3', 'Right Corner 3', 'Above the Break 3')
             league_efg[z] = (t['fgm'] * 1.5 / t['fga']) if is3 else (t['fgm'] / t['fga'])
 
     print(f"  League EFG% by zone:")
@@ -1072,10 +1108,8 @@ def compute_zone_metrics(conn, season, season_type):
         ce, cd, cf  = ze('Corner 3', is3=True)
         ae, ad, af  = ze('Above the Break 3', is3=True)
 
-        pf_pg = round(pf / gp, 2)
-        mf_pg = round(mf / gp, 2)
-        cf_pg = round(cf / gp, 2)
-        af_pg = round(af / gp, 2)
+        pf_pg = round(pf / gp, 2); mf_pg = round(mf / gp, 2)
+        cf_pg = round(cf / gp, 2); af_pg = round(af / gp, 2)
 
         if pf_pg < ZONE_MIN_FGA_PG['paint']:        pe = pd_ = None
         if mf_pg < ZONE_MIN_FGA_PG['midrange']:     me = md  = None
@@ -1092,10 +1126,8 @@ def compute_zone_metrics(conn, season, season_type):
         all3_vw = round(all3_delta * all3_fga_pg, 4) if all3_delta is not None else None
 
         updates.append((
-            pe, pd_, pf_pg, paint_vw,
-            me, md, mf_pg, mid_vw,
-            ce, cd, cf_pg, c3_vw,
-            ae, ad, af_pg, ab3_vw,
+            pe, pd_, pf_pg, paint_vw, me, md, mf_pg, mid_vw,
+            ce, cd, cf_pg, c3_vw, ae, ad, af_pg, ab3_vw,
             all3_efg, all3_delta, all3_fga_pg, all3_vw,
             pid, season, season_type
         ))
@@ -1103,11 +1135,11 @@ def compute_zone_metrics(conn, season, season_type):
     upd = conn.cursor()
     upd.executemany("""
         UPDATE player_metrics SET
-            paint_efg=%s,         paint_efg_delta=%s,        paint_fga_pg=%s,        paint_efg_vw=%s,
-            midrange_efg=%s,      midrange_efg_delta=%s,     midrange_fga_pg=%s,     midrange_efg_vw=%s,
-            corner3_efg=%s,       corner3_efg_delta=%s,      corner3_fga_pg=%s,      corner3_efg_vw=%s,
-            above_break3_efg=%s,  above_break3_efg_delta=%s, above_break3_fga_pg=%s, above_break3_efg_vw=%s,
-            all3_efg=%s,          all3_efg_delta=%s,         all3_fga_pg=%s,         all3_efg_vw=%s,
+            paint_efg=%s,        paint_efg_delta=%s,        paint_fga_pg=%s,        paint_efg_vw=%s,
+            midrange_efg=%s,     midrange_efg_delta=%s,     midrange_fga_pg=%s,     midrange_efg_vw=%s,
+            corner3_efg=%s,      corner3_efg_delta=%s,      corner3_fga_pg=%s,      corner3_efg_vw=%s,
+            above_break3_efg=%s, above_break3_efg_delta=%s, above_break3_fga_pg=%s, above_break3_efg_vw=%s,
+            all3_efg=%s,         all3_efg_delta=%s,         all3_fga_pg=%s,         all3_efg_vw=%s,
             updated_at=NOW()
         WHERE player_id=%s AND season=%s AND season_type=%s
     """, updates)
@@ -1115,12 +1147,11 @@ def compute_zone_metrics(conn, season, season_type):
     upd.close()
     print(f"  ✅ Zone metrics updated for {len(updates)} players")
 
-    # Spot check
     chk = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     for title, col_efg, col_delta, col_fga in [
-        ('Top 10 Paint Finishers',      'paint_efg',   'paint_efg_delta',   'paint_fga_pg'),
-        ('Top 10 Mid-Range Shooters',   'midrange_efg','midrange_efg_delta','midrange_fga_pg'),
-        ('Top 10 All 3PT Shooters (VW)','all3_efg',    'all3_efg_vw',       'all3_fga_pg'),
+        ('Top 10 Paint Finishers',       'paint_efg',    'paint_efg_delta',    'paint_fga_pg'),
+        ('Top 10 Mid-Range Shooters',    'midrange_efg', 'midrange_efg_delta', 'midrange_fga_pg'),
+        ('Top 10 All 3PT Shooters (VW)', 'all3_efg',     'all3_efg_vw',        'all3_fga_pg'),
     ]:
         chk.execute(f"""
             SELECT p.player_name, p.position_group, pm.{col_efg}, pm.{col_delta}, pm.{col_fga}
@@ -1144,7 +1175,6 @@ def compute_zone_metrics(conn, season, season_type):
 # ── Spot check ────────────────────────────────────────────────
 def spot_check(conn, season, season_type):
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
     print(f"\n{'='*90}")
     print(f"Top 15 Playmakers — {season}")
     print(f"{'='*90}")
@@ -1153,12 +1183,15 @@ def spot_check(conn, season, season_type):
                ps.net_rating, pm.bpm_computed, pm.playmaker_score,
                pm.creator_score, pm.pot_ast_per_tov, pm.pass_quality_index
         FROM player_metrics pm
-        JOIN player_seasons ps ON pm.player_id = ps.player_id AND pm.season = ps.season AND pm.season_type = ps.season_type
+        JOIN player_seasons ps ON pm.player_id = ps.player_id
+            AND pm.season = ps.season AND pm.season_type = ps.season_type
         JOIN players p ON pm.player_id = p.player_id
-        WHERE pm.season = %s AND pm.season_type = %s AND ps.min >= %s
+        WHERE pm.season = %s AND pm.season_type = %s
+          AND pm.playmaker_score IS NOT NULL
         ORDER BY pm.playmaker_score DESC NULLS LAST LIMIT 15
-    """, (season, season_type, MIN_MINUTES_TOTAL))
-    print(f"{'Player':<22} {'Pos':<4} {'MIN':>5} {'PTS':>5} {'AST':>5} {'NET':>6} {'BPM':>5} {'PLYMK':>6} {'CREAT':>6} {'POT/TOV':>8} {'PASS_Q':>7}")
+    """, (season, season_type))
+    print(f"{'Player':<22} {'Pos':<4} {'MIN':>5} {'PTS':>5} {'AST':>5} {'NET':>6} "
+          f"{'BPM':>5} {'PLYMK':>6} {'CREAT':>6} {'POT/TOV':>8} {'PASS_Q':>7}")
     print("─" * 90)
     for r in cur.fetchall():
         print(f"{r['player_name']:<22} {r['position_group'] or '':<4} "
@@ -1173,11 +1206,13 @@ def spot_check(conn, season, season_type):
         SELECT p.player_name, p.position_group, ps.stl, ps.blk,
                pm.defender_score, pm.def_delta_overall, pm.rim_protection_score
         FROM player_metrics pm
-        JOIN player_seasons ps ON pm.player_id = ps.player_id AND pm.season = ps.season AND pm.season_type = ps.season_type
+        JOIN player_seasons ps ON pm.player_id = ps.player_id
+            AND pm.season = ps.season AND pm.season_type = ps.season_type
         JOIN players p ON pm.player_id = p.player_id
-        WHERE pm.season = %s AND pm.season_type = %s AND ps.min >= %s
+        WHERE pm.season = %s AND pm.season_type = %s
+          AND pm.defender_score IS NOT NULL
         ORDER BY pm.defender_score DESC NULLS LAST LIMIT 10
-    """, (season, season_type, MIN_MINUTES_TOTAL))
+    """, (season, season_type))
     for r in cur.fetchall():
         print(f"  {r['player_name']:<22} {r['position_group'] or '':<4} "
               f"STL={r['stl'] or 0:.1f}  BLK={r['blk'] or 0:.1f}  "
@@ -1191,11 +1226,13 @@ def spot_check(conn, season, season_type):
                pm.shooting_score, pm.contested_fg_making, pm.open_fg_making,
                pm.all3_efg_vw, pm.midrange_efg_vw
         FROM player_metrics pm
-        JOIN player_seasons ps ON pm.player_id = ps.player_id AND pm.season = ps.season AND pm.season_type = ps.season_type
+        JOIN player_seasons ps ON pm.player_id = ps.player_id
+            AND pm.season = ps.season AND pm.season_type = ps.season_type
         JOIN players p ON pm.player_id = p.player_id
-        WHERE pm.season = %s AND pm.season_type = %s AND ps.min >= %s
+        WHERE pm.season = %s AND pm.season_type = %s
+          AND pm.shooting_score IS NOT NULL
         ORDER BY pm.shooting_score DESC NULLS LAST LIMIT 10
-    """, (season, season_type, MIN_MINUTES_TOTAL))
+    """, (season, season_type))
     for r in cur.fetchall():
         print(f"  {r['player_name']:<22} {r['position_group'] or '':<4} "
               f"TS={r['ts_pct'] or 0:.3f}  SHOOT={r['shooting_score'] or 0:.1f}  "
@@ -1204,143 +1241,6 @@ def spot_check(conn, season, season_type):
 
 
 # ── Main ──────────────────────────────────────────────────────
-def compute_win_correlations(metrics_list, seasons_map, season, season_type):
-    """
-    Compute Pearson correlation of each stat/metric with net_pts100
-    across all qualifying players. Output as JSON for the builder UI.
-    Higher correlation = stat more strongly predicts winning.
-    """
-    import json
-
-    # All metric keys to test — raw stats from seasons_map + composites from metrics_list
-    RAW_STAT_KEYS = [
-        # Scoring
-        'ts_pct','efg_pct','pts','usg_pct','pull_up_efg_pct','spotup_efg_pct',
-        'iso_ppp','pct_uast_fgm','drive_fg_pct','tov_pct',
-        'paint_scoring_rate','drive_pts_per_drive','drive_foul_rate',
-        'pnr_roll_ppp','post_ppp','transition_ppp',
-        # Playmaking
-        'ast','ast_pct','ast_to','pot_ast_per_tov','pass_quality_index',
-        'ast_pts_created_pg','ft_ast_per75','leverage_creation',
-        'lost_ball_tov_pg','pnr_bh_ppp',
-        # Defense
-        'def_delta_overall','def_delta_3pt','def_delta_2pt',
-        'def_disruption_rate','contested_shots','stl','blk','dreb_pct',
-        'rim_protection_score','leverage_defense','def_ws','matchup_def_fg_pct',
-        'def_spotup_ppp','def_pnr_roll_ppp','def_post_ppp',
-        # Hustle
-        'motor_score','hustle_composite','screen_assist_rate',
-        'box_out_rate','oreb_pct',
-        # Win impact (for reference — should correlate ~1.0 with net_pts100)
-        'leverage_full','leverage_shooting',
-        'o_net_pts100','d_net_pts100',
-    ]
-
-    COMPOSITE_KEYS = [
-        'finishing_score','shooting_score','shot_creation_score',
-        'passing_score','creation_score','decision_making_score',
-        'perimeter_def_score','interior_def_score',
-        'activity_score','rebounding_score',
-        'creator_score','playmaker_score','defender_score','hustle_score',
-    ]
-
-    # Build player data vectors
-    pid_to_metrics = {m['player_id']: m for m in metrics_list}
-    qualifying_pids = [
-        pid for pid, ps in seasons_map.items()
-        if float(ps.get('min') or 0) >= MIN_MINUTES_TOTAL
-    ]
-
-    # Get net_pts100 for each player (from seasons_map)
-    def get_val(pid, key):
-        m = pid_to_metrics.get(pid, {})
-        ps = seasons_map.get(pid, {})
-        v = m.get(key) if key in m else ps.get(key)
-        if v is None:
-            return None
-        try:
-            f = float(v)
-            return None if (f != f) else f  # NaN check
-        except (TypeError, ValueError):
-            return None
-
-    net_pts_all = [(pid, get_val(pid, 'net_pts100')) for pid in qualifying_pids]
-    net_pts_all = [(pid, v) for pid, v in net_pts_all if v is not None]
-
-    def pearson(xs, ys):
-        n = len(xs)
-        if n < 10:
-            return None
-        mx = sum(xs) / n
-        my = sum(ys) / n
-        num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
-        dx  = sum((x - mx) ** 2 for x in xs) ** 0.5
-        dy  = sum((y - my) ** 2 for y in ys) ** 0.5
-        if dx == 0 or dy == 0:
-            return None
-        return round(num / (dx * dy), 4)
-
-    correlations = {}
-    net_pids = {pid for pid, _ in net_pts_all}
-    net_map  = {pid: v for pid, v in net_pts_all}
-
-    for key in RAW_STAT_KEYS + COMPOSITE_KEYS:
-        pairs = [(get_val(pid, key), net_map[pid])
-                 for pid in net_pids
-                 if get_val(pid, key) is not None]
-        if len(pairs) < 10:
-            continue
-        xs, ys = zip(*pairs)
-        r = pearson(list(xs), list(ys))
-        if r is not None:
-            # Invert lower-is-better stats so higher correlation = always good
-            LOWER_BETTER = {'tov_pct','lost_ball_tov_pg','matchup_def_fg_pct',
-                            'def_spotup_ppp','def_pnr_roll_ppp','def_post_ppp'}
-            if key in LOWER_BETTER:
-                r = -r
-            correlations[key] = r
-
-    # Normalize correlations to 0-1 range (min-max across absolute values)
-    # so the builder can use them as weights
-    if correlations:
-        abs_vals = [abs(v) for v in correlations.values()]
-        min_abs  = min(abs_vals)
-        max_abs  = max(abs_vals)
-        rng      = max_abs - min_abs if max_abs != min_abs else 1.0
-        # Weight = 0.1 (floor) + 0.9 × normalized_abs_correlation
-        # Floor prevents any metric from being completely zeroed out
-        weights = {
-            k: round(0.1 + 0.9 * (abs(v) - min_abs) / rng, 4)
-            for k, v in correlations.items()
-        }
-    else:
-        weights = {}
-
-    output = {
-        'season':       season,
-        'season_type':  season_type,
-        'n_players':    len(net_pts_all),
-        'correlations': correlations,
-        'weights':      weights,
-    }
-
-    # Save to static data dir
-    out_dir = os.path.join(os.path.dirname(__file__), 'data')
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f'win_correlations_{season.replace("-","_")}.json')
-    with open(out_path, 'w') as f:
-        json.dump(output, f, indent=2)
-
-    print(f"  Computed correlations for {len(correlations)} metrics ({len(net_pts_all)} players)")
-    print(f"  Saved to {out_path}")
-
-    # Print top 10 most correlated
-    top = sorted(correlations.items(), key=lambda x: abs(x[1]), reverse=True)[:10]
-    print("  Top correlates with net_pts100:")
-    for k, v in top:
-        print(f"    {k:35s} r={v:+.3f}  weight={weights.get(k, 0):.3f}")
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--season',      default=SEASON)
@@ -1352,10 +1252,11 @@ def main():
 
     print(f"\nThe Impact Board — Metrics Computation")
     print(f"Season: {season} | Type: {season_type}")
-    print(f"Min minutes for composites: {MIN_MINUTES_TOTAL}")
+    print(f"Min minutes (composites):    {MIN_MINUTES_TOTAL}")
+    print(f"Min minutes (correlations):  {MIN_MINUTES_CORR}")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
 
-    # Pass 1: derived metrics + zone metrics
+    # Pass 1: derived metrics
     conn = psycopg2.connect(DATABASE_URL)
     print("Loading season data...")
     seasons = load_seasons(conn, season, season_type)
@@ -1375,14 +1276,13 @@ def main():
     compute_zone_metrics(conn, season, season_type)
     conn.close()
 
-    # Pass 2: reload zone metrics, then compute composites
+    # Pass 2: reload zone data
     print("\nReloading with zone data for composites (pass 2)...")
     conn = psycopg2.connect(DATABASE_URL)
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute(
         'SELECT player_id, paint_efg_vw, midrange_efg_vw, all3_efg_vw,'
-        ' corner3_efg_vw, above_break3_efg_vw, paint_fga_pg, midrange_fga_pg,'
-        ' all3_fga_pg'
+        ' corner3_efg_vw, above_break3_efg_vw, paint_fga_pg, midrange_fga_pg, all3_fga_pg'
         ' FROM player_metrics WHERE season = %s AND season_type = %s',
         (season, season_type)
     )
@@ -1396,23 +1296,30 @@ def main():
             m.update({k: v for k, v in zone_rows[pid].items()
                       if k != 'player_id' and v is not None})
 
-    print("Computing composites and percentiles (pass 2)...")
-    metrics_list = compute_composites(metrics_list, seasons_map)
-    qualifying   = sum(1 for m in metrics_list if m.get('shooting_score') is not None)
+    # ── Win correlations + weights (computed BEFORE composites) ──
+    print("\nComputing win correlations and composite weights...")
+    raw_correlations, subcomp_weights, catcomp_weights, flat_weights = \
+        compute_win_correlations(metrics_list, seasons_map, season, season_type)
+
+    # ── Pass 2: composites with weights applied ───────────────
+    print("\nComputing composites and percentiles (pass 2, weighted)...")
+    metrics_list = compute_composites(
+        metrics_list, seasons_map, season, season_type,
+        subcomp_weights=subcomp_weights,
+        catcomp_weights=catcomp_weights,
+    )
+    qualifying = sum(1 for m in metrics_list if m.get('shooting_score') is not None)
     print(f"  {qualifying} players qualify (>={MIN_MINUTES_TOTAL} min)")
 
     print("\nWriting final metrics with composites...")
-    # Strip zone cols from metrics_list before upserting — compute_zone_metrics
-    # owns those columns and already wrote them. Re-upserting would overwrite
-    # them with potentially stale values from zone_rows merge.
-    ZONE_COLS = {'paint_efg_vw', 'midrange_efg_vw', 'all3_efg_vw',
-                 'corner3_efg_vw', 'above_break3_efg_vw',
-                 'paint_fga_pg', 'midrange_fga_pg', 'all3_fga_pg',
-                 'paint_efg', 'paint_efg_delta',
-                 'midrange_efg', 'midrange_efg_delta',
-                 'corner3_efg', 'corner3_efg_delta',
-                 'above_break3_efg', 'above_break3_efg_delta',
-                 'all3_efg', 'all3_efg_delta'}
+    ZONE_COLS = {
+        'paint_efg_vw', 'midrange_efg_vw', 'all3_efg_vw',
+        'corner3_efg_vw', 'above_break3_efg_vw',
+        'paint_fga_pg', 'midrange_fga_pg', 'all3_fga_pg',
+        'paint_efg', 'paint_efg_delta', 'midrange_efg', 'midrange_efg_delta',
+        'corner3_efg', 'corner3_efg_delta', 'above_break3_efg', 'above_break3_efg_delta',
+        'all3_efg', 'all3_efg_delta',
+    }
     metrics_no_zone = [{k: v for k, v in m.items() if k not in ZONE_COLS}
                        for m in metrics_list]
     conn = psycopg2.connect(DATABASE_URL)
@@ -1420,12 +1327,6 @@ def main():
 
     spot_check(conn, season, season_type)
     conn.close()
-
-    # ── Win correlation computation ───────────────────────────
-    # Compute Pearson correlation of each metric with net_pts100
-    # across all qualifying players. Output as JSON for the builder UI.
-    print("\nComputing win correlations...")
-    compute_win_correlations(metrics_list, seasons_map, season, season_type)
 
     print(f"\n{'='*60}")
     print(f"✅ Done — {datetime.now().strftime('%Y-%m-%d %H:%M')}")

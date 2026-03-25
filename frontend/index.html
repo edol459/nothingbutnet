@@ -30,6 +30,10 @@ header{
 }
 .logo{font-family:var(--fh);font-size:21px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;display:flex;align-items:center;gap:10px}
 .logo em{color:var(--accent);font-style:normal}
+.info-link{font-family:var(--fm);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text3);text-decoration:none;border:1px solid var(--border2);
+  border-radius:4px;padding:4px 10px;transition:all .15s;white-space:nowrap;margin-left:auto}
+.info-link:hover{color:var(--accent);border-color:var(--accent)}
 .logo-sep{width:1px;height:16px;background:var(--border3)}
 .logo-season{font-family:var(--fm);font-size:10px;color:var(--text3);letter-spacing:.06em}
 
@@ -236,7 +240,7 @@ input[type=number]:focus{border-color:var(--accent)}
 /* ── Metric tooltip ──────────────────────── */
 .metric-tooltip{
   position:fixed;background:var(--bg2);border:1px solid var(--border2);
-  border-radius:var(--r);padding:10px 12px;width:240px;z-index:500;
+  border-radius:var(--r);padding:10px 12px;width:280px;z-index:500;
   pointer-events:none;opacity:0;transition:opacity .15s;
   box-shadow:0 8px 24px rgba(0,0,0,.4);
 }
@@ -245,6 +249,21 @@ input[type=number]:focus{border-color:var(--accent)}
 .tt-formula{font-family:var(--fm);font-size:10px;color:var(--accent);background:var(--bg3);padding:4px 7px;border-radius:2px;margin-bottom:6px;line-height:1.5;word-break:break-word}
 .tt-desc{font-size:11px;color:var(--text2);line-height:1.5}
 .tt-source{font-family:var(--fm);font-size:9px;color:var(--text3);margin-top:6px;letter-spacing:.04em}
+/* Weight table inside tooltip */
+.tt-weight-header{
+  font-family:var(--fm);font-size:9px;color:var(--text3);
+  letter-spacing:.07em;text-transform:uppercase;
+  margin-top:8px;margin-bottom:5px;padding-top:7px;
+  border-top:1px solid var(--border);
+}
+.tt-weight-table{display:flex;flex-direction:column;gap:3px}
+.tt-weight-row{display:grid;grid-template-columns:118px 1fr 58px;align-items:center;gap:5px}
+.tt-weight-label{font-size:10px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tt-weight-bar-wrap{height:3px;background:var(--bg4);border-radius:2px;overflow:hidden}
+.tt-weight-bar{height:100%;background:var(--accent);border-radius:2px}
+.tt-weight-nums{display:flex;gap:4px;justify-content:flex-end;font-family:var(--fm);font-size:9px}
+.tt-w{color:var(--accent)}
+.tt-weight-meta{font-family:var(--fm);font-size:8px;color:var(--text4);margin-top:5px;letter-spacing:.04em}
 
 /* ── Settings drawer ─────────────────────── */
 .settings-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;opacity:0;pointer-events:none;transition:opacity .2s}
@@ -474,6 +493,58 @@ td.c-primary{min-width:140px}
 .b-bar{height:4px;background:var(--bg3);border-radius:2px;overflow:hidden}
 .b-bar-f{height:100%;background:var(--accent);border-radius:2px;transition:width .4s}
 .b-breakdown{font-size:10px;font-family:var(--fm);color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px}
+.b-win-toggle{display:flex;align-items:center;gap:5px;background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.2);border-radius:10px;padding:3px 9px;cursor:pointer;transition:all .18s}
+.b-win-toggle:hover{background:rgba(249,115,22,.16)}
+.b-win-toggle span{font-size:9px;font-family:var(--fm);color:var(--text3);letter-spacing:.06em;font-weight:600;text-transform:uppercase;transition:color .18s}
+.b-win-toggle-dot{width:5px;height:5px;border-radius:50%;background:var(--border3);flex-shrink:0;transition:background .18s}
+.b-win-toggle.on .b-win-toggle-dot{background:var(--accent)}
+.b-win-toggle.on span{color:var(--accent)}
+.b-win-toggle.on{background:rgba(249,115,22,.12);border-color:rgba(249,115,22,.28)}
+.b-head-right{display:flex;align-items:center;gap:8px}
+.b-global-sel-all{font-size:9px;font-family:var(--fm);letter-spacing:.04em;text-transform:uppercase;background:rgba(249,115,22,.1);border:1px solid rgba(249,115,22,.25);color:var(--accent);border-radius:8px;padding:3px 9px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.b-global-sel-all:hover{background:rgba(249,115,22,.18)}
+.bm-sub-header.extras-header{cursor:pointer;user-select:none}
+.bm-sub-header.extras-header:hover{filter:brightness(1.15)}
+.bm-sub-name{font-size:10px;font-family:var(--fh);font-weight:600;color:var(--sub-text);letter-spacing:.04em;flex:1}
+.bm-extras-chevron{font-size:9px;color:var(--sub-text);opacity:.6;transition:transform .18s;flex-shrink:0}
+.bm-extras-chevron.open{transform:rotate(90deg)}
+.bm-sel-all{font-size:9px;font-family:var(--fm);background:transparent;border:1px solid var(--sub-border);color:var(--sub-text);border-radius:8px;padding:1px 6px;cursor:pointer;opacity:.75;transition:opacity .15s;flex-shrink:0;white-space:nowrap}
+.bm-sel-all:hover{opacity:1}
+.bm-cat-header{display:flex;align-items:center;gap:6px;padding:7px 14px 5px;border-bottom:1px solid var(--border);background:var(--bg2);position:sticky;top:0;z-index:3}
+.bm-cat-label{font-size:10px;font-family:var(--fh);font-weight:700;color:var(--text2);letter-spacing:.04em;flex:1;text-transform:uppercase}
+.bm-cat-sel-all{font-size:9px;font-family:var(--fm);background:transparent;border:1px solid var(--border2);color:var(--text3);border-radius:8px;padding:2px 8px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.bm-cat-sel-all:hover{border-color:var(--border3);color:var(--text2)}
+.bm-impact-bar{width:40px;height:3px;background:var(--bg3);border-radius:2px;flex-shrink:0;overflow:hidden}
+.bm-impact-fill{height:100%;border-radius:2px;transition:width .3s}
+.b-spotlight{display:none;flex-shrink:0;border-bottom:1px solid var(--border);background:var(--bg2);padding:18px 28px;gap:24px;align-items:center}
+.b-spotlight.visible{display:flex}
+.b-shot-wrap{position:relative;flex-shrink:0;width:100px;height:76px;border-radius:6px;overflow:hidden;background:var(--bg3);border:1px solid var(--border)}
+.b-shot-img{width:100%;height:100%;object-fit:cover;object-position:top center;display:block}
+.b-shot-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:26px;opacity:.18}
+.b-spot-info{display:flex;flex-direction:column;gap:4px;min-width:0}
+.b-spot-rank-label{font-size:9px;font-family:var(--fm);color:var(--accent);letter-spacing:.08em;text-transform:uppercase;font-weight:600}
+.b-spot-name{font-family:var(--fh);font-size:20px;font-weight:700;color:var(--text);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-spot-meta{font-size:11px;font-family:var(--fm);color:var(--text3)}
+.b-spot-score{display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.2);border-radius:8px;padding:10px 16px;flex-shrink:0}
+.b-spot-score-val{font-family:var(--fm);font-size:24px;font-weight:700;color:var(--accent);line-height:1}
+.b-spot-score-label{font-size:9px;font-family:var(--fm);color:var(--accent);opacity:.7;letter-spacing:.06em;text-transform:uppercase;margin-top:3px}
+.b-donut-wrap{flex-shrink:0;position:relative;width:90px;height:90px}
+.b-donut-svg{width:100%;height:100%;transform:rotate(-90deg)}
+.b-donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+.b-donut-center-n{font-family:var(--fm);font-size:14px;font-weight:700;color:var(--text)}
+.b-donut-center-label{font-size:8px;font-family:var(--fm);color:var(--text3);letter-spacing:.04em;text-transform:uppercase}
+.b-legend{display:flex;flex-direction:column;gap:5px;flex:1;min-width:0;max-height:90px;overflow-y:auto}
+.b-legend::-webkit-scrollbar{width:2px}
+.b-legend::-webkit-scrollbar-thumb{background:var(--border2)}
+.b-legend-row{display:flex;align-items:center;gap:6px;min-width:0}
+.b-legend-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.b-legend-name{font-size:10px;font-family:var(--fm);color:var(--text2);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b-legend-bar-wrap{width:36px;height:2px;background:var(--bg3);border-radius:1px;flex-shrink:0;overflow:hidden}
+.b-legend-bar-fill{height:100%;border-radius:1px}
+.b-legend-pct{font-size:10px;font-family:var(--fm);color:var(--text3);flex-shrink:0}
+.b-row-selected td{background:rgba(249,115,22,.06)!important}
+.b-row-selected .b-pname{color:var(--accent)}
+.b-chip-r{font-family:var(--fm);font-size:9px;color:var(--accent);opacity:.8}
 .builder-empty{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   height:100%;color:var(--text3);font-family:var(--fm);font-size:12px;gap:8px;
@@ -499,6 +570,7 @@ td.c-primary{min-width:140px}
       <select class="season-select" id="season-select"></select>
     </div>
   </div>
+  <a href="stat_chart.html" target="_blank" class="info-link" title="Methodology & stat reference">Info</a>
 </header>
 
 <!-- Category tab bar -->
@@ -583,6 +655,7 @@ td.c-primary{min-width:140px}
   <div class="tt-formula" id="tt-formula" style="display:none"></div>
   <div class="tt-desc" id="tt-desc"></div>
   <div class="tt-source" id="tt-source"></div>
+  <div id="tt-weights" style="display:none"></div>
 </div>
 
 <!-- Settings drawer -->
@@ -605,7 +678,7 @@ td.c-primary{min-width:140px}
       <div class="sd-section-title">Sub-Category Score Thresholds</div>
       <div class="sd-note">Players below these thresholds are excluded from sub-category Overall scores. Lower the threshold to include more players.</div>
       <br>
-      <div class="sd-row"><span class="sd-row-label">Passing — min AST/g</span><div class="sd-row-input"><input type="number" id="sd-ast-pg" value="2.0" min="0" max="10" step="0.5"><span class="sd-row-unit">AST/g</span></div></div>
+      <div class="sd-row"><span class="sd-row-label">Passing — min AST/g</span><div class="sd-row-input"><input type="number" id="sd-ast-pg" value="1.5" min="0" max="10" step="0.5"><span class="sd-row-unit">AST/g</span></div></div>
       <div class="sd-row"><span class="sd-row-label">Ball Handling — min Touches/g</span><div class="sd-row-input"><input type="number" id="sd-touches-pg" value="40" min="0" max="120" step="5"><span class="sd-row-unit">TCH/g</span></div></div>
       <div class="sd-row"><span class="sd-row-label">Creation — min Drives/g</span><div class="sd-row-input"><input type="number" id="sd-drives-pg" value="2.0" min="0" max="20" step="0.5"><span class="sd-row-unit">DRV/g</span></div></div>
       <div class="sd-row"><span class="sd-row-label">Finishing — min Paint FGA/g</span><div class="sd-row-input"><input type="number" id="sd-paint-fga" value="2.0" min="0" max="15" step="0.5"><span class="sd-row-unit">FGA/g</span></div></div>
@@ -649,11 +722,12 @@ td.c-primary{min-width:140px}
   <div class="builder-panel">
     <div class="builder-panel-head">
       <h2>⚗ Composite Builder</h2>
-      <div style="display:flex;align-items:center;gap:8px">
-        <div class="b-mode-toggle" id="b-mode-toggle" title="Impact Mode weights each metric by how strongly it predicts winning (Pearson r with Net Pts/100). Skill Mode uses flat percentile averages.">
-          <button class="b-mode-btn on" data-mode="impact">Impact</button>
-          <button class="b-mode-btn" data-mode="skill">Skill</button>
-        </div>
+      <div class="b-head-right">
+        <button class="b-global-sel-all" id="b-global-sel-all">Select All</button>
+        <button class="b-win-toggle on" id="b-win-toggle">
+          <div class="b-win-toggle-dot"></div>
+          <span>Win-Weighted</span>
+        </button>
         <button class="builder-close" id="builder-close">✕</button>
       </div>
     </div>
@@ -689,6 +763,30 @@ td.c-primary{min-width:140px}
       </div>
       <span class="builder-result-count" id="b-result-count"></span>
     </div>
+    <div class="b-spotlight" id="b-spotlight">
+      <div class="b-shot-wrap">
+        <img class="b-shot-img" id="b-spot-img" src="" alt="" onerror="this.style.opacity=0">
+        <div class="b-shot-fallback">🏀</div>
+      </div>
+      <div class="b-spot-info">
+        <div class="b-spot-rank-label" id="b-spot-rank-label">#1 Match</div>
+        <div class="b-spot-name" id="b-spot-name">—</div>
+        <div class="b-spot-meta" id="b-spot-meta"></div>
+      </div>
+      <div class="b-spot-score">
+        <div class="b-spot-score-val" id="b-spot-score-val">—</div>
+        <div class="b-spot-score-label">composite</div>
+      </div>
+      <div class="b-donut-wrap">
+        <svg class="b-donut-svg" id="b-donut-svg" viewBox="0 0 100 100"></svg>
+        <div class="b-donut-center">
+          <div class="b-donut-center-n" id="b-donut-n">—</div>
+          <div class="b-donut-center-label">metrics</div>
+        </div>
+      </div>
+      <div class="b-legend" id="b-legend"></div>
+    </div>
+
     <div class="builder-table-wrap">
       <div class="builder-empty" id="builder-empty">
         <div class="builder-empty-icon">⚗</div>
@@ -719,8 +817,7 @@ const DEFAULTS = {
   threeAll:     1.5,
   c3:           0.5,
   ab3:          1.0,
-  // Sub-composite thresholds
-  minAstPg:     2.0,
+  minAstPg:     1.5,
   minTouchesPg: 40.0,
   minDrivesPg:  2.0,
   minPaintFga:  2.0,
@@ -728,9 +825,31 @@ const DEFAULTS = {
   min3ptFga:    1.5,
 };
 
+// ── Composite weight store ─────────────────────────────────────────────────
+// Populated on startup and season change via fetchCompositeWeights()
+const COMPOSITE_WEIGHTS = {
+  subcomp: {},   // {comp_name: {stat_key: {weight, r}}}
+  catcomp: {},   // {cat_name:  {sub_key:  {weight, r}}}
+  meta:    {},   // {season, n_players, min_minutes_corr}
+};
+
+async function fetchCompositeWeights(season) {
+  try {
+    const res  = await fetch(`${API}/api/composite-weights?season=${season}`);
+    const data = await res.json();
+    COMPOSITE_WEIGHTS.subcomp = data.subcomp_weights || {};
+    COMPOSITE_WEIGHTS.catcomp = data.catcomp_weights || {};
+    COMPOSITE_WEIGHTS.meta    = {
+      season:           data.season,
+      n_players:        data.n_players,
+      min_minutes_corr: data.min_minutes_corr,
+    };
+  } catch(e) {
+    console.warn('Could not load composite weights:', e);
+  }
+}
+
 // ── Navigation structure ──────────────────
-// Each category has sub-categories.
-// Each sub-category has an 'overall' composite key and a list of metrics.
 const NAV = {
   scoring: {
     label: 'Scoring',
@@ -754,7 +873,6 @@ const NAV = {
         key:'shooting', label:'Shooting',
         overall: { key:'shooting_score', label:'Shooting Avg Percentile', fmt:'1f', isOverall:true },
         metrics: [
-          { key:'cs_efg_pct',               label:'Catch & Shoot EFG%',   fmt:'pct', badge:'C&S'  },
           { key:'all3_efg_vw',              label:'3-Pointers EFG+',       fmt:'3f',  badge:'3PT', is3pt:true },
           { key:'midrange_efg_vw',          label:'Midrange EFG+',         fmt:'3f',  badge:'MID'  },
           { key:'sq_fg_pct_above_expected', label:'FG% Above Expected',    fmt:'3f',  badge:'FG+'  },
@@ -779,6 +897,8 @@ const NAV = {
         overall: null,
         metrics: [
           { key:'ts_pct',               label:'True Shooting %',    fmt:'pct', badge:'TS%'  },
+          { key:'cs_efg_pct',           label:'Catch & Shoot EFG%', fmt:'pct', badge:'C&S'  },
+          { key:'spotup_efg_pct',       label:'Spot-Up EFG%',       fmt:'pct', badge:'SPT'  },
           { key:'efg_pct',              label:'Eff FG%',             fmt:'pct', badge:'EFG%' },
           { key:'sq_avg_shot_quality',  label:'Avg Shot Quality',    fmt:'3f',  badge:'SQ'   },
           { key:'creation_premium',     label:'Creation Delta',      fmt:'3f',  badge:'CΔ'   },
@@ -936,11 +1056,10 @@ const NAV = {
         key:'activity', label:'Activity',
         overall: { key:'activity_score', label:'Activity Avg Percentile', fmt:'1f', isOverall:true },
         metrics: [
-          { key:'motor_score',      label:'Motor Score',   fmt:'2f', badge:'MOTR' },
           { key:'hustle_composite', label:'Hustle Comp',   fmt:'2f', badge:'COMP' },
           { key:'screen_assist_rate',label:'Scr AST Pts/75',fmt:'2f',badge:'SCR'  },
         ],
-        cols:['deflections','charges_drawn','stl','motor_score'],
+        cols:['deflections','charges_drawn','stl','hustle_composite'],
       },
       {
         key:'rebounding_h', label:'Rebounding',
@@ -956,6 +1075,7 @@ const NAV = {
         key:'hustle_extras', label:'Extras',
         overall: null,
         metrics: [
+          { key:'motor_score',        label:'Motor Score',    fmt:'2f', badge:'MOTR' },
           { key:'deflections',        label:'Deflections',    fmt:'1f', badge:'DEFL' },
           { key:'charges_drawn',      label:'Charges Drawn',  fmt:'1f', badge:'CHG'  },
           { key:'def_disruption_rate',label:'Disruption/75',  fmt:'2f', badge:'DISR' },
@@ -979,7 +1099,7 @@ const NAV = {
       const season     = ST?.season || '2024-25';
       const showDarko  = season >= '2025-26';
       const showLebron = season >= '2025-26';
-      const showNetPts = true;  // ESPN data available for all seasons
+      const showNetPts = true;
 
       const DARKO_OPTIONS = [
         { key:'darko_dpm',  label:'DPM (Overall)', fmt:'2f' },
@@ -1078,7 +1198,7 @@ const COL_DEF = {
   def_spotup_ppp:{label:'D-SU',fmt:'2f',cls:'lower-better'},
   def_pnr_roll_ppp:{label:'D-ROLL',fmt:'2f',cls:'lower-better'},
   matchup_def_fg_pct:{label:'MU-FG%',fmt:'pct',cls:'lower-better'},
-  finishing_score:{formula:'Avg percentile of: Paint EFG+, Paint Scoring Rate, Pts/Drive, Drive Foul Rate, Roll Man PPP, Post PPP, Transition PPP. Min 1 of 7.',desc:'Finishing sub-composite (position-normalized). Transition PPP uses ≥ 2.0 FGA/g gate. Requires paint_efg_vw OR paint_scoring_rate non-NULL.',source:'Composite'},
+  finishing_score:{formula:'Win-corr weighted avg of: Paint EFG+, Paint Scoring Rate, Pts/Drive, Drive Foul Rate, Roll Man PPP, Post PPP, Transition PPP',desc:'Finishing sub-composite (position-normalized). Stats weighted by raw |r| with net_pts100. Min 2 of 7 non-null. Gate: 3 paint touches/g. Requires paint_efg_vw OR paint_scoring_rate non-null.',source:'Composite'},
   def_post_ppp:{formula:'Post-up PPP allowed (Synergy, defensive)',desc:'Points per possession allowed on post-up plays. Lower is better — inverted percentile used in Interior Defense composite. Gate: ≥ 1.5 post poss/g.',source:'Synergy'},
   def_spotup_ppp:{formula:'Spot-up PPP allowed (Synergy, defensive)',desc:'Points per possession allowed on catch-and-shoot / spot-up plays. Lower is better — inverted percentile in Perimeter Defense composite. Gate: ≥ 1.5 spotup poss/g.',source:'Synergy'},
   def_pnr_roll_ppp:{formula:'PnR Roll Man PPP allowed (Synergy, defensive)',desc:'Points per possession allowed defending the roll man. Lower is better — inverted percentile in Interior Defense composite. Gate: ≥ 1.5 poss/g.',source:'Synergy'},
@@ -1117,7 +1237,6 @@ const ST = {
   maxVal:  null,
   season:  '2024-25',
   threePtSub: 'all3_efg_vw',
-  // Sub-composite thresholds
   minAstPg:     2.0,
   minTouchesPg: 40.0,
   minDrivesPg:  2.0,
@@ -1145,7 +1264,6 @@ function numCls(key, val) {
   return '';
 }
 
-// ── Get current cols for table ────────────
 function currentCols() {
   const cat = NAV[ST.cat];
   if (ST.sub) {
@@ -1155,7 +1273,6 @@ function currentCols() {
   return cat.cols;
 }
 
-// ── Effective sort key (handles 3PT sub) ──
 function effectiveSort() {
   const is3pt = ['all3_efg_vw','corner3_efg_vw','above_break3_efg_vw'].includes(ST.sort);
   return is3pt ? ST.threePtSub : ST.sort;
@@ -1173,7 +1290,7 @@ const METRIC_INFO = {
   corner3_efg_vw:{formula:'(Corner EFG% − Lg Avg) × FGA/g',desc:'Volume-weighted corner 3 efficiency delta.',source:'Shot Zones'},
   above_break3_efg_vw:{formula:'(AB3 EFG% − Lg Avg) × FGA/g',desc:'Volume-weighted above-break 3 efficiency delta.',source:'Shot Zones'},
   pull_up_efg_pct:{formula:'(PU FGM + 0.5 × PU FG3M) / PU FGA',desc:'EFG% on pull-up jump shots — self-creation ability.',source:'Tracking'},
-  cs_efg_pct:{formula:'(CS FGM + 0.5 × CS FG3M) / CS FGA',desc:'EFG% on catch-and-shoot attempts.',source:'Tracking'},
+  cs_efg_pct:{formula:'(CS FGM + 0.5 × CS FG3M) / CS FGA',desc:'EFG% on catch-and-shoot attempts. Display only in Extras — not in the Shooting composite.',source:'Tracking'},
   creation_premium:{formula:'Pull-Up EFG% − C&S EFG%',desc:'Efficiency gap between creating your own shot vs catching and shooting.',source:'Computed'},
   paint_scoring_rate:{formula:'Paint PTS / Paint Touches',desc:'Points per paint touch.',source:'Computed'},
   ft_rate:{formula:'FTA / FGA',desc:'Free throw rate — how often a player gets to the line.',source:'Computed'},
@@ -1186,7 +1303,7 @@ const METRIC_INFO = {
   ast_conversion_rate:{formula:'AST / Potential AST',desc:'How often potential assists are converted into actual assists.',source:'Computed'},
   pot_ast_per_tov:{formula:'(Pot AST/G) / (Bad Pass TOV/G)',desc:'Potential assists per bad-pass turnover. Uses PBP-derived data.',source:'Computed + PBP'},
   pass_quality_index:{formula:'(AST Pts Created/G) / (Passes Made/G)',desc:'Points created per pass made.',source:'Computed'},
-  ast_pts_created_pg:{formula:'AST Pts Created / GP',desc:'Points created for teammates via assists per game. Combines assist volume with shot quality assisted — counts the value of what teammates score off your passes.',source:'NBA Tracking'},
+  ast_pts_created_pg:{formula:'AST Pts Created / GP',desc:'Points created for teammates via assists per game.',source:'NBA Tracking'},
   playmaking_gravity:{formula:'(AST Pts Created/G) / (ToP / MPG)',desc:'Points created per unit of time of possession.',source:'Computed'},
   pass_to_score_pct:{formula:'AST / (Passes Made / GP)',desc:'What % of passes result in an assist.',source:'Computed'},
   secondary_ast_per75:{formula:'(Sec AST / GP) × (75 / Poss/G)',desc:'Hockey assist — pass to the player who then passes for an assist.',source:'Computed'},
@@ -1195,24 +1312,24 @@ const METRIC_INFO = {
   pnr_roll_ppp:{formula:'Roll Man Points Per Possession',desc:'Efficiency as the roll man in pick-and-roll.',source:'Synergy'},
   post_ppp:{formula:'Post Up Points Per Possession',desc:'Scoring efficiency on post-up plays.',source:'Synergy'},
   drive_and_dish_rate:{formula:'Drive Passes / (Drive FGA + Drive TOV + Drive Passes)',desc:'On drives, how often a player passes rather than shooting or turning it over.',source:'Computed'},
-  ft_ast_per75:{formula:'(FT AST / GP) × (75 / Poss/G)',desc:'Free-throw assists per 75 possessions. Captures post passers and PnR passers whose value shows up at the free-throw line.',source:'Computed'},
-  drive_ast_per75:{formula:'(Drive AST / GP) × (75 / Poss/G)',desc:'Assists generated specifically off drives per 75 possessions. Requires ≥ 2.0 drives/g.',source:'Computed'},
-  drive_passes_per75:{formula:'(Drive Passes / GP) × (75 / Poss/G)',desc:'Passes made out of drives per 75 possessions. Display metric — shows drive playmaking volume without penalising scorers.',source:'Computed'},
-  lost_ball_tov_pg:{formula:'(Lost Ball TOV / GP) / (Touches / GP) × 100',desc:'Lost ball turnovers per 100 touches — fumbles, strips, and travels while dribbling, normalized by how much a player handles the ball. Lower is better. Used inverted in Decision Making composite.',source:'Computed'},
-  bad_pass_tov_pg:{formula:'(Bad Pass TOV / GP) / (Touches / GP) × 100',desc:'Bad pass turnovers per 100 touches, normalized by how much a player handles the ball. Lower is better. Used inverted in Decision Making composite. Also drives the denominator in Pot AST / BP TOV.',source:'Computed'},
-  gravity_score:{formula:'AVGGRAVITYSCORE (NBA)',desc:'Average gravity score from NBA tracking — how much defenders shift toward a player. Only counts as a boost in the Creation composite (above-median players get a percentile; below-median is treated as NULL so it can only help, never hurt).',source:'NBA Stats'},
-  gravity_creation:{formula:'On-Ball Perimeter Gravity × MPG',desc:'Display metric — on-ball perimeter gravity × minutes per game. Mirrors the GV-MP column on NBA.com. Not used in composite directly; gravity_score (with above-median gate) is used instead.',source:'Computed'},
-  gravity_onball_perimeter:{formula:'AVGONBALLPERIMETERGRAVITYSCORE (NBA)',desc:'Gravity score specifically when handling the ball on the perimeter. Measures on-ball threat level.',source:'NBA Stats'},
-  gravity_offball_perimeter:{formula:'AVGOFFBALLPERIMETERGRAVITYSCORE (NBA)',desc:'Gravity score when moving off the ball on the perimeter. Measures off-ball spacing threat.',source:'NBA Stats'},
-  leverage_defense:{formula:'DEFENSE (NBA Leverage)',desc:'On/off defensive leverage — how much a player\'s presence improves team defense. Used in Overall Defense composite alongside Def Win Shares.',source:'NBA Stats'},
+  ft_ast_per75:{formula:'(FT AST / GP) × (75 / Poss/G)',desc:'Free-throw assists per 75 possessions.',source:'Computed'},
+  drive_ast_per75:{formula:'(Drive AST / GP) × (75 / Poss/G)',desc:'Assists generated specifically off drives per 75 possessions.',source:'Computed'},
+  drive_passes_per75:{formula:'(Drive Passes / GP) × (75 / Poss/G)',desc:'Passes made out of drives per 75 possessions.',source:'Computed'},
+  lost_ball_tov_pg:{formula:'(Lost Ball TOV / GP) / (Touches / GP) × 100',desc:'Lost ball turnovers per 100 touches. Lower is better. Used inverted in Decision Making composite.',source:'Computed'},
+  bad_pass_tov_pg:{formula:'(Bad Pass TOV / GP) / (Touches / GP) × 100',desc:'Bad pass turnovers per 100 touches. Lower is better.',source:'Computed'},
+  gravity_score:{formula:'AVGGRAVITYSCORE (NBA)',desc:'Average gravity score from NBA tracking — how much defenders shift toward a player.',source:'NBA Stats'},
+  gravity_creation:{formula:'On-Ball Perimeter Gravity × MPG',desc:'Display metric — on-ball perimeter gravity × minutes per game.',source:'Computed'},
+  gravity_onball_perimeter:{formula:'AVGONBALLPERIMETERGRAVITYSCORE (NBA)',desc:'Gravity score specifically when handling the ball on the perimeter.',source:'NBA Stats'},
+  gravity_offball_perimeter:{formula:'AVGOFFBALLPERIMETERGRAVITYSCORE (NBA)',desc:'Gravity score when moving off the ball on the perimeter.',source:'NBA Stats'},
+  leverage_defense:{formula:'DEFENSE (NBA Leverage)',desc:'On/off defensive leverage — how much a player\'s presence improves team defense.',source:'NBA Stats'},
   leverage_onball_def:{formula:'ONBALLDEF (NBA Leverage)',desc:'On-ball defensive leverage — impact when guarding the ball handler directly.',source:'NBA Stats'},
-  def_ws:{formula:'Defensive Win Shares (NBA Advanced)',desc:'Estimated wins contributed through defensive play. Position-normalized percentile factors directly into Defender Score alongside leverage_defense, perimeter, and interior sub-scores.',source:'NBA Stats'},
+  def_ws:{formula:'Defensive Win Shares (NBA Advanced)',desc:'Estimated wins contributed through defensive play.',source:'NBA Stats'},
   off_ws:{formula:'Offensive Win Shares (NBA Advanced)',desc:'Estimated wins contributed through offensive play. Display only.',source:'NBA Stats'},
   ws_48:{formula:'Win Shares per 48 minutes (NBA Advanced)',desc:'WS normalized for playing time. Display only.',source:'NBA Stats'},
-  leverage_shooting:{formula:'SHOOTING (NBA Leverage)',desc:'On/off shooting leverage — how much a player\'s presence changes team shooting efficiency. Used in Shot Creation composite.',source:'NBA Stats'},
-  leverage_full:{formula:'FULL (NBA Leverage)',desc:'Full leverage score — combined offensive and defensive impact from NBA Leverage data.',source:'NBA Stats'},
-  sq_avg_shot_quality:{formula:'AVGSHOTQUALITY (NBA)',desc:'Average quality of shots taken, based on shot location, defender distance, and body movement. Higher = harder shots attempted.',source:'NBA Stats'},
-  sq_fg_pct_above_expected:{formula:'FGPCTABOVEEXPECTED (NBA)',desc:'FG% above what was expected given shot difficulty. Positive = making harder shots than average. Key indicator of shot-making ability.',source:'NBA Stats'},
+  leverage_shooting:{formula:'SHOOTING (NBA Leverage)',desc:'On/off shooting leverage — how much a player\'s presence changes team shooting efficiency.',source:'NBA Stats'},
+  leverage_full:{formula:'FULL (NBA Leverage)',desc:'Full leverage score — combined offensive and defensive impact.',source:'NBA Stats'},
+  sq_avg_shot_quality:{formula:'AVGSHOTQUALITY (NBA)',desc:'Average quality of shots taken, based on shot location, defender distance, and body movement.',source:'NBA Stats'},
+  sq_fg_pct_above_expected:{formula:'FGPCTABOVEEXPECTED (NBA)',desc:'FG% above what was expected given shot difficulty. Positive = making harder shots than average.',source:'NBA Stats'},
   pnr_bh_ppp:{formula:'PnR PTS / PnR Poss',desc:'Points per possession as ball handler in pick-and-roll.',source:'Synergy'},
   transition_ppp:{formula:'Trans PTS / Trans Poss',desc:'Points per possession in transition.',source:'Synergy'},
   def_delta_overall:{formula:'Normal Opp FG% − Actual Opp FG%',desc:'How much a player reduces opponent FG% vs their normal shooting.',source:'Defender Shooting'},
@@ -1238,65 +1355,160 @@ const METRIC_INFO = {
   bpm_computed:{formula:'−2.611 + 0.318×AST% + ...',desc:'Box Plus/Minus approximation. Points contributed per 100 possessions above average.',source:'Computed'},
   net_rating:{formula:'Off Rtg − Def Rtg',desc:'Net rating while on the floor.',source:'Advanced'},
   pie:{formula:'(PTS+FGM+FTM−FGA−FTA+DREB+0.5×OREB+AST+STL+0.5×BLK−PF−TOV) / Total',desc:'Player Impact Estimate.',source:'Advanced'},
-  net_pts100:{formula:'Luck-adjusted on/off net rating per 100 possessions',desc:'Net Points per 100 — ESPN Analytics impact metric measuring how the team net rating changes with the player on the floor, luck-adjusted.',source:'ESPN Analytics'},
+  net_pts100:{formula:'Luck-adjusted on/off net rating per 100 possessions',desc:'Net Points per 100 — ESPN Analytics impact metric.',source:'ESPN Analytics'},
   o_net_pts100:{formula:null,desc:'Offensive Net Points per 100 — offensive component of ESPN Net Points.',source:'ESPN Analytics'},
   d_net_pts100:{formula:null,desc:'Defensive Net Points per 100 — defensive component of ESPN Net Points.',source:'ESPN Analytics'},
-  darko_odpm:{formula:null,desc:'DARKO Offensive DPM — offensive component of DARKO.',source:'DARKO (darko.app)'},
-  darko_ddpm:{formula:null,desc:'DARKO Defensive DPM — defensive component of DARKO.',source:'DARKO (darko.app)'},
+  darko_odpm:{formula:null,desc:'DARKO Offensive DPM.',source:'DARKO (darko.app)'},
+  darko_ddpm:{formula:null,desc:'DARKO Defensive DPM.',source:'DARKO (darko.app)'},
   darko_box:{formula:null,desc:'DARKO Box DPM — box score component only, without RAPM adjustment.',source:'DARKO (darko.app)'},
-  lebron:{formula:'Box prior (boxPIPM) + luck-adjusted RAPM + offensive archetypes',desc:'LEBRON (Luck-adjusted Estimate using a Box prior Regularized ON-off) — overall impact in points per 100 possessions above average.',source:'BBall Index'},
-  o_lebron:{formula:null,desc:'Offensive LEBRON — offensive component of the LEBRON metric.',source:'BBall Index'},
-  d_lebron:{formula:null,desc:'Defensive LEBRON — defensive component of the LEBRON metric.',source:'BBall Index'},
-  war:{formula:'LEBRON / league wins-per-point constant (~2.7)',desc:'Wins Above Replacement — estimated wins contributed above a replacement-level player.',source:'BBall Index'},
+  lebron:{formula:'Box prior (boxPIPM) + luck-adjusted RAPM + offensive archetypes',desc:'LEBRON — overall impact in points per 100 possessions above average.',source:'BBall Index'},
+  o_lebron:{formula:null,desc:'Offensive LEBRON.',source:'BBall Index'},
+  d_lebron:{formula:null,desc:'Defensive LEBRON.',source:'BBall Index'},
+  war:{formula:'LEBRON / league wins-per-point constant (~2.7)',desc:'Wins Above Replacement.',source:'BBall Index'},
   paint_fga_pg:{formula:null,desc:'Paint field goal attempts per game.',source:'Shot Zones'},
   pct_uast_fgm:{formula:'Unassisted FGM / Total FGM',desc:'% of made field goals that were unassisted — indicates self-creation.',source:'Tracking'},
-  // Composites — percentile-averaging methodology
-  creator_score:{formula:'Avg percentile of: Finishing score + Shooting score + Creation score',desc:'Overall Scoring composite. Average of sub-category percentile scores across Finishing, Shooting, and Shot Creation. Requires qualifying in all three.',source:'Composite'},
-  playmaker_score:{formula:'Avg percentile of available sub-scores: Passing + Creation + Ball Handling',desc:'Overall Playmaking composite. Requires passing_score (gate: 2 AST/g + 3 pot AST/g + 30 GP, all positions). Creation averages in when available (gate: 3 pot AST/g + 40 touches/g + 30 GP). Ball Handling averages in when available (gate: 4 drives/g + 40 touches/g + 30 GP).',source:'Composite'},
-  defender_score:{formula:"Avg of available: Perimeter Def + Interior Def + Leverage Defense + Def Win Shares + Matchup FG% Allowed (inv)",desc:"Overall Defense composite (position-normalized). Perimeter sub-score (delta 3PT/overall, disruption, contested shots, steals, spot-up coverage), interior sub-score (rim protection, blocks, DREB%, post/roll coverage), plus leverage_defense, def_ws, and matchup_def_fg_pct. All position-normalized.",source:"Composite"},
-  hustle_score:{formula:'Avg percentile of: Activity score + Rebounding score',desc:'Overall Hustle composite (position-normalized). Average of Activity and Rebounding sub-scores.',source:'Composite'},
-  finishing_score:{formula:'Avg percentile of: Paint EFG+, Paint Scoring Rate, Pts/Drive, Drive Foul Rate, Roll Man PPP, Post PPP, Transition PPP. Min 1 of 7.',desc:'Finishing sub-composite (position-normalized). Transition PPP uses ≥ 2.0 FGA/g gate. Requires paint_efg_vw OR paint_scoring_rate non-NULL.',source:'Composite'},
-  shooting_score:{formula:'Avg percentile (league-wide) of: Spotup EFG%, All3 EFG+, Midrange EFG+, FG% Above Expected. Min 2 of 4 non-NULL.',desc:'Shooting sub-composite. FG% Above Expected (130 players, NBA Stats) measures shot-making quality independent of shot selection — being below expected hurts your percentile. Spotup only counted if above lg avg C&S EFG% (0.535).',source:'Composite'},
-  shot_creation_score:{formula:'Avg percentile (league-wide) of: Unassisted FGM%, ISO PPP, Pull-Up EFG%, Drive FG%, USG%, TOV% (inv), Leverage Shooting. Min 2 of 7 non-NULL.',desc:'Shot Creation sub-composite (Scoring category). Self-creation ability plus shooting leverage impact (how much your presence moves team shooting on/off). Gate: min 2.0 drives/g.',source:'Composite'},
-  creation_score:{formula:'Avg percentile (league-wide) of: Leverage Creation, AST Pts Created/G, FT AST/75. Min 2 of 3 non-NULL.',desc:'Playmaking Creation sub-composite. Style-agnostic — all three measure how much scoring you create for others regardless of method. Jokic, Draymond, and LeBron-types rank appropriately via FT AST and AST pts created. Gate: 3 pot AST/g + 40 touches/g + 30 GP.',source:'Composite'},
-  passing_score:{formula:'Avg percentile (league-wide) of: Pot AST/BP TOV (required), AST%, Pass Quality Index. Min 2 of 3 non-NULL.',desc:'Passing sub-composite. Open to all positions. Pot AST per bad pass TOV is required. Gate: 2 AST/g + 3 pot AST/g + 30 GP.',source:'Composite'},
-  decision_making_score:{formula:'Avg percentile (league-wide) of: Lost Ball/100 Touches (inv), P&R BH PPP. BOTH required.',desc:'Ball Handling sub-composite. Requires both metrics — lost ball security (inverted, per 100 touches) AND PnR BH efficiency (≥ 3.0 PnR BH FGA/g). Players without sufficient PnR volume get NULL. Gate: 4 drives/g + 40 touches/g + 30 GP.',source:'Composite'},
-  perimeter_def_score:{formula:'Avg percentile (position-normalized) of: Def Delta 3PT, Disruption/75, Steals, Def Delta Overall',desc:'Perimeter Defense sub-composite.',source:'Composite'},
-  interior_def_score:{formula:'Avg percentile (position-normalized) of: Rim Protection, Def Delta 2PT, DREB%, Blocks, Box Out/75',desc:'Interior Defense sub-composite. Gate: min 50 rim FGA defended.',source:'Composite'},
-  activity_score:{formula:'Avg percentile (position-normalized) of: Motor Score, Hustle Composite, Deflections, Charges Drawn',desc:'Activity sub-composite.',source:'Composite'},
-  rebounding_score:{formula:'Avg percentile (position-normalized) of: DREB%, Box Out/75, Loose Balls/75',desc:'Rebounding sub-composite.',source:'Composite'},
+  // Composites
+  creator_score:{formula:'Flat avg of available sub-scores: Finishing + Shooting + Shot Creation',desc:'Overall Scoring composite. Requires shot_creation_score. Shooting: Pull-Up EFG%, All3 EFG+, Midrange EFG+, FG% Above Expected. C&S EFG% is display-only in Extras.',source:'Composite'},
+  playmaker_score:{formula:'Best 2 of available sub-scores: Passing + Creation + Ball Handling',desc:'Overall Playmaking composite. Requires passing_score (gate: 1.5 AST/g + 3 pot AST/g). Takes the best 2 of however many sub-scores qualify — ball handling never penalises a player who does not run PnR-BH.',source:'Composite'},
+  defender_score:{formula:'Flat avg of available inputs: Perimeter Def + Interior Def + Leverage Defense + Def Win Shares + Matchup FG% (inv)',desc:'Overall Defense composite. Flat unweighted average of all non-null inputs. No anchors. Sub-composites are win-corr weighted internally.',source:'Composite'},
+  hustle_score:{formula:'Flat avg of sub-scores: Activity + Rebounding',desc:'Overall Hustle composite. Flat unweighted average of activity_score and rebounding_score. Sub-scores are win-corr weighted internally.',source:'Composite'},
+  finishing_score:{formula:'Win-corr weighted avg of: Paint EFG+, Paint Scoring Rate, Pts/Drive, Drive Foul Rate, Roll Man PPP, Post PPP, Transition PPP',desc:'Finishing sub-composite (position-normalized). Each stat weighted by raw |r| with net_pts100. Min 2 of 7 non-null. Gate: 3 paint touches/g. Requires paint_efg_vw OR paint_scoring_rate non-null.',source:'Composite'},
+  shooting_score:{formula:'Win-corr weighted avg of: All3 EFG+, Midrange EFG+, FG% Above Expected',desc:'Shooting sub-composite (league-wide). Stats weighted by raw |r| with net_pts100. Min 2 of 3 non-null. Gate: 3 FGA/g. Catch & Shoot EFG% is display-only in Extras.',source:'Composite'},
+  shot_creation_score:{formula:'Win-corr weighted avg of: Unassisted FGM%, ISO PPP, Drive FG%, USG%, TOV% (inv), Leverage Shooting',desc:'Shot Creation sub-composite. Stats weighted by raw |r| with net_pts100. Min 2 of 6 non-null. Gate: 2 drives/g. Pull-Up EFG% moved to Shooting composite.',source:'Composite'},
+  creation_score:{formula:'Win-corr weighted avg of: Leverage Creation, AST Pts Created/G, FT AST/75',desc:'Playmaking Creation sub-composite. Stats weighted by raw |r| with net_pts100. Min 2 of 3 non-null. Gate: 3 pot AST/g + 40 touches/g.',source:'Composite'},
+  passing_score:{formula:'Win-corr weighted avg of: Pot AST/BP TOV, AST%, Pass Quality Index',desc:'Passing sub-composite. Stats weighted by raw |r| with net_pts100. Min 2 of 3 non-null. Gate: 1.5 AST/g + 3 pot AST/g.',source:'Composite'},
+  decision_making_score:{formula:'Win-corr weighted avg of: Lost Ball/100 Touches (inv), P&R BH PPP',desc:'Ball Handling sub-composite. Min 1 of 2 non-null. Gate: 4 drives/g + 40 touches/g. P&R BH PPP additionally requires pnr_bh_poss/g ≥ 5.0. NOT included in playmaker_score if it would lower it (best 2 of 3 rule).',source:'Composite'},
+  perimeter_def_score:{formula:'Win-corr weighted avg of: Def Delta 3PT, Def Delta Overall, Disruption/75, Contested Shots, Steals, Def Spot-Up PPP (inv)',desc:'Perimeter Defense sub-composite (position-normalized). Stats weighted by raw |r| with net_pts100. Min 2 of 6 non-null. No qualifying gate.',source:'Composite'},
+  interior_def_score:{formula:'Win-corr weighted avg of: Rim Protection, Def Delta 2PT, DREB%, Blocks, Def Post PPP (inv), Def Roll PPP (inv)',desc:'Interior Defense sub-composite. Gate: min 50 rim FGA defended.',source:'Composite'},
+  activity_score:{formula:'Win-corr weighted avg of: Hustle Composite, Screen Assist Rate',desc:'Activity sub-composite (position-normalized). Stats weighted by raw |r| with net_pts100. Min 1 of 2 non-null. Motor Score removed — miles/min has a negative win correlation (high-usage stars conserve movement).',source:'Composite'},
+  rebounding_score:{formula:'Win-corr weighted avg of: DREB%, OREB%, Box Out/75',desc:'Rebounding sub-composite (position-normalized). Stats weighted by raw |r| with net_pts100. Min 2 of 3 non-null. No qualifying gate.',source:'Composite'},
 };
+
+// ── Composite key sets for weight tooltip ─
+const CATCOMP_KEYS = new Set([
+  'creator_score','playmaker_score','defender_score','hustle_score',
+]);
+const SUBCOMP_KEYS = new Set([
+  'finishing_score','shooting_score','shot_creation_score',
+  'passing_score','creation_score','decision_making_score',
+  'perimeter_def_score','interior_def_score','activity_score','rebounding_score',
+]);
+
+// Human-readable labels for weight table rows
+const WEIGHT_STAT_LABELS = {
+  paint_efg_vw:'Paint EFG+', paint_scoring_rate:'Paint Scoring Rate',
+  drive_pts_per_drive:'Pts Per Drive', drive_foul_rate:'Drive Foul Rate',
+  pnr_roll_ppp:'Roll Man PPP', post_ppp:'Post PPP', transition_ppp:'Transition PPP',
+  spotup_efg_pct:'C&S EFG%', all3_efg_vw:'All-3 EFG+', midrange_efg_vw:'Midrange EFG+',
+  sq_fg_pct_above_expected:'FG% Above Expected',
+  pct_uast_fgm:'Unassisted FGM%', iso_ppp:'ISO PPP', pull_up_efg_pct:'Pull-Up EFG%',
+  drive_fg_pct:'Drive FG%', usg_pct:'Usage %', tov_pct:'TOV% (inv)',
+  leverage_shooting:'Leverage Shooting',
+  pot_ast_per_tov:'Pot AST / BP TOV', ast_pct:'Assist %', pass_quality_index:'Pass Quality Index',
+  leverage_creation:'Leverage Creation', ast_pts_created_pg:'AST Pts Created/G',
+  ft_ast_per75:'FT AST / 75',
+  lost_ball_tov_pg:'Lost Ball / 100 TCH (inv)', pnr_bh_ppp:'P&R BH PPP',
+  def_delta_3pt:'Def Delta 3PT', def_delta_overall:'Def Delta Overall',
+  def_disruption_rate:'Disruption / 75', contested_shots:'Contested Shots',
+  stl:'Steals', def_spotup_ppp:'Def Spot-Up PPP (inv)',
+  rim_protection_score:'Rim Protection', def_delta_2pt:'Def Delta 2PT',
+  dreb_pct:'DREB %', blk:'Blocks', def_post_ppp:'Def Post PPP (inv)',
+  def_pnr_roll_ppp:'Def Roll PPP (inv)',
+  motor_score:'Motor Score', hustle_composite:'Hustle Composite',
+  screen_assist_rate:'Screen AST Rate', oreb_pct:'OREB %', box_out_rate:'Box Out / 75',
+  // Sub-composite labels (for category tooltips)
+  finishing_score:'Finishing', shooting_score:'Shooting',
+  shot_creation_score:'Shot Creation', passing_score:'Passing',
+  creation_score:'Creation', decision_making_score:'Ball Handling',
+  perimeter_def_score:'Perimeter Defense', interior_def_score:'Interior Defense',
+  activity_score:'Activity', rebounding_score:'Rebounding',
+};
+
+function buildWeightTable(statWeights) {
+  const sorted = Object.entries(statWeights).sort((a, b) => b[1].weight - a[1].weight);
+  const maxW   = sorted.length ? sorted[0][1].weight : 1;
+  let html = '<div class="tt-weight-table">';
+  for (const [key, {weight, r}] of sorted) {
+    const label  = WEIGHT_STAT_LABELS[key] || key;
+    const barPct = Math.round((weight / maxW) * 100);
+    const rStr   = r !== null && r !== undefined
+      ? (r >= 0 ? `+${r.toFixed(3)}` : r.toFixed(3)) : 'n/a';
+    const rColor = (r > 0) ? 'var(--green)' : (r < 0) ? 'var(--red)' : 'var(--text3)';
+    html += `<div class="tt-weight-row">
+      <div class="tt-weight-label" title="${key}">${label}</div>
+      <div class="tt-weight-bar-wrap"><div class="tt-weight-bar" style="width:${barPct}%"></div></div>
+      <div class="tt-weight-nums">
+        <span class="tt-w" style="color:${rColor}">r=${rStr}</span>
+      </div>
+    </div>`;
+  }
+  html += '</div>';
+  return html;
+}
 
 const tooltip   = document.getElementById('metric-tooltip');
 const ttName    = document.getElementById('tt-name');
 const ttFormula = document.getElementById('tt-formula');
 const ttDesc    = document.getElementById('tt-desc');
 const ttSource  = document.getElementById('tt-source');
+const ttWeights = document.getElementById('tt-weights');
 
 function showTooltip(el, key) {
-  const info = METRIC_INFO[key]; if(!info) return;
+  const info      = METRIC_INFO[key];
+  const isCat     = CATCOMP_KEYS.has(key);
+  const isSub     = SUBCOMP_KEYS.has(key);
+  const wData     = isCat ? COMPOSITE_WEIGHTS.catcomp[key]
+                  : isSub ? COMPOSITE_WEIGHTS.subcomp[key]
+                  : null;
+  const hasWeights = wData && Object.keys(wData).length > 0;
+
+  if (!info && !hasWeights) return;
+
+  // Label
   let label = key;
-  // Find label from NAV
   outer: for (const cat of Object.values(NAV)) {
     for (const sub of (cat.subs||[])) {
-      const all = [...(sub.overall?[sub.overall]:[]),...sub.metrics];
+      const all = [...(sub.overall?[sub.overall]:[]),...(sub.metrics||[])];
       const f = all.find(m=>m.key===key);
       if(f){label=f.label;break outer;}
     }
   }
   ttName.textContent = label;
-  if(info.formula){ttFormula.textContent=info.formula;ttFormula.style.display='block';}
-  else{ttFormula.style.display='none';}
-  ttDesc.textContent  = info.desc;
-  ttSource.textContent = `Source: ${info.source}`;
-  const rect=el.getBoundingClientRect();
-  let left=rect.right+8;
-  let top=rect.top-4;
-  if(left+240>window.innerWidth-8) left=rect.left-248;
-  tooltip.style.left=`${left}px`;
-  tooltip.style.top=`${top}px`;
+
+  // Formula
+  if (info?.formula) { ttFormula.textContent=info.formula; ttFormula.style.display='block'; }
+  else { ttFormula.style.display='none'; }
+
+  ttDesc.textContent   = info?.desc || '';
+  ttSource.textContent = info?.source ? `Source: ${info.source}` : '';
+
+  // Weight breakdown
+  if (hasWeights) {
+    const meta       = COMPOSITE_WEIGHTS.meta;
+    const methodLine = isCat
+      ? 'Stat weights = raw |r| with net_pts100 (higher bar = stronger win predictor):'
+      : 'Stat weights = raw |r| with net_pts100 (higher bar = stronger win predictor):';
+    ttWeights.innerHTML = `
+      <div class="tt-weight-header">${methodLine}</div>
+      ${buildWeightTable(wData)}
+      ${meta.n_players ? `<div class="tt-weight-meta">${meta.n_players} players · ≥${meta.min_minutes_corr} min · ${meta.season}</div>` : ''}
+    `;
+    ttWeights.style.display = 'block';
+  } else {
+    ttWeights.innerHTML = '';
+    ttWeights.style.display = 'none';
+  }
+
+  // Position
+  const rect = el.getBoundingClientRect();
+  let left   = rect.right + 8;
+  let top    = rect.top - 4;
+  if (left + 288 > window.innerWidth - 8) left = rect.left - 296;
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top  = `${top}px`;
   tooltip.classList.add('visible');
 }
+
 function hideTooltip(){tooltip.classList.remove('visible');}
 
 // ── Sidebar rendering ─────────────────────
@@ -1305,7 +1517,6 @@ function renderSidebar() {
   const list = document.getElementById('metric-list');
   let html   = '';
 
-  // ── Flat category (Metrics tab) ───────────
   if (cat.flat) {
     html += `<div class="metric-group-label">All Metrics</div>`;
     for (const m of cat.flatMetrics) {
@@ -1314,9 +1525,7 @@ function renderSidebar() {
         html += `<div class="metric-item coming-soon"><span class="metric-item-name">${m.label}</span><span class="ext-badge">${soonTxt}</span></div>`;
         continue;
       }
-
       if (m.isGroup) {
-        // Group item — acts like a 3PT-style expandable
         const active = m.groupActive;
         html += `<div class="metric-item ${active?'active':''}" data-key="${m.key}" data-fmt="${m.fmt}" data-overall="false" data-isgroup="true">
           <span class="metric-item-name">${m.label}</span>
@@ -1325,7 +1534,6 @@ function renderSidebar() {
             <span class="metric-item-badge">${m.badge}</span>
           </div>
         </div>`;
-        // Inject sub-toggle when active
         if (active) {
           html += `<div class="sub-toggle">`;
           for (const opt of m.groupOptions) {
@@ -1336,7 +1544,6 @@ function renderSidebar() {
         }
         continue;
       }
-
       const mActive = ST.sort === m.key;
       html += `<div class="metric-item ${mActive?'active':''}" data-key="${m.key}" data-fmt="${m.fmt}" data-overall="false">
         <span class="metric-item-name">${m.label}</span>
@@ -1346,49 +1553,38 @@ function renderSidebar() {
         </div>
       </div>`;
     }
-
     list.innerHTML = html;
-
-    // Regular metric item clicks
     list.querySelectorAll('.metric-item:not(.coming-soon)').forEach(el => {
       el.addEventListener('click', () => {
         if (el.dataset.isgroup === 'true') {
-          // If not already in this group, default to first option (overall)
           const m = cat.flatMetrics.find(m => m.key === el.dataset.key);
-          if (m && !m.groupActive) {
-            ST.sort    = m.groupOptions[0].key;
-            ST.sortFmt = m.groupOptions[0].fmt;
-          }
-          // If already in group, clicking the header again does nothing (toggle stays open)
-        } else {
-          ST.sort    = el.dataset.key;
-          ST.sortFmt = el.dataset.fmt;
-        }
-        ST.isOverall = false; ST.dir = 'desc'; ST.page = 1;
+          if (m && !m.groupActive) { ST.sort=m.groupOptions[0].key; ST.sortFmt=m.groupOptions[0].fmt; }
+        } else { ST.sort=el.dataset.key; ST.sortFmt=el.dataset.fmt; }
+        ST.isOverall=false; ST.dir='desc'; ST.page=1;
         renderSidebar(); updateViewLabel(); renderHeader(); fetchPlayers();
       });
     });
-
-    // Sub-toggle clicks (DARKO/LEBRON sub-options)
     list.querySelectorAll('.sub-toggle-btn').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
-        ST.sort    = btn.dataset.subkey;
-        ST.sortFmt = btn.dataset.subfmt;
-        ST.isOverall = false; ST.dir = 'desc'; ST.page = 1;
+        ST.sort=btn.dataset.subkey; ST.sortFmt=btn.dataset.subfmt;
+        ST.isOverall=false; ST.dir='desc'; ST.page=1;
         renderSidebar(); updateViewLabel(); renderHeader(); fetchPlayers();
       });
     });
-
     list.querySelectorAll('.metric-info').forEach(el => {
       el.addEventListener('mouseenter', () => showTooltip(el, el.dataset.infokey));
       el.addEventListener('mouseleave', hideTooltip);
       el.addEventListener('click', e => e.stopPropagation());
     });
+    const creditsEl = document.getElementById('sidebar-credits');
+    if (creditsEl) creditsEl.style.display = 'block';
     return;
   }
 
-  // Category-level Overall at top
+  const creditsEl = document.getElementById('sidebar-credits');
+  if (creditsEl) creditsEl.style.display = 'none';
+
   if (cat.overall) {
     const active = !ST.sub && ST.isOverall;
     html += `<div class="subcat-group">
@@ -1406,7 +1602,6 @@ function renderSidebar() {
 
   for (const sub of cat.subs) {
     const subActive = ST.sub === sub.key;
-
     html += `<div class="subcat-group">
       <div class="subcat-header ${subActive?'active':''}" data-action="sub" data-subkey="${sub.key}">
         <span class="subcat-name">${sub.label}</span>
@@ -1414,7 +1609,6 @@ function renderSidebar() {
       ${subActive ? `<div class="subcat-metrics">` : ''}`;
 
     if (subActive) {
-      // Sub-category overall (if exists)
       if (sub.overall) {
         const isOvAct = ST.isOverall;
         html += `<div class="metric-item ${isOvAct?'active':''}" data-key="${sub.overall.key}" data-fmt="${sub.overall.fmt}" data-overall="true">
@@ -1425,16 +1619,14 @@ function renderSidebar() {
           </div>
         </div>`;
       }
-      // Regular metric items — use getter if defined (for season-conditional metrics)
-      const metricList = typeof sub.metrics === 'function' ? sub.metrics() : (sub.metrics || []);
+      const metricList = typeof sub.metrics==='function' ? sub.metrics() : (sub.metrics||[]);
       for (const m of metricList) {
         if (m.soon) {
-          const soonTxt = m.soonLabel || 'soon';
-          html += `<div class="metric-item coming-soon"><span class="metric-item-name">${m.label}</span><span class="ext-badge">${soonTxt}</span></div>`;
+          html += `<div class="metric-item coming-soon"><span class="metric-item-name">${m.label}</span><span class="ext-badge">${m.soonLabel||'soon'}</span></div>`;
           continue;
         }
         const is3ptActive = m.is3pt && ['all3_efg_vw','corner3_efg_vw','above_break3_efg_vw'].includes(ST.sort);
-        const mActive = !ST.isOverall && (ST.sort === m.key || is3ptActive);
+        const mActive = !ST.isOverall && (ST.sort===m.key || is3ptActive);
         html += `<div class="metric-item ${mActive?'active':''}" data-key="${m.key}" data-fmt="${m.fmt}" data-overall="false" ${m.is3pt?'data-is3pt="true"':''}>
           <span class="metric-item-name">${m.label}</span>
           <div class="metric-item-right">
@@ -1457,75 +1649,47 @@ function renderSidebar() {
 
   list.innerHTML = html;
 
-  // Show credits only on Metrics tab
-  const creditsEl = document.getElementById('sidebar-credits');
-  if (creditsEl) creditsEl.style.display = cat.flat ? 'block' : 'none';
-
-  // ── Event: category overall ───────────────
   list.querySelectorAll('[data-action="cat-overall"]').forEach(el => {
     el.addEventListener('click', () => {
-      const ov = NAV[ST.cat].overall;
-      ST.sub = null; ST.sort = ov.key; ST.sortFmt = ov.fmt;
-      ST.isOverall = true; ST.dir = 'desc'; ST.page = 1;
+      const ov=NAV[ST.cat].overall;
+      ST.sub=null; ST.sort=ov.key; ST.sortFmt=ov.fmt;
+      ST.isOverall=true; ST.dir='desc'; ST.page=1;
       renderSidebar(); updateViewLabel(); renderHeader(); fetchPlayers();
     });
   });
-
-  // ── Event: sub-category header ────────────
   list.querySelectorAll('[data-action="sub"]').forEach(el => {
     el.addEventListener('click', () => {
-      const subKey = el.dataset.subkey;
-      const sub    = NAV[ST.cat].subs.find(s=>s.key===subKey);
-      ST.sub = subKey;
-
-      if (sub.overall) {
-        ST.sort = sub.overall.key; ST.sortFmt = sub.overall.fmt; ST.isOverall = true;
-      } else {
-        const metricList = typeof sub.metrics === 'function' ? sub.metrics() : (sub.metrics || []);
-        const first = metricList.find(m=>!m.soon);
-        if (first) {
-          ST.sort = first.is3pt ? ST.threePtSub : first.key;
-          ST.sortFmt = first.is3pt ? '3f' : first.fmt;
-        }
-        ST.isOverall = false;
+      const subKey=el.dataset.subkey;
+      const sub=NAV[ST.cat].subs.find(s=>s.key===subKey);
+      ST.sub=subKey;
+      if (sub.overall) { ST.sort=sub.overall.key; ST.sortFmt=sub.overall.fmt; ST.isOverall=true; }
+      else {
+        const metricList=typeof sub.metrics==='function'?sub.metrics():(sub.metrics||[]);
+        const first=metricList.find(m=>!m.soon);
+        if (first) { ST.sort=first.is3pt?ST.threePtSub:first.key; ST.sortFmt=first.is3pt?'3f':first.fmt; }
+        ST.isOverall=false;
       }
-      ST.dir = 'desc'; ST.page = 1;
+      ST.dir='desc'; ST.page=1;
       renderSidebar(); updateViewLabel(); renderHeader(); fetchPlayers();
     });
   });
-
-  // ── Event: metric item ────────────────────
   list.querySelectorAll('.metric-item:not(.coming-soon)').forEach(el => {
     el.addEventListener('click', () => {
-      if (el.dataset.is3pt === 'true') {
-        // 3PT item — use active sub-toggle selection
-        ST.sort    = ST.threePtSub;
-        ST.sortFmt = '3f';
-        ST.isOverall = false;
-      } else {
-        ST.sort      = el.dataset.key;
-        ST.sortFmt   = el.dataset.fmt;
-        ST.isOverall = el.dataset.overall === 'true';
-      }
-      ST.dir = 'desc'; ST.page = 1;
+      if (el.dataset.is3pt==='true') { ST.sort=ST.threePtSub; ST.sortFmt='3f'; ST.isOverall=false; }
+      else { ST.sort=el.dataset.key; ST.sortFmt=el.dataset.fmt; ST.isOverall=el.dataset.overall==='true'; }
+      ST.dir='desc'; ST.page=1;
       renderSidebar(); updateViewLabel(); renderHeader(); fetchPlayers();
     });
   });
-
-  // ── Event: 3PT sub-toggle ─────────────────
   list.querySelectorAll('.sub-toggle-btn').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      ST.threePtSub = btn.dataset.subkey;
-      ST.sort       = ST.threePtSub;
-      ST.sortFmt    = btn.dataset.subfmt;
-      ST.isOverall  = btn.dataset.subkey === 'all3_efg_vw';
-      ST.dir = 'desc'; ST.page = 1;
+      ST.threePtSub=btn.dataset.subkey; ST.sort=ST.threePtSub;
+      ST.sortFmt=btn.dataset.subfmt; ST.isOverall=btn.dataset.subkey==='all3_efg_vw';
+      ST.dir='desc'; ST.page=1;
       renderSidebar(); updateViewLabel(); renderHeader(); fetchPlayers();
     });
   });
-
-  // ── Event: info icons ─────────────────────
   list.querySelectorAll('.metric-info').forEach(el => {
     el.addEventListener('mouseenter', () => showTooltip(el, el.dataset.infokey));
     el.addEventListener('mouseleave', hideTooltip);
@@ -1534,168 +1698,117 @@ function renderSidebar() {
 }
 
 function updateViewLabel() {
-  const cat = NAV[ST.cat];
-  document.getElementById('view-cat').textContent = cat.label.toUpperCase();
-  const viewSub    = document.getElementById('view-sub');
-  const viewMetric = document.getElementById('view-metric');
+  const cat=NAV[ST.cat];
+  document.getElementById('view-cat').textContent=cat.label.toUpperCase();
+  const viewSub=document.getElementById('view-sub');
+  const viewMetric=document.getElementById('view-metric');
 
   if (cat.flat) {
-    // Find active metric label in flat list
-    const metrics = cat.flatMetrics;
-    let label = ST.sort;
+    const metrics=cat.flatMetrics;
+    let label=ST.sort;
     for (const m of metrics) {
       if (m.isGroup && m.groupOptions) {
-        const opt = m.groupOptions.find(o => o.key === ST.sort);
-        if (opt) { label = opt.label; viewSub.textContent = m.label; viewSub.style.display = 'inline'; viewMetric.textContent = opt.label.toUpperCase(); viewMetric.style.display = 'inline'; return; }
-      } else if (m.key === ST.sort) {
-        label = m.label;
-      }
+        const opt=m.groupOptions.find(o=>o.key===ST.sort);
+        if (opt) { label=opt.label; viewSub.textContent=m.label; viewSub.style.display='inline'; viewMetric.textContent=opt.label.toUpperCase(); viewMetric.style.display='inline'; return; }
+      } else if (m.key===ST.sort) { label=m.label; }
     }
-    viewSub.style.display    = 'none';
-    viewMetric.textContent   = label.toUpperCase();
-    viewMetric.style.display = 'inline';
-    return;
+    viewSub.style.display='none'; viewMetric.textContent=label.toUpperCase(); viewMetric.style.display='inline'; return;
   }
 
-  if (!ST.sub) {
-    viewSub.style.display    = 'none';
-    viewMetric.style.display = 'none';
-    return;
-  }
+  if (!ST.sub) { viewSub.style.display='none'; viewMetric.style.display='none'; return; }
 
-  const sub = cat.subs.find(s=>s.key===ST.sub);
+  const sub=cat.subs.find(s=>s.key===ST.sub);
   if (!sub) return;
-  viewSub.textContent   = sub.label;
-  viewSub.style.display = 'inline';
+  viewSub.textContent=sub.label; viewSub.style.display='inline';
 
-  if (ST.isOverall) {
-    viewMetric.style.display = 'none';
-  } else {
-    const sortKey = effectiveSort();
-    const opt3    = THREE_PT_OPTIONS.find(o=>o.key===sortKey);
-    let label = opt3 ? opt3.label : '';
+  if (ST.isOverall) { viewMetric.style.display='none'; }
+  else {
+    const sortKey=effectiveSort();
+    const opt3=THREE_PT_OPTIONS.find(o=>o.key===sortKey);
+    let label=opt3?opt3.label:'';
     if (!label) {
-      const metricList = typeof sub.metrics === 'function' ? sub.metrics() : (sub.metrics || []);
-      const m = metricList.find(m=>m.key===ST.sort);
-      label = m ? m.label : ST.sort;
+      const metricList=typeof sub.metrics==='function'?sub.metrics():(sub.metrics||[]);
+      const m=metricList.find(m=>m.key===ST.sort);
+      label=m?m.label:ST.sort;
     }
-    viewMetric.textContent   = label.toUpperCase();
-    viewMetric.style.display = 'inline';
+    viewMetric.textContent=label.toUpperCase(); viewMetric.style.display='inline';
   }
 }
 
-// ── Category tab clicks ───────────────────
 document.getElementById('cat-bar').querySelectorAll('.cat-tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.cat-tab').forEach(t=>t.classList.remove('active'));
     tab.classList.add('active');
-    ST.cat = tab.dataset.cat;
-    ST.sub = null;
-    ST.page = 1;
-
-    const cat = NAV[ST.cat];
-    if (cat.overall) {
-      ST.sort = cat.overall.key; ST.sortFmt = cat.overall.fmt; ST.isOverall = true;
-    } else if (cat.flat) {
-      // Flat category (Metrics) — auto-select first non-soon metric
-      const first = cat.flatMetrics.find(m=>!m.soon);
-      if (first) { ST.sort = first.key; ST.sortFmt = first.fmt; ST.isOverall = false; }
-    } else {
-      const first = cat.subs[0]?.metrics?.find(m=>!m.soon);
-      if (first) { ST.sort = first.key; ST.sortFmt = first.fmt; ST.isOverall = false; }
-    }
-    ST.dir = 'desc';
+    ST.cat=tab.dataset.cat; ST.sub=null; ST.page=1;
+    const cat=NAV[ST.cat];
+    if (cat.overall) { ST.sort=cat.overall.key; ST.sortFmt=cat.overall.fmt; ST.isOverall=true; }
+    else if (cat.flat) { const first=cat.flatMetrics.find(m=>!m.soon); if(first){ST.sort=first.key;ST.sortFmt=first.fmt;ST.isOverall=false;} }
+    else { const first=cat.subs[0]?.metrics?.find(m=>!m.soon); if(first){ST.sort=first.key;ST.sortFmt=first.fmt;ST.isOverall=false;} }
+    ST.dir='desc';
     renderSidebar(); updateViewLabel(); renderHeader(); fetchPlayers();
   });
 });
 
-// ── Table header ──────────────────────────
 function renderHeader() {
-  const row     = document.getElementById('thead-row');
-  const cols    = currentCols();
-  const sortKey = effectiveSort();
-  const arr     = ST.dir==='desc'?'↓':'↑';
-
-  let html = `
-    <th class="c-rank"><span class="th-btn">#</span></th>
+  const row=document.getElementById('thead-row');
+  const cols=currentCols();
+  const sortKey=effectiveSort();
+  const arr=ST.dir==='desc'?'↓':'↑';
+  let html=`<th class="c-rank"><span class="th-btn">#</span></th>
     <th style="min-width:190px"><span class="th-btn">Player</span></th>
     <th><button class="th-btn sortable" data-k="min_per_game">MIN<span class="th-arr"> ${sortKey==='min_per_game'?arr:''}</span></button></th>`;
-
   for (const ck of cols) {
     const cd=COL_DEF[ck]; if(!cd) continue;
-    const active = sortKey===ck;
-    html += `<th><button class="th-btn sortable ${active?'active':''}" data-k="${ck}">${cd.label}<span class="th-arr"> ${active?arr:''}</span></button></th>`;
+    const active=sortKey===ck;
+    html+=`<th><button class="th-btn sortable ${active?'active':''}" data-k="${ck}">${cd.label}<span class="th-arr"> ${active?arr:''}</span></button></th>`;
   }
-
-  // Primary sort column label
-  const sortLabel = (() => {
-    const opt3 = THREE_PT_OPTIONS.find(o=>o.key===sortKey);
-    if (opt3) return `3PT EFG+ · ${opt3.label.toUpperCase()}`;
-    if (ST.isOverall) {
-      if (!ST.sub) return NAV[ST.cat].label.toUpperCase() + ' AVG PERCENTILE';
-      const sub = NAV[ST.cat].subs.find(s=>s.key===ST.sub);
-      return (sub?.label||'') + ' AVG PERCENTILE';
-    }
-    const sub = ST.sub ? NAV[ST.cat].subs.find(s=>s.key===ST.sub) : null;
-    const m   = sub?.metrics.find(m=>m.key===ST.sort);
-    return m ? m.label.toUpperCase() : ST.sort.toUpperCase();
+  const sortLabel=(()=>{
+    const opt3=THREE_PT_OPTIONS.find(o=>o.key===sortKey);
+    if(opt3) return `3PT EFG+ · ${opt3.label.toUpperCase()}`;
+    if(ST.isOverall){if(!ST.sub)return NAV[ST.cat].label.toUpperCase()+' AVG PERCENTILE';const sub=NAV[ST.cat].subs.find(s=>s.key===ST.sub);return(sub?.label||'')+' AVG PERCENTILE';}
+    const sub=ST.sub?NAV[ST.cat].subs.find(s=>s.key===ST.sub):null;
+    const m=sub?.metrics.find(m=>m.key===ST.sort);
+    return m?m.label.toUpperCase():ST.sort.toUpperCase();
   })();
-
-  html += `<th style="min-width:150px"><button class="th-btn sortable active" data-k="${sortKey}">${sortLabel}<span class="th-arr"> ${arr}</span></button></th>`;
-  row.innerHTML = html;
-
-  // Columns where lower = better — default to ascending when first clicked
-  const ASC_DEFAULT = new Set([
-    'lost_ball_tov_pg', 'bad_pass_tov_pg', 'tov', 'tov_pct', 'pf',
-  ]);
-
-  row.querySelectorAll('.sortable').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const k = btn.dataset.k;
-      if (sortKey===k) { ST.dir = ST.dir==='desc'?'asc':'desc'; }
-      else {
-        ST.sort=k; ST.sortFmt=COL_DEF[k]?.fmt||'1f'; ST.isOverall=false;
-        ST.dir = ASC_DEFAULT.has(k) ? 'asc' : 'desc';
-        renderSidebar(); updateViewLabel();
-      }
-      ST.page=1; renderHeader(); fetchPlayers();
+  html+=`<th style="min-width:150px"><button class="th-btn sortable active" data-k="${sortKey}">${sortLabel}<span class="th-arr"> ${arr}</span></button></th>`;
+  row.innerHTML=html;
+  const ASC_DEFAULT=new Set(['lost_ball_tov_pg','bad_pass_tov_pg','tov','tov_pct','pf']);
+  row.querySelectorAll('.sortable').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const k=btn.dataset.k;
+      if(sortKey===k){ST.dir=ST.dir==='desc'?'asc':'desc';}
+      else{ST.sort=k;ST.sortFmt=COL_DEF[k]?.fmt||'1f';ST.isOverall=false;ST.dir=ASC_DEFAULT.has(k)?'asc':'desc';renderSidebar();updateViewLabel();}
+      ST.page=1;renderHeader();fetchPlayers();
     });
   });
 }
 
-// ── Fetch ─────────────────────────────────
 async function fetchPlayers() {
-  const sortKey = effectiveSort();
-  const params = new URLSearchParams({
-    sort:sortKey, dir:ST.dir, pos:ST.pos,
-    season:ST.season, min:ST.minMin, page:ST.page, per_page:ST.per,
-    min_ast_pg:     ST.minAstPg,
-    min_touches_pg: ST.minTouchesPg,
-    min_drives_pg:  ST.minDrivesPg,
-    min_paint_fga:  ST.minPaintFga,
-    min_rim_fga:    ST.minRimFga,
-    min_3pt_fga:    ST.min3ptFga,
+  const sortKey=effectiveSort();
+  const params=new URLSearchParams({
+    sort:sortKey,dir:ST.dir,pos:ST.pos,
+    season:ST.season,min:ST.minMin,page:ST.page,per_page:ST.per,
+    min_ast_pg:ST.minAstPg,min_touches_pg:ST.minTouchesPg,min_drives_pg:ST.minDrivesPg,
+    min_paint_fga:ST.minPaintFga,min_rim_fga:ST.minRimFga,min_3pt_fga:ST.min3ptFga,
   });
-  if (ST.search) params.set('search', ST.search);
+  if(ST.search) params.set('search',ST.search);
   showSkeletons();
   try {
-    const res  = await fetch(`${API}/api/players?${params}`);
-    const data = await res.json();
-    ST.data    = data.players || [];
-    ST.total   = data.total   || 0;
-    const vals = ST.data.map(p=>parseFloat(p[sortKey])).filter(v=>!isNaN(v)&&v>0);
-    ST.maxVal  = vals.length ? Math.max(...vals) : 100;
+    const res=await fetch(`${API}/api/players?${params}`);
+    const data=await res.json();
+    ST.data=data.players||[]; ST.total=data.total||0;
+    const vals=ST.data.map(p=>parseFloat(p[sortKey])).filter(v=>!isNaN(v)&&v>0);
+    ST.maxVal=vals.length?Math.max(...vals):100;
     renderRows(); renderPagination();
-    document.getElementById('result-count').textContent = `${ST.total.toLocaleString()} players`;
+    document.getElementById('result-count').textContent=`${ST.total.toLocaleString()} players`;
   } catch(e) {
-    document.getElementById('tbody').innerHTML =
-      `<tr><td colspan="20" style="text-align:center;padding:40px;font-family:var(--fm);font-size:11px;color:var(--text3)">Cannot connect — is the server running at ${API}?</td></tr>`;
+    document.getElementById('tbody').innerHTML=`<tr><td colspan="20" style="text-align:center;padding:40px;font-family:var(--fm);font-size:11px;color:var(--text3)">Cannot connect — is the server running at ${API}?</td></tr>`;
   }
 }
 
 function showSkeletons() {
-  const cols = 3 + currentCols().length + 1;
-  document.getElementById('tbody').innerHTML = Array(10).fill(0).map((_,i) =>
+  const cols=3+currentCols().length+1;
+  document.getElementById('tbody').innerHTML=Array(10).fill(0).map((_,i)=>
     `<tr class="sk-row"><td colspan="${cols}"><div class="sk-inner">
       <div class="sk sk-c"></div>
       <div class="sk sk-n" style="width:${120+Math.random()*60}px"></div>
@@ -1705,29 +1818,19 @@ function showSkeletons() {
 }
 
 function renderRows() {
-  const tbody   = document.getElementById('tbody');
-  const cols    = currentCols();
-  const offset  = (ST.page-1)*ST.per;
-  const sortKey = effectiveSort();
-
-  if (!ST.data.length) {
-    tbody.innerHTML = `<tr><td colspan="20" style="text-align:center;padding:40px;font-family:var(--fm);font-size:11px;color:var(--text3)">No players match.</td></tr>`;
-    return;
-  }
-
-  tbody.innerHTML = ST.data.map((p,i) => {
-    const rank    = offset+i+1;
-    const rankCls = rank===1?'t1':rank===2?'t2':rank===3?'t3':'';
-    const val     = p[sortKey];
-    const barPct  = (ST.maxVal&&val!=null) ? Math.min(100,(Math.abs(parseFloat(val))/Math.abs(ST.maxVal))*100) : 0;
-    const delay   = Math.min(i*12,200);
-
-    let ctx = `<td><div class="num">${fmt(p.min_per_game,'1f')}</div></td>`;
-    for (const ck of cols) {
-      const cd = COL_DEF[ck]; if(!cd) continue;
-      ctx += `<td><div class="num ${numCls(ck,p[ck])}">${fmt(p[ck],cd.fmt)}</div></td>`;
-    }
-
+  const tbody=document.getElementById('tbody');
+  const cols=currentCols();
+  const offset=(ST.page-1)*ST.per;
+  const sortKey=effectiveSort();
+  if(!ST.data.length){tbody.innerHTML=`<tr><td colspan="20" style="text-align:center;padding:40px;font-family:var(--fm);font-size:11px;color:var(--text3)">No players match.</td></tr>`;return;}
+  tbody.innerHTML=ST.data.map((p,i)=>{
+    const rank=offset+i+1;
+    const rankCls=rank===1?'t1':rank===2?'t2':rank===3?'t3':'';
+    const val=p[sortKey];
+    const barPct=(ST.maxVal&&val!=null)?Math.min(100,(Math.abs(parseFloat(val))/Math.abs(ST.maxVal))*100):0;
+    const delay=Math.min(i*12,200);
+    let ctx=`<td><div class="num">${fmt(p.min_per_game,'1f')}</div></td>`;
+    for(const ck of cols){const cd=COL_DEF[ck];if(!cd)continue;ctx+=`<td><div class="num ${numCls(ck,p[ck])}">${fmt(p[ck],cd.fmt)}</div></td>`;}
     return `<tr data-id="${p.player_id}" style="animation:rowIn .25s both;animation-delay:${delay}ms">
       <td class="c-rank"><div class="rank-n ${rankCls}">${rank}</div></td>
       <td class="c-player"><div class="pcell">
@@ -1742,21 +1845,19 @@ function renderRows() {
       </div></td>
     </tr>`;
   }).join('');
-
-  document.querySelectorAll('tr[data-id]').forEach(r => {
-    r.addEventListener('click', () => openDrawer(parseInt(r.dataset.id)));
+  document.querySelectorAll('tr[data-id]').forEach(r=>{
+    r.addEventListener('click',()=>openDrawer(parseInt(r.dataset.id)));
   });
 }
 
-// ── Pagination ────────────────────────────
 function renderPagination() {
-  const pages = Math.ceil(ST.total/ST.per);
-  const pg    = document.getElementById('pagination');
-  if (pages<=1) { pg.style.display='none'; return; }
+  const pages=Math.ceil(ST.total/ST.per);
+  const pg=document.getElementById('pagination');
+  if(pages<=1){pg.style.display='none';return;}
   pg.style.display='flex';
   const cur=ST.page;
   let html=`<button class="pg-btn" ${cur===1?'disabled':''} onclick="gp(${cur-1})">←</button>`;
-  for (let p=1;p<=pages;p++) {
+  for(let p=1;p<=pages;p++){
     if(p===1||p===pages||Math.abs(p-cur)<=1) html+=`<button class="pg-btn ${p===cur?'cur':''}" onclick="gp(${p})">${p}</button>`;
     else if(Math.abs(p-cur)===2) html+=`<span style="color:var(--text3);font-family:var(--fm);font-size:10px;padding:0 3px">…</span>`;
   }
@@ -1766,17 +1867,16 @@ function renderPagination() {
 function gp(p){ST.page=p;fetchPlayers();document.querySelector('.table-wrap').scrollTop=0;}
 window.gp=gp;
 
-// ── Settings ──────────────────────────────
 function openSettings(){
-  document.getElementById('sd-min-min').value    = ST.minMin;
-  document.getElementById('sd-ast-pg').value     = ST.minAstPg;
-  document.getElementById('sd-touches-pg').value = ST.minTouchesPg;
-  document.getElementById('sd-drives-pg').value  = ST.minDrivesPg;
-  document.getElementById('sd-paint-fga').value  = ST.minPaintFga;
-  document.getElementById('sd-rim-fga').value    = ST.minRimFga;
-  document.getElementById('sd-3pt-fga').value    = ST.min3ptFga;
-  document.getElementById('sd-paint').value      = DEFAULTS.paint;
-  document.getElementById('sd-mid').value        = DEFAULTS.mid;
+  document.getElementById('sd-min-min').value=ST.minMin;
+  document.getElementById('sd-ast-pg').value=ST.minAstPg;
+  document.getElementById('sd-touches-pg').value=ST.minTouchesPg;
+  document.getElementById('sd-drives-pg').value=ST.minDrivesPg;
+  document.getElementById('sd-paint-fga').value=ST.minPaintFga;
+  document.getElementById('sd-rim-fga').value=ST.minRimFga;
+  document.getElementById('sd-3pt-fga').value=ST.min3ptFga;
+  document.getElementById('sd-paint').value=DEFAULTS.paint;
+  document.getElementById('sd-mid').value=DEFAULTS.mid;
   document.getElementById('settings-overlay').classList.add('on');
   document.getElementById('settings-drawer').classList.add('on');
 }
@@ -1788,39 +1888,31 @@ document.getElementById('filter-btn').addEventListener('click',openSettings);
 document.getElementById('settings-overlay').addEventListener('click',closeSettings);
 document.getElementById('sd-close').addEventListener('click',closeSettings);
 document.getElementById('sd-reset').addEventListener('click',()=>{
-  document.getElementById('sd-min-min').value  = DEFAULTS.minMin;
-  document.getElementById('sd-ast-pg').value   = DEFAULTS.minAstPg;
-  document.getElementById('sd-touches-pg').value = DEFAULTS.minTouchesPg;
-  document.getElementById('sd-drives-pg').value  = DEFAULTS.minDrivesPg;
-  document.getElementById('sd-paint-fga').value  = DEFAULTS.minPaintFga;
-  document.getElementById('sd-rim-fga').value    = DEFAULTS.minRimFga;
-  document.getElementById('sd-3pt-fga').value    = DEFAULTS.min3ptFga;
-  document.getElementById('sd-paint').value    = DEFAULTS.paint;
-  document.getElementById('sd-mid').value      = DEFAULTS.mid;
+  document.getElementById('sd-min-min').value=DEFAULTS.minMin;
+  document.getElementById('sd-ast-pg').value=DEFAULTS.minAstPg;
+  document.getElementById('sd-touches-pg').value=DEFAULTS.minTouchesPg;
+  document.getElementById('sd-drives-pg').value=DEFAULTS.minDrivesPg;
+  document.getElementById('sd-paint-fga').value=DEFAULTS.minPaintFga;
+  document.getElementById('sd-rim-fga').value=DEFAULTS.minRimFga;
+  document.getElementById('sd-3pt-fga').value=DEFAULTS.min3ptFga;
+  document.getElementById('sd-paint').value=DEFAULTS.paint;
+  document.getElementById('sd-mid').value=DEFAULTS.mid;
 });
 document.getElementById('sd-apply').addEventListener('click',()=>{
-  ST.minMin        = parseFloat(document.getElementById('sd-min-min').value)  || 0;
-  ST.minAstPg      = parseFloat(document.getElementById('sd-ast-pg').value)   || 0;
-  ST.minTouchesPg  = parseFloat(document.getElementById('sd-touches-pg').value)|| 0;
-  ST.minDrivesPg   = parseFloat(document.getElementById('sd-drives-pg').value) || 0;
-  ST.minPaintFga   = parseFloat(document.getElementById('sd-paint-fga').value) || 0;
-  ST.minRimFga     = parseFloat(document.getElementById('sd-rim-fga').value)   || 0;
-  ST.min3ptFga     = parseFloat(document.getElementById('sd-3pt-fga').value)   || 0;
-  document.getElementById('min-min').value = ST.minMin;
-  ST.page = 1;
-  const isNonDefault =
-    ST.minMin !== DEFAULTS.minMin ||
-    ST.minAstPg !== DEFAULTS.minAstPg ||
-    ST.minTouchesPg !== DEFAULTS.minTouchesPg ||
-    ST.minDrivesPg !== DEFAULTS.minDrivesPg ||
-    ST.minPaintFga !== DEFAULTS.minPaintFga ||
-    ST.minRimFga !== DEFAULTS.minRimFga ||
-    ST.min3ptFga !== DEFAULTS.min3ptFga;
-  document.getElementById('filter-btn').classList.toggle('active', isNonDefault);
+  ST.minMin=parseFloat(document.getElementById('sd-min-min').value)||0;
+  ST.minAstPg=parseFloat(document.getElementById('sd-ast-pg').value)||0;
+  ST.minTouchesPg=parseFloat(document.getElementById('sd-touches-pg').value)||0;
+  ST.minDrivesPg=parseFloat(document.getElementById('sd-drives-pg').value)||0;
+  ST.minPaintFga=parseFloat(document.getElementById('sd-paint-fga').value)||0;
+  ST.minRimFga=parseFloat(document.getElementById('sd-rim-fga').value)||0;
+  ST.min3ptFga=parseFloat(document.getElementById('sd-3pt-fga').value)||0;
+  document.getElementById('min-min').value=ST.minMin;
+  ST.page=1;
+  const isNonDefault=ST.minMin!==DEFAULTS.minMin||ST.minAstPg!==DEFAULTS.minAstPg||ST.minTouchesPg!==DEFAULTS.minTouchesPg||ST.minDrivesPg!==DEFAULTS.minDrivesPg||ST.minPaintFga!==DEFAULTS.minPaintFga||ST.minRimFga!==DEFAULTS.minRimFga||ST.min3ptFga!==DEFAULTS.min3ptFga;
+  document.getElementById('filter-btn').classList.toggle('active',isNonDefault);
   closeSettings(); fetchPlayers();
 });
 
-// ── Player drawer ─────────────────────────
 async function openDrawer(playerId) {
   document.getElementById('overlay').classList.add('on');
   document.getElementById('drawer').classList.add('on');
@@ -1829,22 +1921,20 @@ async function openDrawer(playerId) {
   ['d-name','d-sub'].forEach(id=>document.getElementById(id).textContent='…');
   ['d-scores','d-box','d-adv','d-zones','d-play','d-def','d-hus'].forEach(id=>document.getElementById(id).innerHTML='');
   try {
-    const res  = await fetch(`${API}/api/players/${playerId}?season=${ST.season}`);
-    const data = await res.json();
-    const s    = data.season_stats||{};
-    const m    = data.metrics||{};
-    document.getElementById('d-name').textContent = s.player_name||'—';
-    document.getElementById('d-sub').textContent  =
-      [s.position,s.team_abbr,s.gp?`${s.gp}G`:'',s.min_per_game?`${Math.round(s.min_per_game)}MPG`:''].filter(Boolean).join(' · ');
+    const res=await fetch(`${API}/api/players/${playerId}?season=${ST.season}`);
+    const data=await res.json();
+    const s=data.season_stats||{};
+    const m=data.metrics||{};
+    document.getElementById('d-name').textContent=s.player_name||'—';
+    document.getElementById('d-sub').textContent=[s.position,s.team_abbr,s.gp?`${s.gp}G`:'',s.min_per_game?`${Math.round(s.min_per_game)}MPG`:''].filter(Boolean).join(' · ');
     const img=document.getElementById('d-img');
     img.src=`https://cdn.nba.com/headshots/nba/latest/1040x760/${playerId}.png`;
     img.onerror=()=>{img.style.display='none';}; img.style.display='block';
-
     const scores=[
-      {key:'creator_score',   label:'Scoring',    val:m.creator_score},
-      {key:'playmaker_score', label:'Playmaking', val:m.playmaker_score},
-      {key:'defender_score',  label:'Defense',    val:m.defender_score},
-      {key:'hustle_score',    label:'Hustle',     val:m.hustle_score},
+      {key:'creator_score',label:'Scoring',val:m.creator_score},
+      {key:'playmaker_score',label:'Playmaking',val:m.playmaker_score},
+      {key:'defender_score',label:'Defense',val:m.defender_score},
+      {key:'hustle_score',label:'Hustle',val:m.hustle_score},
     ];
     const best=scores.reduce((b,c)=>parseFloat(c.val||0)>parseFloat(b.val||0)?c:b,scores[0]);
     document.getElementById('d-scores').innerHTML=scores.map(c=>{
@@ -1855,36 +1945,20 @@ async function openDrawer(playerId) {
         <div class="d-score-bar"><div class="d-score-fill" style="width:${pct}%"></div></div>
       </div>`;
     }).join('');
-
     document.getElementById('d-box').innerHTML=[
       ['PTS',fmt(s.pts,'1f')],['AST',fmt(s.ast,'1f')],['REB',fmt(s.reb,'1f')],
       ['STL',fmt(s.stl,'1f')],['BLK',fmt(s.blk,'1f')],['TOV',fmt(s.tov,'1f')],
       ['FG%',fmt(s.fg_pct,'pct')],['3P%',fmt(s.fg3_pct,'pct')],['FT%',fmt(s.ft_pct,'pct')],
     ].map(([l,v])=>`<div><div class="d-stat-val">${v}</div><div class="d-stat-lbl">${l}</div></div>`).join('');
-
     document.getElementById('d-adv').innerHTML=[
       ['True Shooting %',fmt(s.ts_pct,'pct')],['EFG %',fmt(s.efg_pct,'pct')],
       ['Usage %',fmt(s.usg_pct,'pct')],['Net Rating',fmt(s.net_rating,'1f')],
       ['On/Off Diff',fmt(s.on_off_diff,'1f')],['BPM',fmt(m.bpm_computed,'1f')],
       ['PIE',fmt(s.pie,'pct')],['Clutch Net Rtg',fmt(s.clutch_net_rating,'1f')],
-      ...(s.net_pts100 != null ? [
-        ['Net Pts/100',  fmt(s.net_pts100,'2f')],
-        ['Net Pts Off',  fmt(s.o_net_pts100,'2f')],
-        ['Net Pts Def',  fmt(s.d_net_pts100,'2f')],
-      ] : []),
-      ...(s.darko_dpm != null ? [
-        ['DARKO DPM',fmt(s.darko_dpm,'2f')],
-        ['DARKO Off',fmt(s.darko_odpm,'2f')],
-        ['DARKO Def',fmt(s.darko_ddpm,'2f')],
-      ] : []),
-      ...(s.lebron != null ? [
-        ['LEBRON',   fmt(s.lebron,'2f')],
-        ['O-LEBRON', fmt(s.o_lebron,'2f')],
-        ['D-LEBRON', fmt(s.d_lebron,'2f')],
-        ['WAR',      fmt(s.war,'2f')],
-      ] : []),
+      ...(s.net_pts100!=null?[['Net Pts/100',fmt(s.net_pts100,'2f')],['Net Pts Off',fmt(s.o_net_pts100,'2f')],['Net Pts Def',fmt(s.d_net_pts100,'2f')]]:[] ),
+      ...(s.darko_dpm!=null?[['DARKO DPM',fmt(s.darko_dpm,'2f')],['DARKO Off',fmt(s.darko_odpm,'2f')],['DARKO Def',fmt(s.darko_ddpm,'2f')]]:[] ),
+      ...(s.lebron!=null?[['LEBRON',fmt(s.lebron,'2f')],['O-LEBRON',fmt(s.o_lebron,'2f')],['D-LEBRON',fmt(s.d_lebron,'2f')],['WAR',fmt(s.war,'2f')]]:[] ),
     ].map(dr).join('');
-
     document.getElementById('d-zones').innerHTML=[
       ['Paint EFG+',fmt(m.paint_efg_vw,'3f')],['Paint EFG%',fmt(m.paint_efg,'pct')],['Paint FGA/g',fmt(m.paint_fga_pg,'1f')],
       ['Mid-Range EFG+',fmt(m.midrange_efg_vw,'3f')],['Mid-Range EFG%',fmt(m.midrange_efg,'pct')],['Mid FGA/g',fmt(m.midrange_fga_pg,'1f')],
@@ -1892,7 +1966,6 @@ async function openDrawer(playerId) {
       ['Corner 3 EFG+',fmt(m.corner3_efg_vw,'3f')],['Corner 3 EFG%',fmt(m.corner3_efg,'pct')],['Corner FGA/g',fmt(m.corner3_fga_pg,'1f')],
       ['Above Brk EFG+',fmt(m.above_break3_efg_vw,'3f')],['Above Brk EFG%',fmt(m.above_break3_efg,'pct')],['AB3 FGA/g',fmt(m.above_break3_fga_pg,'1f')],
     ].map(dr).join('');
-
     document.getElementById('d-play').innerHTML=[
       ['Pot AST / 75',fmt(m.potential_ast_per75,'1f')],['Pot AST / BP TOV',fmt(m.pot_ast_per_tov,'2f')],
       ['AST Conv %',fmt(m.ast_conversion_rate,'pct')],['Pass Quality',fmt(m.pass_quality_index,'3f')],
@@ -1900,31 +1973,26 @@ async function openDrawer(playerId) {
       ['Drive & Dish %',fmt(m.drive_and_dish_rate,'pct')],['Sec AST / 75',fmt(m.secondary_ast_per75,'2f')],
       ['ISO PPP',fmt(s.iso_ppp,'2f')],['P&R BH PPP',fmt(s.pnr_bh_ppp,'2f')],['Transition PPP',fmt(s.transition_ppp,'2f')],
     ].map(dr).join('');
-
     document.getElementById('d-def').innerHTML=[
       ['Def Delta (overall)',fmt(m.def_delta_overall,'3f')],['Def Delta (2PT)',fmt(m.def_delta_2pt,'3f')],
       ['Def Delta (3PT)',fmt(m.def_delta_3pt,'3f')],['Rim Protection',fmt(m.rim_protection_score,'1f')],
       ['Disruption / 75',fmt(m.def_disruption_rate,'2f')],['Box Out / 75',fmt(m.box_out_rate,'2f')],
       ['DREB %',fmt(s.dreb_pct,'pct')],['DEF Rating',fmt(s.def_rating,'1f')],
     ].map(dr).join('');
-
     document.getElementById('d-hus').innerHTML=[
       ['Hustle Comp/75',fmt(m.hustle_composite,'2f')],['Motor Score',fmt(m.motor_score,'2f')],
       ['Screen AST Pts/75',fmt(m.screen_assist_rate,'2f')],['Loose Balls / 75',fmt(m.loose_ball_rate,'2f')],
       ['Box Outs / 75',fmt(m.box_out_rate,'2f')],['Deflections',fmt(s.deflections,'1f')],['Charges Drawn',fmt(s.charges_drawn,'1f')],
     ].map(dr).join('');
-  } catch(e) { console.error(e); }
+  } catch(e){console.error(e);}
 }
 
-function dr([label,val]){
-  return `<div class="d-row"><span class="d-row-lbl">${label}</span><span class="d-row-val">${val}</span></div>`;
-}
+function dr([label,val]){return `<div class="d-row"><span class="d-row-lbl">${label}</span><span class="d-row-val">${val}</span></div>`;}
 function closeDrawer(){
   document.getElementById('overlay').classList.remove('on');
   document.getElementById('drawer').classList.remove('on');
   document.querySelectorAll('tr[data-id]').forEach(r=>r.classList.remove('selected'));
 }
-
 document.getElementById('d-close').addEventListener('click',closeDrawer);
 document.getElementById('overlay').addEventListener('click',closeDrawer);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeDrawer();closeSettings();}});
@@ -1944,487 +2012,560 @@ document.getElementById('min-min').addEventListener('input',e=>{
 });
 
 // ── Composite Builder ─────────────────────
-const BUILDER = {
-  open: false,
-  selected: [],
-  allPlayers: [],
-  results: [],
-  posFilter: 'ALL',
-  catFilter: 'ALL',
-  search: '',
-  mode: 'impact',         // 'impact' | 'skill'
-  correlations: {},       // {metric_key: pearson_r}
-  weights: {},            // {metric_key: 0.1-1.0 normalized weight}
-  weightsLoaded: false,
+const BUILDER={
+  open:false, selected:[], allPlayers:[], results:[],
+  posFilter:'ALL', catFilter:'ALL', search:'',
+  correlations:{}, weights:{}, weightsLoaded:false,
+  pctiles:{}, percentilesLoaded:false,
+  expandedExtras: new Set(),
+  winWeighted: true,
+  spotlightIdx: 0,
 };
 
-// Build flat metric list from NAV
-// Each entry: {key, label, cat, catLabel, sub, subLabel}
-function buildMetricIndex() {
-  const seen = new Set();
-  const metrics = [];
-  const catLabels = {scoring:'Scoring',playmaking:'Playmaking',defense:'Defense',hustle:'Hustle',metrics:'Metrics'};
+const EXTRAS_LABELS=new Set(['Extras','External','Traditional']);
+const DONUT_PALETTE=[
+  '#f97316','#3b82f6','#22c55e','#a78bfa','#f59e0b',
+  '#ec4899','#06b6d4','#84cc16','#fb7185','#38bdf8',
+  '#fbbf24','#c084fc','#4ade80','#f472b6','#60a5fa',
+];
 
-  const SKIP = new Set(['creator_score','playmaker_score','defender_score','hustle_score',
+function buildMetricIndex(){
+  const seen=new Set(); const metrics=[];
+  const catLabels={scoring:'Scoring',playmaking:'Playmaking',defense:'Defense',hustle:'Hustle',metrics:'Metrics'};
+  const SKIP=new Set(['creator_score','playmaker_score','defender_score','hustle_score',
     'finishing_score','shooting_score','shot_creation_score','passing_score','creation_score',
     'decision_making_score','perimeter_def_score','interior_def_score','activity_score',
     'rebounding_score','three_and_d_score','overall_def_score']);
-
-  const addMetric = (key, label, catKey, subLabel) => {
-    if (!key || seen.has(key) || SKIP.has(key)) return;
+  const addMetric=(key,label,catKey,subLabel,subKey,fmt)=>{
+    if(!key||seen.has(key)||SKIP.has(key))return;
     seen.add(key);
-    metrics.push({key, label, cat: catKey, catLabel: catLabels[catKey] || catKey, subLabel: subLabel || ''});
+    const isExtra=EXTRAS_LABELS.has(subLabel);
+    metrics.push({key,label,fmt:fmt||'2f',cat:catKey,catLabel:catLabels[catKey]||catKey,subLabel:subLabel||'',subKey:subKey||'',isExtra});
   };
-
-  for (const [catKey, cat] of Object.entries(NAV)) {
-    if (cat.flat) {
-      const fm = cat.flatMetrics;
-      for (const m of (fm || [])) {
-        if (m.isGroup && m.groupOptions) m.groupOptions.forEach(o => addMetric(o.key, o.label, catKey, 'External'));
-        else if (!m.soon) addMetric(m.key, m.label, catKey, 'Overall');
+  for(const[catKey,cat]of Object.entries(NAV)){
+    if(cat.flat){
+      const fm=cat.flatMetrics;
+      for(const m of(fm||[])){
+        if(m.isGroup&&m.groupOptions) m.groupOptions.forEach(o=>addMetric(o.key,o.label,catKey,'External','ext_external'));
+        else if(!m.soon) addMetric(m.key,m.label,catKey,'Overall','ext_overall',m.fmt);
       }
-    } else if (cat.subs) {
-      for (const sub of cat.subs) {
-        const mlist = sub.metrics || [];
-        for (const m of mlist) addMetric(m.key, m.label, catKey, sub.label);
+    } else if(cat.subs){
+      for(const sub of cat.subs){
+        const mlist=sub.metrics||[];
+        for(const m of mlist) addMetric(m.key,m.label,catKey,sub.label,`${catKey}_${sub.key}`,m.fmt);
       }
     }
   }
   return metrics;
 }
 
-let BUILDER_METRICS = [];
+let BUILDER_METRICS=[];
 
-function openBuilder() {
-  BUILDER.open = true;
+function openBuilder(){
+  BUILDER.open=true;
   document.getElementById('builder-overlay').classList.add('on');
-  document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.cat-tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('builder-tab').classList.add('active');
-
-  if (!BUILDER_METRICS.length) BUILDER_METRICS = buildMetricIndex();
-  renderBuilderCats();
-  renderBuilderMetrics();
-  renderBuilderChips();
-
-  if (!BUILDER.allPlayers.length) fetchBuilderPlayers();
-  if (!BUILDER.weightsLoaded) fetchWinCorrelations();
+  if(!BUILDER_METRICS.length) BUILDER_METRICS=buildMetricIndex();
+  renderBuilderCats(); renderBuilderMetrics(); renderBuilderChips();
+  if(!BUILDER.allPlayers.length) fetchBuilderPlayers();
+  if(!BUILDER.weightsLoaded) fetchWinCorrelations();
+  if(!BUILDER.percentilesLoaded) fetchPlayerPercentiles();
 }
 
-async function fetchWinCorrelations() {
-  try {
-    const res = await fetch(`${API}/api/win-correlations?season=${ST.season}`);
-    const data = await res.json();
-    BUILDER.correlations  = data.correlations || {};
-    BUILDER.weights       = data.weights      || {};
-    BUILDER.weightsLoaded = true;
+async function fetchWinCorrelations(){
+  try{
+    const res=await fetch(`${API}/api/win-correlations?season=${ST.season}`);
+    const data=await res.json();
+    BUILDER.correlations=data.correlations||{};
+    BUILDER.weights=data.weights||{};
+    BUILDER.weightsLoaded=true;
     console.log(`Win correlations loaded: ${Object.keys(BUILDER.weights).length} metrics`);
-  } catch(e) {
-    console.warn('Could not load win correlations — skill mode only', e);
-  }
+  }catch(e){console.warn('Could not load win correlations — skill mode only',e);}
+}
+async function fetchPlayerPercentiles(){
+  try{
+    const res=await fetch(`${API}/api/player-percentiles?season=${ST.season}`);
+    const data=await res.json();
+    BUILDER.pctiles=data.percentiles||{};
+    BUILDER.percentilesLoaded=true;
+    console.log(`Player percentiles loaded: ${Object.keys(BUILDER.pctiles).length} stats`);
+  }catch(e){console.warn('Could not load player percentiles — falling back to client-side',e);}
 }
 
-// Mode toggle
-document.getElementById('b-mode-toggle').querySelectorAll('.b-mode-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    BUILDER.mode = btn.dataset.mode;
-    document.querySelectorAll('.b-mode-btn').forEach(b => b.classList.remove('on'));
-    btn.classList.add('on');
-    // Re-run if results exist
-    if (BUILDER.results.length) runBuilderComposite();
-  });
+document.getElementById('b-win-toggle').addEventListener('click',function(){
+  BUILDER.winWeighted=!BUILDER.winWeighted;
+  this.classList.toggle('on',BUILDER.winWeighted);
+  if(BUILDER.results.length) runBuilderComposite();
 });
+document.getElementById('b-global-sel-all').addEventListener('click',()=>{
+  const nonExtra=BUILDER_METRICS.filter(m=>!m.isExtra);
+  const allSel=nonExtra.length>0&&nonExtra.every(m=>BUILDER.selected.some(s=>s.key===m.key));
+  if(allSel){const keys=new Set(nonExtra.map(m=>m.key));BUILDER.selected=BUILDER.selected.filter(s=>!keys.has(s.key));}
+  else{for(const m of nonExtra){if(!BUILDER.selected.some(s=>s.key===m.key))BUILDER.selected.push({...m});}}
+  renderBuilderMetrics();renderBuilderChips();
+  document.getElementById('builder-run').disabled=BUILDER.selected.length===0;
+});
+function closeBuilder(){BUILDER.open=false;document.getElementById('builder-overlay').classList.remove('on');}
+document.getElementById('builder-close').addEventListener('click',closeBuilder);
+document.getElementById('builder-tab').addEventListener('click',openBuilder);
 
-function closeBuilder() {
-  BUILDER.open = false;
-  document.getElementById('builder-overlay').classList.remove('on');
-}
-
-document.getElementById('builder-close').addEventListener('click', closeBuilder);
-document.getElementById('builder-tab').addEventListener('click', openBuilder);
-
-// Fetch all players (no pagination) for builder
-async function fetchBuilderPlayers() {
-  try {
-    const params = new URLSearchParams({
-      sort: 'creator_score', dir: 'desc', pos: 'ALL',
-      season: ST.season, min: 500, page: 1, per_page: 600,
-      min_ast_pg: 0, min_touches_pg: 0, min_drives_pg: 0,
-      min_paint_fga: 0, min_rim_fga: 0, min_3pt_fga: 0,
-    });
-    const res = await fetch(`${API}/api/players?${params}`);
-    const data = await res.json();
-    BUILDER.allPlayers = data.players || [];
+async function fetchBuilderPlayers(){
+  const btn=document.getElementById('builder-run');
+  const origText=btn.textContent;
+  btn.disabled=true;btn.textContent='Loading players…';
+  try{
+    const params=new URLSearchParams({sort:'creator_score',dir:'desc',pos:'ALL',season:ST.season,min:500,page:1,per_page:600,min_ast_pg:0,min_touches_pg:0,min_drives_pg:0,min_paint_fga:0,min_rim_fga:0,min_3pt_fga:0});
+    const res=await fetch(`${API}/api/players?${params}`);
+    const data=await res.json();
+    BUILDER.allPlayers=data.players||[];
     console.log(`Builder loaded ${BUILDER.allPlayers.length} players`);
-  } catch(e) {
-    console.error('Builder fetch failed', e);
+  }catch(e){console.error('Builder fetch failed',e);}
+  finally{
+    btn.textContent=origText;
+    btn.disabled=BUILDER.selected.length===0;
   }
 }
 
-// Re-fetch builder data when season changes (handled in season change listener below)
-
-function renderBuilderCats() {
-  const cats = ['ALL', ...new Set(BUILDER_METRICS.map(m => m.catLabel))];
-  const catKeys = {Scoring:'scoring',Playmaking:'playmaking',Defense:'defense',Hustle:'hustle',Metrics:'metrics'};
-  const el = document.getElementById('builder-cats');
-  el.innerHTML = cats.map(c => {
-    const ck = catKeys[c];
-    const col = ck ? CAT_COLORS[ck] : null;
-    const isOn = BUILDER.catFilter === c;
-    const style = isOn && col
-      ? `background:${col.bg};border-color:${col.border};color:${col.text}`
-      : isOn ? '' : '';
-    return `<button class="builder-cat-btn ${isOn ? 'on' : ''}" data-cat="${c}" style="${style}">${c}</button>`;
-  }).join('');
-  el.querySelectorAll('.builder-cat-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      BUILDER.catFilter = btn.dataset.cat;
-      renderBuilderCats();
-      renderBuilderMetrics();
-    });
-  });
-}
-
-// Category + subcategory color palette
-const CAT_COLORS = {
-  scoring:    { bg:'rgba(59,130,246,.12)',  text:'#3b82f6', border:'rgba(59,130,246,.25)' },
-  playmaking: { bg:'rgba(34,197,94,.12)',   text:'#22c55e', border:'rgba(34,197,94,.25)'  },
-  defense:    { bg:'rgba(239,68,68,.12)',   text:'#ef4444', border:'rgba(239,68,68,.25)'  },
-  hustle:     { bg:'rgba(234,179,8,.12)',   text:'#eab308', border:'rgba(234,179,8,.25)'  },
-  metrics:    { bg:'rgba(167,139,250,.12)', text:'#a78bfa', border:'rgba(167,139,250,.25)' },
+const CAT_COLORS={
+  scoring:{bg:'rgba(59,130,246,.12)',text:'#3b82f6',border:'rgba(59,130,246,.25)'},
+  playmaking:{bg:'rgba(34,197,94,.12)',text:'#22c55e',border:'rgba(34,197,94,.25)'},
+  defense:{bg:'rgba(239,68,68,.12)',text:'#ef4444',border:'rgba(239,68,68,.25)'},
+  hustle:{bg:'rgba(234,179,8,.12)',text:'#eab308',border:'rgba(234,179,8,.25)'},
+  metrics:{bg:'rgba(167,139,250,.12)',text:'#a78bfa',border:'rgba(167,139,250,.25)'},
 };
 
-function renderBuilderMetrics() {
-  const q = BUILDER.search.toLowerCase();
-  const list = document.getElementById('builder-metric-list');
+function renderBuilderCats(){
+  const cats=['ALL',...new Set(BUILDER_METRICS.map(m=>m.catLabel))];
+  const catKeys={Scoring:'scoring',Playmaking:'playmaking',Defense:'defense',Hustle:'hustle',Metrics:'metrics'};
+  const el=document.getElementById('builder-cats');
+  el.innerHTML=cats.map(c=>{
+    const ck=catKeys[c]; const col=ck?CAT_COLORS[ck]:null; const isOn=BUILDER.catFilter===c;
+    const style=isOn&&col?`background:${col.bg};border-color:${col.border};color:${col.text}`:'';
+    return `<button class="builder-cat-btn ${isOn?'on':''}" data-cat="${c}" style="${style}">${c}</button>`;
+  }).join('');
+  el.querySelectorAll('.builder-cat-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>{BUILDER.catFilter=btn.dataset.cat;renderBuilderCats();renderBuilderMetrics();});
+  });
+}
 
-  const filtered = BUILDER_METRICS.filter(m => {
-    if (BUILDER.catFilter !== 'ALL' && m.catLabel !== BUILDER.catFilter) return false;
-    if (q && !m.label.toLowerCase().includes(q) && !m.key.toLowerCase().includes(q)) return false;
+function getWinR(key){
+  const aliases={'cs_efg_pct':'spotup_efg_pct'};
+  const k=aliases[key]||key;
+  const r=BUILDER.correlations[k];
+  return r!==undefined?Math.abs(r):null;
+}
+function toggleSelectGroup(metricList){
+  const allSel=metricList.every(m=>BUILDER.selected.some(s=>s.key===m.key));
+  if(allSel){const keys=new Set(metricList.map(m=>m.key));BUILDER.selected=BUILDER.selected.filter(s=>!keys.has(s.key));}
+  else{for(const m of metricList){if(!BUILDER.selected.some(s=>s.key===m.key))BUILDER.selected.push({...m});}}
+  renderBuilderMetrics();renderBuilderChips();
+  document.getElementById('builder-run').disabled=BUILDER.selected.length===0;
+}
+function selAllLabel(metricList,prefix){
+  const allSel=metricList.length>0&&metricList.every(m=>BUILDER.selected.some(s=>s.key===m.key));
+  return allSel?`− deselect ${prefix}`:`+ all ${prefix}`;
+}
+function renderMetricRow(m,c,maxR){
+  const sel=BUILDER.selected.some(s=>s.key===m.key);
+  const r=getWinR(m.key);
+  const barW=r!==null?Math.round((r/maxR)*100):0;
+  const barColor=r!==null&&r>0.15?'var(--accent)':r!==null&&r>0.07?'#f59e0b':'var(--border3)';
+  const rTitle=r!==null?` · win r=${r.toFixed(3)}`:'';
+  return `<div class="bm-item ${sel?'selected':''}" data-key="${m.key}" title="${m.label}${rTitle}" style="${sel?`--bm-sel-border:${c.text}`:''}">
+    <div class="bm-check" style="${sel?`background:${c.text};border-color:${c.text}`:''}"><div class="bm-check-inner"></div></div>
+    <div class="bm-label">${m.label}</div>
+    <div class="bm-impact-bar"><div class="bm-impact-fill" style="width:${barW}%;background:${barColor}"></div></div>
+  </div>`;
+}
+function renderBuilderMetrics(){
+  const q=BUILDER.search.toLowerCase();
+  const list=document.getElementById('builder-metric-list');
+  const filtered=BUILDER_METRICS.filter(m=>{
+    if(BUILDER.catFilter!=='ALL'&&m.catLabel!==BUILDER.catFilter)return false;
+    if(q&&!m.label.toLowerCase().includes(q)&&!m.key.toLowerCase().includes(q))return false;
     return true;
   });
-
-  if (!filtered.length) {
-    list.innerHTML = `<div style="padding:20px;text-align:center;font-size:11px;color:var(--text3);font-family:var(--fm)">No metrics found</div>`;
-    return;
-  }
-
-  // Group by cat → subLabel
-  const groups = {};
-  for (const m of filtered) {
-    const gk = `${m.cat}||${m.subLabel}`;
-    if (!groups[gk]) groups[gk] = {cat: m.cat, catLabel: m.catLabel, subLabel: m.subLabel, items: []};
+  if(!filtered.length){list.innerHTML=`<div style="padding:20px;text-align:center;font-size:11px;color:var(--text3);font-family:var(--fm)">No metrics found</div>`;return;}
+  const allR=BUILDER_METRICS.map(m=>getWinR(m.key)).filter(v=>v!==null);
+  const maxR=allR.length?Math.max(...allR):1;
+  const groups={};
+  for(const m of filtered){
+    const gk=`${m.cat}||${m.subLabel}`;
+    if(!groups[gk]) groups[gk]={cat:m.cat,catLabel:m.catLabel,subLabel:m.subLabel,isExtra:m.isExtra,items:[]};
     groups[gk].items.push(m);
   }
-
-  let html = '';
-  let lastCat = null;
-
-  for (const gk of Object.keys(groups)) {
-    const g = groups[gk];
-    const c = CAT_COLORS[g.cat] || CAT_COLORS.metrics;
-
-    // Cat separator if changed
-    if (g.cat !== lastCat) {
-      lastCat = g.cat;
-      if (html) html += `<div style="height:4px"></div>`;
-    }
-
-    // Subcategory header
-    html += `<div class="bm-sub-header" style="--sub-bg:${c.bg};--sub-text:${c.text};--sub-border:${c.border}">
-      <span class="bm-sub-cat">${g.catLabel}</span>
-      <span class="bm-sub-name">${g.subLabel}</span>
-    </div>`;
-
-    for (const m of g.items) {
-      const sel = BUILDER.selected.some(s => s.key === m.key);
-      html += `<div class="bm-item ${sel ? 'selected' : ''}" data-key="${m.key}" style="${sel ? `--bm-sel-border:${c.text}` : ''}">
-        <div class="bm-check" style="${sel ? `background:${c.text};border-color:${c.text}` : ''}"><div class="bm-check-inner"></div></div>
-        <div class="bm-label">${m.label}</div>
+  let html=''; let lastCat=null;
+  for(const[gk,g] of Object.entries(groups)){
+    const c=CAT_COLORS[g.cat]||CAT_COLORS.metrics;
+    if(g.cat!==lastCat){
+      lastCat=g.cat;
+      if(html) html+=`<div style="height:2px"></div>`;
+      const catNonExtra=BUILDER_METRICS.filter(m=>m.cat===g.cat&&!m.isExtra);
+      html+=`<div class="bm-cat-header">
+        <span class="bm-cat-label" style="color:${c.text}">${g.catLabel}</span>
+        <button class="bm-cat-sel-all" data-sel-cat="${g.cat}" style="border-color:${c.border};color:${c.text}">${selAllLabel(catNonExtra,g.catLabel.toLowerCase())}</button>
       </div>`;
     }
+    if(g.isExtra){
+      const isOpen=BUILDER.expandedExtras.has(gk)||q.length>0;
+      html+=`<div class="bm-sub-header extras-header" data-extras-gk="${gk}" style="--sub-bg:${c.bg};--sub-text:${c.text};--sub-border:${c.border}">
+        <span class="bm-sub-cat">${g.catLabel}</span>
+        <span class="bm-sub-name">${g.subLabel}</span>
+        <span class="bm-extras-chevron ${isOpen?'open':''}">▶</span>
+      </div>`;
+      if(isOpen) for(const m of g.items) html+=renderMetricRow(m,c,maxR);
+    } else {
+      html+=`<div class="bm-sub-header" style="--sub-bg:${c.bg};--sub-text:${c.text};--sub-border:${c.border}">
+        <span class="bm-sub-cat">${g.catLabel}</span>
+        <span class="bm-sub-name">${g.subLabel}</span>
+        <button class="bm-sel-all" data-sel-gk="${gk}">${selAllLabel(g.items,g.subLabel.toLowerCase())}</button>
+      </div>`;
+      for(const m of g.items) html+=renderMetricRow(m,c,maxR);
+    }
   }
-
-  list.innerHTML = html;
-
-  list.querySelectorAll('.bm-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const key = item.dataset.key;
-      const idx = BUILDER.selected.findIndex(s => s.key === key);
-      if (idx >= 0) {
-        BUILDER.selected.splice(idx, 1);
-      } else {
-        const meta = BUILDER_METRICS.find(m => m.key === key);
-        BUILDER.selected.push({...meta, weight: 1});
-      }
+  list.innerHTML=html;
+  list.querySelectorAll('.bm-item').forEach(item=>{
+    item.addEventListener('click',()=>{
+      const key=item.dataset.key;
+      const idx=BUILDER.selected.findIndex(s=>s.key===key);
+      if(idx>=0) BUILDER.selected.splice(idx,1);
+      else{const meta=BUILDER_METRICS.find(m=>m.key===key);BUILDER.selected.push({...meta});}
+      renderBuilderMetrics();renderBuilderChips();
+      document.getElementById('builder-run').disabled=BUILDER.selected.length===0;
+    });
+  });
+  list.querySelectorAll('.bm-sel-all').forEach(btn=>{
+    btn.addEventListener('click',e=>{e.stopPropagation();const gk=btn.dataset.selGk;if(groups[gk])toggleSelectGroup(groups[gk].items);});
+  });
+  list.querySelectorAll('.bm-cat-sel-all').forEach(btn=>{
+    btn.addEventListener('click',e=>{e.stopPropagation();toggleSelectGroup(BUILDER_METRICS.filter(m=>m.cat===btn.dataset.selCat&&!m.isExtra));});
+  });
+  list.querySelectorAll('.extras-header').forEach(hdr=>{
+    hdr.addEventListener('click',()=>{
+      const gk=hdr.dataset.extrasGk;
+      if(BUILDER.expandedExtras.has(gk)) BUILDER.expandedExtras.delete(gk);
+      else BUILDER.expandedExtras.add(gk);
       renderBuilderMetrics();
-      renderBuilderChips();
-      document.getElementById('builder-run').disabled = BUILDER.selected.length === 0;
     });
   });
 }
 
-function renderBuilderChips() {
-  const el = document.getElementById('builder-chips');
-  const count = document.getElementById('builder-sel-count');
-  count.textContent = `${BUILDER.selected.length} metric${BUILDER.selected.length !== 1 ? 's' : ''} selected`;
-
-  if (!BUILDER.selected.length) {
-    el.innerHTML = `<div style="font-size:11px;color:var(--text4);font-family:var(--fm);padding:4px 0">None yet — click metrics above</div>`;
-    return;
-  }
-
-  el.innerHTML = BUILDER.selected.map((m, i) => {
-    const c = CAT_COLORS[m.cat] || CAT_COLORS.metrics;
-    return `<div class="b-chip" data-i="${i}" style="border-color:${c.border}">
+function renderBuilderChips(){
+  const el=document.getElementById('builder-chips');
+  const count=document.getElementById('builder-sel-count');
+  count.textContent=`${BUILDER.selected.length} metric${BUILDER.selected.length!==1?'s':''} selected`;
+  if(!BUILDER.selected.length){el.innerHTML=`<div style="font-size:11px;color:var(--text4);font-family:var(--fm);padding:4px 0">None yet — click metrics above</div>`;return;}
+  el.innerHTML=BUILDER.selected.map((m,i)=>{
+    const c=CAT_COLORS[m.cat]||CAT_COLORS.metrics;
+    const r=getWinR(m.key);
+    const rStr=r!==null?`<span class="b-chip-r">r=${r.toFixed(2)}</span>`:'';
+    return `<div class="b-chip" style="border-color:${c.border}">
       <span class="b-chip-label" title="${m.label}" style="color:${c.text}">${m.label}</span>
-      <input class="b-chip-weight" type="number" min="0.1" max="10" step="0.5" value="${m.weight}" data-i="${i}" title="Weight">
+      ${rStr}
       <button class="b-chip-remove" data-i="${i}">×</button>
     </div>`;
   }).join('');
-
-  el.querySelectorAll('.b-chip-weight').forEach(inp => {
-    inp.addEventListener('change', () => {
-      const i = parseInt(inp.dataset.i);
-      BUILDER.selected[i].weight = Math.max(0.1, parseFloat(inp.value) || 1);
-    });
-  });
-  el.querySelectorAll('.b-chip-remove').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const i = parseInt(btn.dataset.i);
-      BUILDER.selected.splice(i, 1);
-      renderBuilderMetrics();
-      renderBuilderChips();
-      document.getElementById('builder-run').disabled = BUILDER.selected.length === 0;
+  el.querySelectorAll('.b-chip-remove').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      BUILDER.selected.splice(parseInt(btn.dataset.i),1);
+      renderBuilderMetrics();renderBuilderChips();
+      document.getElementById('builder-run').disabled=BUILDER.selected.length===0;
     });
   });
 }
 
-document.getElementById('builder-search').addEventListener('input', e => {
-  BUILDER.search = e.target.value;
-  renderBuilderMetrics();
+document.getElementById('builder-search').addEventListener('input',e=>{BUILDER.search=e.target.value;renderBuilderMetrics();});
+document.getElementById('b-pos-filter').querySelectorAll('.builder-pos-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{BUILDER.posFilter=btn.dataset.pos;document.querySelectorAll('.builder-pos-btn').forEach(b=>b.classList.remove('on'));btn.classList.add('on');renderBuilderResults();});
 });
+document.getElementById('builder-clear-all').addEventListener('click',()=>{BUILDER.selected=[];renderBuilderMetrics();renderBuilderChips();document.getElementById('builder-run').disabled=true;});
+document.getElementById('builder-run').addEventListener('click',()=>runBuilderComposite());
 
-// ── Position filter ────────────────────────
-document.getElementById('b-pos-filter').querySelectorAll('.builder-pos-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    BUILDER.posFilter = btn.dataset.pos;
-    document.querySelectorAll('.builder-pos-btn').forEach(b => b.classList.remove('on'));
-    btn.classList.add('on');
-    renderBuilderResults();
-  });
-});
+// ── Builder gate functions — mirror compute_metrics.py passes_gate() exactly ──
+// Each returns true if the player has sufficient volume to have a meaningful
+// percentile for stats in that sub-composite. Per-game rates only, no GP floor.
+const BUILDER_GATES = {
+  // Mirror compute_metrics.py passes_gate() exactly — per-game only, no GP floor.
+  // Storage: ast, fga = per-game avg. drives, touches, paint_touches, potential_ast,
+  //          def_rim_fga = season totals (need /gp).
+  finishing:    p => (p.paint_touches||0)/Math.max(p.gp||1,1) >= 3.0,
+  shooting:     p => (p.fga||0) >= 3.0,  // fga is already per-game avg
+  shot_creation:p => (p.drives||0)/Math.max(p.gp||1,1) >= 2.0,
+  passing:      p => (p.ast||0) >= 1.5 &&   // ast is per-game avg
+                     (p.potential_ast||0)/Math.max(p.gp||1,1) >= 3.0,
+  pm_creation:  p => (p.potential_ast||0)/Math.max(p.gp||1,1) >= 3.0 &&
+                     (p.touches||0)/Math.max(p.gp||1,1) >= 40.0,
+  ball_handling:p => (p.drives||0)/Math.max(p.gp||1,1) >= 4.0 &&
+                     (p.touches||0)/Math.max(p.gp||1,1) >= 40.0,
+  interior_def: p => (p.def_rim_fga||0)/Math.max(p.gp||1,1) >= 2.5,
+  // pnr_bh_poss is stored as a per-game value from Synergy (no /gp)
+  pnr_bh_poss:  p => (p.pnr_bh_poss||0) >= 5.0,
+  // Shooting stat-level gates — per-game FGA minimums
+  spotup:       p => (p.cs_fga||0)/Math.max(p.gp||1,1) >= 2.0,
+  pullup:       p => (p.pull_up_fga||0)/Math.max(p.gp||1,1) >= 1.5,
+};
 
-// ── Run composite ──────────────────────────
-document.getElementById('builder-clear-all').addEventListener('click', () => {
-  BUILDER.selected = [];
-  renderBuilderMetrics();
-  renderBuilderChips();
-  document.getElementById('builder-run').disabled = true;
-});
+// Maps each raw stat key → the composite-level gate the PLAYER must pass.
+// If a player fails this gate, they get null for the stat regardless of their raw value.
+// This mirrors passes_gate() in compute_composites — players who don't qualify
+// for a sub-composite don't appear in those results.
+const STAT_GATE_MAP = {
+  // Finishing — gate: paint_touches/g >= 3.0
+  paint_efg_vw:'finishing', paint_scoring_rate:'finishing',
+  drive_pts_per_drive:'finishing', drive_foul_rate:'finishing',
+  pnr_roll_ppp:'finishing', post_ppp:'finishing', transition_ppp:'finishing',
+  // Shooting — gate: fga/g >= 3.0
+  cs_efg_pct:'spotup', spotup_efg_pct:'spotup',
+  all3_efg_vw:'shooting', midrange_efg_vw:'shooting',
+  sq_fg_pct_above_expected:'shooting',
+  // Shot creation — gate: drives/g >= 2.0
+  pct_uast_fgm:'shot_creation', iso_ppp:'shot_creation',
+  pull_up_efg_pct:'pullup', drive_fg_pct:'shot_creation',
+  usg_pct:'shot_creation', tov_pct:'shot_creation', leverage_shooting:'shot_creation',
+  // Passing — gate: ast/g >= 1.5 AND potential_ast/g >= 3.0
+  pot_ast_per_tov:'passing', ast_pct:'passing', pass_quality_index:'passing',
+  // Creation — gate: potential_ast/g >= 3.0 AND touches/g >= 40.0
+  leverage_creation:'pm_creation', ast_pts_created_pg:'pm_creation', ft_ast_per75:'pm_creation',
+  // Ball handling — gate: drives/g >= 4.0 AND touches/g >= 40.0
+  // ALL ball handling stats require the composite gate — lost ball is only
+  // meaningful in context of a high-touch ball handler
+  lost_ball_tov_pg:'ball_handling',
+  pnr_bh_ppp:'ball_handling',  // composite gate; pnr_bh_poss gate applied server-side
+  // Interior defense — gate: def_rim_fga/g >= 2.5
+  rim_protection_score:'interior_def', def_delta_2pt:'interior_def',
+  def_post_ppp:'interior_def', def_pnr_roll_ppp:'interior_def',
+};
 
-document.getElementById('builder-run').addEventListener('click', runBuilderComposite);
+async function runBuilderComposite(){
+  if(!BUILDER.selected.length)return;
+  if(!BUILDER.allPlayers.length){
+    await fetchBuilderPlayers();
+    if(!BUILDER.allPlayers.length){alert('Could not load player data. Check your connection.');return;}
+  }
+  if(!BUILDER.percentilesLoaded) await fetchPlayerPercentiles();
+  const metrics=BUILDER.selected;
+  const isImpact=BUILDER.winWeighted&&BUILDER.weightsLoaded;
 
-function runBuilderComposite() {
-  if (!BUILDER.selected.length) return;
-  if (!BUILDER.allPlayers.length) {
-    alert('Still loading player data, try again in a moment.');
-    return;
+  const LOWER_BETTER=new Set(['tov','tov_pct','def_rating','def_iso_ppp','def_pnr_bh_ppp','def_post_ppp','def_spotup_ppp','def_pnr_roll_ppp','matchup_def_fg_pct','lost_ball_tov_pg','bad_pass_tov_pg']);
+
+  // Build gated percentile pools — each stat ranks only qualifying players,
+  // matching the backend's percentile_map() pools exactly.
+  const vals={};
+  for(const m of metrics){
+    const gateKey=STAT_GATE_MAP[m.key];
+    const gateFn=gateKey?BUILDER_GATES[gateKey]:null;
+    const pool=BUILDER.allPlayers.filter(p=>!gateFn||gateFn(p));
+    const raw=pool.map(p=>parseFloat(p[m.key])).filter(v=>!isNaN(v)&&v!==null);
+    raw.sort((a,b)=>a-b);
+    vals[m.key]={arr:raw, pool:new Set(pool.map(p=>p.player_id))};
   }
 
-  const metrics    = BUILDER.selected;
-  const isImpact   = BUILDER.mode === 'impact' && BUILDER.weightsLoaded;
-
-  // Pre-compute raw percentile maps for each selected metric
-  const vals = {};
-  for (const m of metrics) {
-    const raw = BUILDER.allPlayers
-      .map(p => parseFloat(p[m.key]))
-      .filter(v => !isNaN(v) && v !== null);
-    raw.sort((a, b) => a - b);
-    vals[m.key] = raw;
-  }
-
-  const LOWER_BETTER = new Set([
-    'tov','tov_pct','def_rating','def_iso_ppp','def_pnr_bh_ppp',
-    'def_post_ppp','def_spotup_ppp','def_pnr_roll_ppp',
-    'matchup_def_fg_pct','lost_ball_tov_pg','bad_pass_tov_pg',
-  ]);
-
-  function pctileOf(key, val) {
-    const arr = vals[key];
-    if (!arr || !arr.length || val === null || isNaN(parseFloat(val))) return null;
-    const n = parseFloat(val);
-    let lo = 0, hi = arr.length;
-    while (lo < hi) { const mid = (lo+hi)>>1; if(arr[mid] < n) lo=mid+1; else hi=mid; }
-    const pct = (lo / arr.length) * 100;
-    return LOWER_BETTER.has(key) ? 100 - pct : pct;
-  }
-
-  // Some NAV display keys differ from the underlying stat key in the correlations JSON
-  const KEY_ALIASES = {
-    'cs_efg_pct':        'spotup_efg_pct',
-    'all3_efg_vw':       'all3_efg_vw',
-    'midrange_efg_vw':   'midrange_efg_vw',
-    'above_break3_efg_vw': 'above_break3_efg_vw',
-    'corner3_efg_vw':    'corner3_efg_vw',
-    'sq_fg_pct_above_expected': 'sq_fg_pct_above_expected',
-    'lost_ball_tov_pg':  'lost_ball_tov_pg',
-    'bad_pass_tov_pg':   'bad_pass_tov_pg',
-    'def_delta_overall': 'def_delta_overall',
-    'def_delta_3pt':     'def_delta_3pt',
-    'def_delta_2pt':     'def_delta_2pt',
+  // Map from NAV stat key → the key used in server percentile maps.
+  // Lower-better stats are stored inverted (_inv) in pct_lg so higher pctile = better.
+  // Defensive PPP stats are also stored inverted.
+  const SERVER_KEY_MAP = {
+    'lost_ball_tov_pg':   'lost_ball_tov_pg_inv',
+    'bad_pass_tov_pg':    'bad_pass_tov_pg',      // display only, not in composite
+    'tov_pct':            'tov_pct_inv',
+    'def_spotup_ppp':     'def_spotup_ppp_inv',
+    'def_post_ppp':       'def_post_ppp_inv',
+    'def_pnr_roll_ppp':   'def_pnr_roll_ppp_inv',
+    'def_iso_ppp':        'def_iso_ppp_inv',
+    'def_pnr_bh_ppp':     'def_pnr_bh_ppp_inv',
+    'matchup_def_fg_pct': 'matchup_def_fg_pct_inv',
   };
 
-  function winWeightFor(key) {
-    const lookup = KEY_ALIASES[key] || key;
-    return BUILDER.weights[lookup];
-  }
+  function pctileOf(key,p){
+    const pid=String(p.player_id);
+    // Apply composite-level gate first — if player doesn't qualify for the
+    // sub-composite, they get null regardless of their raw value.
+    const gateKey=STAT_GATE_MAP[key];
+    const gateFn=gateKey?BUILDER_GATES[gateKey]:null;
+    if(gateFn&&!gateFn(p)) return null;
 
-  function corrFor(key) {
-    const lookup = KEY_ALIASES[key] || key;
-    return BUILDER.correlations[lookup];
-  }
-
-  function effectiveWeight(m) {
-    if (!isImpact) return m.weight;
-    const winW = winWeightFor(m.key);
-    return winW !== undefined ? m.weight * winW : m.weight * 0.1;
-  }
-
-  BUILDER.results = BUILDER.allPlayers.map(p => {
-    const breakdown = [];
-    let weightedSum = 0, totalWeight = 0;
-    for (const m of metrics) {
-      const pct = pctileOf(m.key, p[m.key]);
-      if (pct !== null) {
-        const w = effectiveWeight(m);
-        weightedSum += pct * w;
-        totalWeight += w;
-        const winW = winWeightFor(m.key);
-        const corr = corrFor(m.key);
-        breakdown.push({
-          label: m.label,
-          pct: pct.toFixed(1),
-          weight: m.weight,
-          winWeight: winW !== undefined ? winW.toFixed(3) : null,
-          corr: corr !== undefined ? corr.toFixed(2) : null,
-        });
-      }
+    // Use server-side pre-computed percentiles when available —
+    // these exactly match the backend gating, VW logic, and pool composition.
+    if(BUILDER.percentilesLoaded){
+      // Resolve to the server-side key (inverted stats use _inv version)
+      const serverKey=SERVER_KEY_MAP[key]||key;
+      // Try league-wide first, then pos-normalized (stored with __pos suffix)
+      const lgMap=BUILDER.pctiles[serverKey];
+      if(lgMap&&pid in lgMap) return lgMap[pid];
+      const posMap=BUILDER.pctiles[serverKey+'__pos'];
+      if(posMap&&pid in posMap) return posMap[pid];
+      // Not in server map = player didn't qualify for this stat's gate
+      return null;
     }
-    const score = totalWeight > 0 ? weightedSum / totalWeight : null;
-    return {...p, _score: score, _breakdown: breakdown, _covered: breakdown.length};
-  }).filter(p => p._score !== null && p._covered >= Math.ceil(metrics.length / 2));
+    // Fallback: client-side percentile (used before server fetch completes)
+    const entry=vals[key];
+    if(!entry)return null;
+    if(!entry.pool.has(p.player_id))return null;
+    const val=p[key];
+    if(val===null||val===undefined||isNaN(parseFloat(val)))return null;
+    const arr=entry.arr; const n=parseFloat(val);
+    let lo=0,hi=arr.length;
+    while(lo<hi){const mid=(lo+hi)>>1;if(arr[mid]<n)lo=mid+1;else hi=mid;}
+    const pct=(lo/arr.length)*100;
+    return LOWER_BETTER.has(key)?100-pct:pct;
+  }
 
-  BUILDER.results.sort((a, b) => b._score - a._score);
+  const KEY_ALIASES={'cs_efg_pct':'spotup_efg_pct','all3_efg_vw':'all3_efg_vw','midrange_efg_vw':'midrange_efg_vw','above_break3_efg_vw':'above_break3_efg_vw','corner3_efg_vw':'corner3_efg_vw','sq_fg_pct_above_expected':'sq_fg_pct_above_expected','lost_ball_tov_pg':'lost_ball_tov_pg','bad_pass_tov_pg':'bad_pass_tov_pg','def_delta_overall':'def_delta_overall','def_delta_3pt':'def_delta_3pt','def_delta_2pt':'def_delta_2pt'};
+  function winWeightFor(key){return BUILDER.weights[KEY_ALIASES[key]||key];}
+  function corrFor(key){return BUILDER.correlations[KEY_ALIASES[key]||key];}
+  const FALLBACK_W=0.05;
+  function effectiveWeight(m){if(!isImpact)return 1.0;const r=getWinR(m.key);return r!==null?r:FALLBACK_W;}
 
-  // Build formula label
-  const modeLabel = isImpact ? '⚡ Impact' : '📊 Skill';
-  const parts = metrics.map(m => {
-    const corr = corrFor(m.key);
-    if (isImpact && corr !== undefined) {
-      return `${m.label} (r=${corr.toFixed(2)})`;
+  BUILDER.results=BUILDER.allPlayers.map(p=>{
+    const breakdown=[];let weightedSum=0,totalWeight=0;
+    for(const m of metrics){
+      const pct=pctileOf(m.key,p);
+      if(pct!==null){const w=effectiveWeight(m);weightedSum+=pct*w;totalWeight+=w;
+          const raw=parseFloat(p[m.key]);
+          breakdown.push({key:m.key,label:m.label,pct,w,cat:m.cat,raw:isNaN(raw)?null:raw,fmt:m.fmt});}
     }
-    return m.weight !== 1 ? `${m.label} ×${m.weight}` : m.label;
+    if(totalWeight<=0){return{...p,_score:null,_breakdown:breakdown,_covered:breakdown.length};}
+    // Scale score by coverage ratio to penalise specialists with many null stats.
+    // A player with 15/47 valid stats scores lower than one with 40/47,
+    // even if their valid-stat average is the same.
+    const rawScore=weightedSum/totalWeight;
+    const coverageRatio=breakdown.length/metrics.length;
+    // Exponent 0.5 = square-root penalty: mild for near-complete players,
+    // significant for low-coverage specialists.
+    const score=rawScore*Math.pow(coverageRatio,0.5);
+    return{...p,_score:score,_breakdown:breakdown,_covered:breakdown.length};
   });
-  document.getElementById('builder-formula').textContent = `${modeLabel}: ${parts.join(' + ')}`;
+  // Mirror backend min_metrics rule: ≤2 stats selected → need 1. 3+ → need 2.
+  const minCov = metrics.length <= 2 ? 1 : 2;
+  BUILDER.results = BUILDER.results.filter(p=>p._score!==null&&p._covered>=minCov);
 
+  BUILDER.results.sort((a,b)=>b._score-a._score);
+  console.log(`Builder: ${BUILDER.allPlayers.length} players, ${BUILDER.results.length} results after filter`);
+  const modeLabel=isImpact?'⚡ Win-Weighted':'📊 Flat';
+  const parts=metrics.map(m=>{const corr=corrFor(m.key);return isImpact&&corr!==undefined?`${m.label} (r=${corr.toFixed(2)})`:m.label;});
+  document.getElementById('builder-formula').textContent=`${modeLabel}: ${parts.join(' + ')}`;
   renderBuilderResults();
 }
 
-function renderBuilderResults() {
-  const posFilter = BUILDER.posFilter;
-  const filtered = BUILDER.results.filter(p =>
-    posFilter === 'ALL' || p.position_group === posFilter
-  );
-
-  const empty = document.getElementById('builder-empty');
-  const table = document.getElementById('b-table');
-  const tbody = document.getElementById('b-tbody');
-  const countEl = document.getElementById('b-result-count');
-
-  if (!filtered.length) {
-    empty.style.display = 'flex';
-    table.style.display = 'none';
-    countEl.textContent = '';
+function buildDonut(slices){
+  const svg=document.getElementById('b-donut-svg');
+  const R=38,cx=50,cy=50,stroke=14;
+  let html='';let angle=0;
+  for(const s of slices){
+    const deg=s.pct/100*360;const GAP=2;
+    const rg1=(angle+GAP/2)*(Math.PI/180),rg2=(angle+deg-GAP/2)*(Math.PI/180);
+    const gx1=cx+R*Math.cos(rg1),gy1=cy+R*Math.sin(rg1);
+    const gx2=cx+R*Math.cos(rg2),gy2=cy+R*Math.sin(rg2);
+    if(deg>GAP) html+=`<path d="M${gx1.toFixed(2)} ${gy1.toFixed(2)} A${R} ${R} 0 ${deg-GAP>180?1:0} 1 ${gx2.toFixed(2)} ${gy2.toFixed(2)}" fill="none" stroke="${s.color}" stroke-width="${stroke}" stroke-linecap="round"/>`;
+    angle+=deg;
+  }
+  svg.innerHTML=html;
+}
+function renderSpotlight(filtered,idx){
+  const spot=document.getElementById('b-spotlight');
+  if(!filtered.length){spot.classList.remove('visible');return;}
+  idx=Math.max(0,Math.min(idx||0,filtered.length-1));
+  const p=filtered[idx];
+  spot.classList.add('visible');
+  const spotImg=document.getElementById('b-spot-img');
+  spotImg.style.opacity='1';
+  spotImg.src=`https://cdn.nba.com/headshots/nba/latest/1040x760/${p.player_id}.png`;
+  document.getElementById('b-spot-rank-label').textContent=`#${idx+1} Match`;
+  document.getElementById('b-spot-name').textContent=p.player_name;
+  document.getElementById('b-spot-meta').textContent=[p.position_group,p.team_abbreviation].filter(Boolean).join(' · ');
+  document.getElementById('b-spot-score-val').textContent=p._score.toFixed(1);
+  document.getElementById('b-donut-n').textContent=p._breakdown.length;
+  const bd=p._breakdown;const totalW=bd.reduce((s,b)=>s+b.w,0);
+  const slices=bd.map((b,i)=>({key:b.key,label:b.label,w:b.w,pct:totalW>0?(b.w/totalW)*100:100/bd.length,playerPct:b.pct,raw:b.raw,fmt:b.fmt,color:DONUT_PALETTE[i%DONUT_PALETTE.length]})).sort((a,b)=>b.w-a.w);
+  buildDonut(slices);
+  const maxPct=Math.max(...slices.map(s=>s.pct));
+  document.getElementById('b-legend').innerHTML=slices.map(s=>{
+    const rawStr=fmtRaw(s.raw,s.fmt,s.key);
+    const title=rawStr?`${s.label}: ${s.playerPct.toFixed(1)}th pctile (${rawStr})`:`${s.label}: ${s.playerPct.toFixed(1)}th pctile`;
+    const pctColor=s.playerPct>=75?'var(--green,#22c55e)':s.playerPct>=45?'var(--text2)':'var(--red,#ef4444)';
+    return `<div class="b-legend-row" title="${title}">
+      <div class="b-legend-dot" style="background:${s.color}"></div>
+      <div class="b-legend-name">${s.label}</div>
+      <div class="b-legend-bar-wrap"><div class="b-legend-bar-fill" style="width:${Math.round(s.pct/maxPct*100)}%;background:${s.color}"></div></div>
+      <div class="b-legend-pct" style="color:${pctColor}">${s.playerPct.toFixed(0)}p</div>
+    </div>`;}).join('');
+}
+function fmtRaw(val,fmt,key){
+  if(val===null||val===undefined||isNaN(val))return null;
+  // Lower-is-better — show raw as-is (the inversion is only for percentile)
+  if(fmt==='pct') return (val*100).toFixed(1)+'%';
+  if(fmt==='3f')  return val.toFixed(3);
+  if(fmt==='2f')  return val.toFixed(2);
+  if(fmt==='1f')  return val.toFixed(1);
+  if(fmt==='int') return Math.round(val).toString();
+  return val.toFixed(2);
+}
+function renderBuilderResults(){
+  const posFilter=BUILDER.posFilter;
+  const filtered=BUILDER.results.filter(p=>posFilter==='ALL'||p.position_group===posFilter);
+  const empty=document.getElementById('builder-empty');
+  const table=document.getElementById('b-table');
+  const tbody=document.getElementById('b-tbody');
+  const countEl=document.getElementById('b-result-count');
+  if(!filtered.length){
+    empty.style.display='flex';table.style.display='none';countEl.textContent='';
+    document.getElementById('b-spotlight').classList.remove('visible');
     return;
   }
-
-  empty.style.display = 'none';
-  table.style.display = 'table';
-  countEl.textContent = `${filtered.length} players`;
-
-  const maxScore = filtered[0]._score || 100;
-
-  tbody.innerHTML = filtered.map((p, i) => {
-    const rank = i + 1;
-    const rankCls = rank===1?'t1':rank===2?'t2':rank===3?'t3':'';
-    const barPct = (p._score / maxScore * 100).toFixed(1);
-    const bdText = p._breakdown.map(b => {
-      const isImpact = BUILDER.mode === 'impact' && BUILDER.weightsLoaded;
-      return isImpact && b.winWeight
-        ? `${b.label}: ${b.pct} (r-wt:${b.winWeight})`
-        : `${b.label}${b.weight !== 1 ? ` ×${b.weight}` : ''}: ${b.pct}`;
+  empty.style.display='none';table.style.display='table';countEl.textContent=`${filtered.length} players`;
+  renderSpotlight(filtered,BUILDER.spotlightIdx);
+  const maxScore=filtered[0]._score||100;
+  tbody.innerHTML=filtered.map((p,i)=>{
+    const rank=i+1;const rankCls=rank===1?'t1':rank===2?'t2':rank===3?'t3':'';
+    const barPct=(p._score/maxScore*100).toFixed(1);
+    const bdText=p._breakdown.map(b=>{
+      const rawStr=fmtRaw(b.raw,b.fmt,b.key);
+      const pctStr=b.pct.toFixed(0)+'p';
+      return rawStr?`${b.label}: ${pctStr} (${rawStr})`:`${b.label}: ${pctStr}`;
     }).join(' · ');
-    return `<tr>
+    const isSel=i===BUILDER.spotlightIdx;
+    return `<tr class="${isSel?'b-row-selected':''}" data-idx="${i}" style="cursor:pointer">
       <td><div class="b-rank ${rankCls}">${rank}</div></td>
-      <td>
-        <div style="display:flex;align-items:center;gap:8px">
-          <img src="https://cdn.nba.com/headshots/nba/latest/1040x760/${p.player_id}.png"
-            onerror="this.style.opacity=0" alt=""
-            style="width:28px;height:21px;object-fit:cover;border-radius:2px;opacity:1">
-          <div>
-            <span class="b-pname">${p.player_name}</span>
-            <span class="b-pos">${p.position_group||''}</span>
-          </div>
-        </div>
-      </td>
-      <td class="b-bar-cell">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div class="b-bar" style="flex:1"><div class="b-bar-f" style="width:${barPct}%"></div></div>
-          <div class="b-score">${p._score.toFixed(1)}</div>
-        </div>
-      </td>
+      <td><div style="display:flex;align-items:center;gap:8px">
+        <img src="https://cdn.nba.com/headshots/nba/latest/1040x760/${p.player_id}.png" onerror="this.style.opacity=0" alt="" style="width:28px;height:21px;object-fit:cover;border-radius:2px">
+        <div><span class="b-pname">${p.player_name}</span><span class="b-pos">${p.position_group||''}</span></div>
+      </div></td>
+      <td class="b-bar-cell"><div style="display:flex;align-items:center;gap:8px">
+        <div class="b-bar" style="flex:1"><div class="b-bar-f" style="width:${barPct}%"></div></div>
+        <div class="b-score">${p._score.toFixed(1)}</div>
+      </div></td>
       <td><div class="b-breakdown" title="${bdText}">${bdText}</div></td>
     </tr>`;
   }).join('');
+  tbody.querySelectorAll('tr[data-idx]').forEach(row=>{
+    row.addEventListener('click',()=>{
+      BUILDER.spotlightIdx=parseInt(row.dataset.idx);
+      renderBuilderResults();
+    });
+  });
 }
 
+// ── Season init ───────────────────────────
 fetch(`${API}/api/seasons`).then(r=>r.json()).then(seasons=>{
-  if (!seasons || !seasons.length) return;
+  if(!seasons||!seasons.length)return;
+  const sel=document.getElementById('season-select');
+  seasons.forEach(s=>{const opt=document.createElement('option');opt.value=s.season;opt.textContent=s.season;sel.appendChild(opt);});
+  ST.season=seasons[0].season;
+  sel.value=ST.season;
 
-  const sel = document.getElementById('season-select');
+  // Load composite weights for initial season
+  fetchCompositeWeights(ST.season);
 
-  // Populate dropdown — most recent first (API already orders DESC)
-  seasons.forEach(s => {
-    const opt = document.createElement('option');
-    opt.value = s.season;
-    opt.textContent = s.season;
-    sel.appendChild(opt);
+  renderSidebar(); renderHeader(); fetchPlayers();
+
+  sel.addEventListener('change',()=>{
+    ST.season=sel.value; ST.page=1;
+    // Reload composite weights when season changes
+    fetchCompositeWeights(ST.season);
+    if(BUILDER.open){BUILDER.allPlayers=[];fetchBuilderPlayers();BUILDER.percentilesLoaded=false;fetchPlayerPercentiles();}
+    renderSidebar(); updateViewLabel(); renderHeader(); fetchPlayers();
   });
-
-  // Default to most recent
-  ST.season = seasons[0].season;
-  sel.value = ST.season;
-
-  // Re-render sidebar in case DARKO visibility changed
-  renderSidebar();
-  renderHeader();
-  fetchPlayers();
-
-  // Season change handler
-  sel.addEventListener('change', () => {
-    ST.season = sel.value;
-    ST.page   = 1;
-    // Re-fetch builder data too
-    if (BUILDER.open) { BUILDER.allPlayers = []; fetchBuilderPlayers(); }
-    renderSidebar();
-    updateViewLabel();
-    renderHeader();
-    fetchPlayers();
-  });
-}).catch(()=>{
-  fetchPlayers();
-});
+}).catch(()=>{fetchPlayers();});
 </script>
 </body>
 </html>

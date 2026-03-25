@@ -101,6 +101,8 @@ migrations = [
     # ── turnover type columns ────────────────────────────────────────────────
     ("player_seasons",  "bad_pass_tov",               "REAL"),
     ("player_seasons",  "lost_ball_tov",               "REAL"),
+    # ── PnR ballhandler possessions ─────────────────────────────────────────
+    ("player_seasons",  "pnr_bh_poss",                "REAL"),
 ]
 
 print(f"\nRunning migrations...")
@@ -120,4 +122,4 @@ conn.close()
 
 print(f"{'─'*50}")
 print(f"\n✅ Migration complete.")
-print(f"\nNext step: python backend/ingest/compute_metrics.py")
+print(f"\nNext step: python backend/ingest/fetch_season.py")

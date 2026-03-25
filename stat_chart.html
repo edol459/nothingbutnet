@@ -40,11 +40,15 @@ tr:last-child td{border-bottom:none}
 .tag-lg{background:#0a1828;color:#60a5fa;border-color:#1a3050}
 .tag-comp{background:#0a2010;color:#34d399;border-color:#1a4030}
 .tag-raw{color:#555;border-color:#1e1e1e}
+.tag-inv{background:#2a1010;color:#f87171;border-color:#4a2020}
 </style>
 </head>
 <body>
-<h1>The Impact Board — Stat Reference</h1>
-<p class="subtitle">All stats, composites, formulas, gates, and normalization methods. Shaded rows = composites. Last updated: 2026-03-21.</p>
+<div style="display:flex;align-items:center;gap:16px;margin-bottom:6px">
+  <h1 style="margin:0">The Impact Board — Stat Reference</h1>
+  <a href="index.html" style="font-size:11px;color:#555;text-decoration:none;border:1px solid #2a2a2a;padding:3px 10px;border-radius:4px;transition:all .15s" onmouseover="this.style.color='#f97316';this.style.borderColor='#f97316'" onmouseout="this.style.color='#555';this.style.borderColor='#2a2a2a'">← Back to Board</a>
+</div>
+<p class="subtitle">All stats, composites, formulas, gates, and weighting methods. Reflects current <code>compute_metrics.py</code> methodology.</p>
 
 <div class="filters">
   <input type="text" id="search" placeholder="Search stats, formulas…">
@@ -65,10 +69,10 @@ tr:last-child td{border-bottom:none}
 <thead><tr>
   <th style="width:90px">Category</th>
   <th style="width:155px">Sub-category</th>
-  <th style="width:170px">Stat</th>
+  <th style="width:175px">Stat</th>
   <th>Formula / Description</th>
-  <th style="width:250px">Gate / Min requirements</th>
-  <th style="width:95px">Normalization</th>
+  <th style="width:270px">Gate / Min requirements</th>
+  <th style="width:105px">Norm</th>
 </tr></thead>
 <tbody id="tbody"></tbody>
 </table>
@@ -77,325 +81,511 @@ tr:last-child td{border-bottom:none}
 <script>
 const ROWS=[
 
-  // ─── SCORING ─────────────────────────────────────────────────────────────
-  {cat:'scoring',sub:'Overall',name:'Creator Score',type:'composite',norm:'lg',
-   formula:'Avg of available: Finishing + Shooting + Shot Creation scores',
-   min:'1000 min. Shot Creation required (drives gate). Finishing + Shooting optional.'},
+  // ══════════════════════════════════════════════════════════════
+  // SCORING
+  // ══════════════════════════════════════════════════════════════
 
-  {cat:'scoring',sub:'Finishing',name:'Finishing Score',type:'composite',norm:'pos',
-   formula:'Avg percentile of: Paint EFG+, Paint Scoring Rate, Pts/Drive, Drive Foul Rate, Roll Man PPP, Post PPP. Min 1 of 6.',
-   min:'Gate: ≥ 3.0 paint touches/g. Also requires paint_efg_vw OR paint_scoring_rate non-NULL.'},
-  {cat:'scoring',sub:'Finishing',name:'Paint EFG+',type:'metric',norm:'pos',
-   formula:'(Paint EFG% − Lg Avg Paint EFG%) × Paint FGA/g',
-   min:'≥ 2.0 paint FGA/g. Zero = NULL in percentile pool.'},
-  {cat:'scoring',sub:'Finishing',name:'Paint Scoring Rate',type:'metric',norm:'pos',
-   formula:'Paint PTS / Paint Touches',
-   min:'NULL if paint_touches = 0.'},
-  {cat:'scoring',sub:'Finishing',name:'Pts Per Drive',type:'metric',norm:'pos',
-   formula:'Drive PTS / Drives',
-   min:'≥ 2.0 drives/g. NULL below threshold.'},
-  {cat:'scoring',sub:'Finishing',name:'Drive Foul Rate',type:'metric',norm:'pos',
-   formula:'Drive PF Drawn / Drives',
-   min:'≥ 2.0 drives/g. NULL below threshold.'},
-  {cat:'scoring',sub:'Finishing',name:'Roll Man PPP',type:'metric',norm:'pos',
-   formula:'Roll man points per possession (Synergy)',
-   min:'NULL if no roll man possessions.'},
-  {cat:'scoring',sub:'Finishing',name:'Post PPP',type:'metric',norm:'pos',
-   formula:'Post-up points per possession (Synergy)',
-   min:'NULL if no post-up possessions.'},
+  // ── Creator Score (category) ──────────────────────────────────
+  {cat:'scoring',sub:'Overall',name:'Creator Score',type:'composite',norm:'lg',inv:false,
+   formula:'Flat avg of available sub-scores: Finishing + Shooting + Shot Creation.\n'
+          +'Requires shot_creation_score non-NULL. Finishing and shooting are optional.\n'
+          +'No anchors, no blending with outcome metrics.',
+   min:'No hard minutes cutoff. shot_creation_score is REQUIRED; others averaged in when non-null.'},
 
-  {cat:'scoring',sub:'Shooting',name:'Shooting Score',type:'composite',norm:'lg',
-   formula:'Avg percentile of: C&S EFG%, All3 EFG+, Midrange EFG+, FG% Above Expected. Min 2 of 4.',
-   min:'Gate: ≥ 3.0 FGA/g. C&S EFG% NULL if below lg avg (0.535). FG% Above Exp: 130 players, NULL-skipped.'},
-  {cat:'scoring',sub:'Shooting',name:'C&S EFG% (Spotup)',type:'metric',norm:'lg',
-   formula:'(CS FGM + 0.5×CS FG3M) / CS FGA',
-   min:'≥ 50 C&S FGA. NULL if below lg avg C&S EFG% (≈0.535) — pull-up specialists not penalized.'},
-  {cat:'scoring',sub:'Shooting',name:'All3 EFG+',type:'metric',norm:'lg',
-   formula:'(3PT EFG% − Lg Avg 3PT EFG%) × 3PA/g',
-   min:'≥ 1.5 3PA/g (server gate, adjustable). Zero = NULL.'},
-  {cat:'scoring',sub:'Shooting',name:'Midrange EFG+',type:'metric',norm:'lg',
-   formula:'(Mid EFG% − Lg Avg Mid EFG%) × Mid FGA/g',
-   min:'≥ 1.0 mid FGA/g. Zero = NULL.'},
-  {cat:'scoring',sub:'Shooting',name:'FG% Above Expected',type:'metric',norm:'lg',
-   formula:'FGPCTABOVEEXPECTED (NBA Stats shotqualityleaders)',
-   min:'130 players (manually imported per season). FG% vs expected given shot difficulty. Below-expected hurts percentile.'},
-  {cat:'scoring',sub:'Shooting (extras)',name:'True Shooting %',type:'metric',norm:'lg',
-   formula:'PTS / (2 × (FGA + 0.44 × FTA))',
+  // ── Finishing Score ───────────────────────────────────────────
+  {cat:'scoring',sub:'Finishing',name:'Finishing Score',type:'composite',norm:'pos',inv:false,
+   formula:'win-corr weighted avg percentile of 7 stats (see below). Min 2 of 7 non-NULL (or 1 if ≤2 stats available). '
+          +'ADDITIONALLY requires paint_efg_vw OR paint_scoring_rate to be non-NULL — pure off-ball finishers excluded.',
+   min:'Composite gate (passes_gate "finishing"): ≥ 3.0 paint_touches/g (season total ÷ gp). '
+      +'Position-normalized percentiles (vs all positions combined). No minimum-minutes hard cutoff.'},
+
+  {cat:'scoring',sub:'Finishing',name:'Paint EFG+',type:'metric',norm:'pos',inv:false,
+   formula:'(Paint EFG% − Lg Avg Paint EFG%) × Paint FGA/g\nwhere Paint EFG% = (paint_fgm + 0.5×paint_fg3m) / paint_fga',
+   min:'Zone gate: ≥ 2.0 paint FGA/g (ZONE_MIN_FGA_PG). Values of 0.0 are excluded from percentile pool (VW_METRICS). '
+      +'Paint EFG+ is a REQUIRED anchor for finishing_score — if NULL, entire finishing score = NULL.'},
+
+  {cat:'scoring',sub:'Finishing',name:'Paint Scoring Rate',type:'metric',norm:'pos',inv:false,
+   formula:'pts_paint / paint_touches',
+   min:'Percentile gate: paint_touches/gp < 10.0 → NULL before percentile ranking (then restored). '
+      +'Paint scoring rate is also a REQUIRED anchor for finishing_score (either this or paint_efg_vw must be non-NULL).'},
+
+  {cat:'scoring',sub:'Finishing',name:'Pts Per Drive',type:'metric',norm:'pos',inv:false,
+   formula:'drive_pts / drives',
+   min:'Requires drives/g ≥ 2.0 (drive_foul_rate gate; same applies). NULL if drives = 0.'},
+
+  {cat:'scoring',sub:'Finishing',name:'Drive Foul Rate',type:'metric',norm:'pos',inv:false,
+   formula:'drive_pf / drives',
+   min:'Requires drives/g ≥ 2.0. NULL if drives = 0.'},
+
+  {cat:'scoring',sub:'Finishing',name:'Roll Man PPP',type:'metric',norm:'pos',inv:false,
+   formula:'pnr_roll_ppp (Synergy, offensive)',
+   min:'Percentile gate: pnr_roll_poss/gp < 2.0 → NULL before percentile ranking (then restored). '
+      +'NULL if no roll poss.'},
+
+  {cat:'scoring',sub:'Finishing',name:'Post PPP',type:'metric',norm:'pos',inv:false,
+   formula:'post_ppp (Synergy, offensive)',
+   min:'Percentile gate: post_poss/gp < 2.0 → NULL before percentile ranking (then restored). '
+      +'NULL if no post poss.'},
+
+  {cat:'scoring',sub:'Finishing',name:'Transition PPP',type:'metric',norm:'lg',inv:false,
+   formula:'transition_ppp (Synergy, offensive)',
+   min:'Percentile gate: transition_fga/gp < 0.5 → NULL before percentile ranking (then restored). '
+      +'Note: in finishing composite uses league-wide percentile pool (listed in ALL_METRICS_LG for pnr_bh, transition).'},
+
+  // ── Shooting Score ────────────────────────────────────────────
+  {cat:'scoring',sub:'Shooting',name:'Shooting Score',type:'composite',norm:'lg',inv:false,
+   formula:'win-corr weighted avg percentile of 4 stats: C&S EFG%, All3 EFG+, Midrange EFG+, FG% Above Expected. '
+          +'Min 2 of 4 non-NULL.',
+   min:'Composite gate (passes_gate "shooting"): fga/g ≥ 3.0 (per-game avg). '
+      +'League-wide percentiles. No min-minutes hard cutoff.'},
+
+  {cat:'scoring',sub:'Shooting',name:'C&S EFG% (spotup)',type:'metric',norm:'lg',inv:false,
+   formula:'(cs_fgm + 0.5×cs_fg3m) / cs_fga\n(stored as spotup_efg_pct in percentile pool key)',
+   min:'Previously nulled below lg avg (0.535) — NOW no pre-null applied. All C&S shooters included in percentile pool. '
+      +'Gate removed per code comment: "Below-average catch-and-shoot EFG% naturally ranks low."'},
+
+  {cat:'scoring',sub:'Shooting',name:'All3 EFG+',type:'metric',norm:'lg',inv:false,
+   formula:'(all3_fgm×1.5 / all3_fga) − lg_avg_3pt_efg) × all3_fga_pg\nCombined corner + above-break 3PT',
+   min:'Zone gate: ≥ 1.5 above_break3 FGA/g (ZONE_MIN_FGA_PG for above_break3). '
+      +'Zero values excluded from percentile pool (VW_METRICS). '
+      +'Server also applies adjustable 3pt gate (default 1.5 FGA/g).'},
+
+  {cat:'scoring',sub:'Shooting',name:'Midrange EFG+',type:'metric',norm:'lg',inv:false,
+   formula:'(midrange_fgm / midrange_fga − lg_avg_mid_efg) × midrange_fga_pg',
+   min:'Zone gate: ≥ 1.0 mid FGA/g (ZONE_MIN_FGA_PG). Zero values excluded from percentile pool.'},
+
+  {cat:'scoring',sub:'Shooting',name:'FG% Above Expected',type:'metric',norm:'lg',inv:false,
+   formula:'sq_fg_pct_above_expected (NBA Stats shotqualityleaders — FGPCTABOVEEXPECTED)',
+   min:'Manually imported ~130 players. NULL-skipped if unavailable (min_metrics=2 of 4 handles this).'},
+
+  {cat:'scoring',sub:'Shooting (extras)',name:'True Shooting %',type:'metric',norm:'lg',inv:false,
+   formula:'pts / (2 × (fga + 0.44 × fta))',
    min:'Display only.'},
-  {cat:'scoring',sub:'Shooting (extras)',name:'EFG%',type:'metric',norm:'lg',
-   formula:'(FGM + 0.5 × FG3M) / FGA',
-   min:'Display only.'},
-  {cat:'scoring',sub:'Shooting (extras)',name:'Avg Shot Quality',type:'metric',norm:'lg',
-   formula:'AVGSHOTQUALITY (NBA Stats shotqualityleaders)',
-   min:'130 players. Difficulty of shots attempted. Display only.'},
-  {cat:'scoring',sub:'Shooting (extras)',name:'Clutch Net Rating',type:'metric',norm:'lg',
-   formula:'Off Rtg − Def Rtg in clutch (score ≤5, final 5 min)',
-   min:'Sufficient clutch minutes per NBA threshold. Display only.'},
-  {cat:'scoring',sub:'Shooting (extras)',name:'3PT EFG+ (Corner)',type:'metric',norm:'lg',
-   formula:'(Corner 3 EFG% − Lg Avg) × Corner 3PA/g',
-   min:'≥ 0.5 corner 3PA/g. Display only.'},
-  {cat:'scoring',sub:'Shooting (extras)',name:'3PT EFG+ (Above Break)',type:'metric',norm:'lg',
-   formula:'(AB3 EFG% − Lg Avg) × AB3 FGA/g',
-   min:'≥ 1.5 AB3PA/g. Display only.'},
 
-  {cat:'scoring',sub:'Shot Creation',name:'Shot Creation Score',type:'composite',norm:'lg',
-   formula:'Avg percentile of: Unassisted FGM%, ISO PPP, Pull-Up EFG%, Drive FG%, USG%, TOV% inv, Leverage Shooting. Min 2 of 7.',
-   min:'Gate: ≥ 2.0 drives/g (server gate, adjustable). TOV% inverted. Leverage Shooting NULL-skipped (247 players).'},
-  {cat:'scoring',sub:'Shot Creation',name:'Unassisted FGM%',type:'metric',norm:'lg',
-   formula:'Unassisted FGM / Total FGM',
-   min:'1000 min.'},
-  {cat:'scoring',sub:'Shot Creation',name:'ISO PPP',type:'metric',norm:'lg',
-   formula:'ISO points / ISO possessions (Synergy)',
-   min:'NULL if no ISO possessions.'},
-  {cat:'scoring',sub:'Shot Creation',name:'Pull-Up EFG%',type:'metric',norm:'lg',
-   formula:'(PU FGM + 0.5×PU FG3M) / PU FGA',
-   min:'≥ 50 pull-up FGA (season).'},
-  {cat:'scoring',sub:'Shot Creation',name:'Drive FG%',type:'metric',norm:'lg',
-   formula:'Drive FGM / Drive FGA',
+  {cat:'scoring',sub:'Shooting (extras)',name:'EFG%',type:'metric',norm:'lg',inv:false,
+   formula:'(fgm + 0.5 × fg3m) / fga',
+   min:'Display only.'},
+
+  {cat:'scoring',sub:'Shooting (extras)',name:'Avg Shot Quality',type:'metric',norm:'lg',inv:false,
+   formula:'sq_avg_shot_quality (NBA Stats shotqualityleaders — AVGSHOTQUALITY)',
+   min:'~130 players. Display only.'},
+
+  {cat:'scoring',sub:'Shooting (extras)',name:'Clutch Net Rating',type:'metric',norm:'lg',inv:false,
+   formula:'Off Rtg − Def Rtg in clutch (score within 5, last 5 min)',
+   min:'Display only.'},
+
+  {cat:'scoring',sub:'Shooting (extras)',name:'Corner 3 EFG+',type:'metric',norm:'lg',inv:false,
+   formula:'(corner_fgm×1.5 / corner_fga − lg_avg_corner_efg) × corner_fga_pg',
+   min:'Zone gate: ≥ 0.5 corner 3PA/g (ZONE_MIN_FGA_PG). Display only.'},
+
+  {cat:'scoring',sub:'Shooting (extras)',name:'Above Break 3 EFG+',type:'metric',norm:'lg',inv:false,
+   formula:'(ab3_fgm×1.5 / ab3_fga − lg_avg_ab3_efg) × ab3_fga_pg',
+   min:'Zone gate: ≥ 1.5 AB3 FGA/g (ZONE_MIN_FGA_PG). Display only.'},
+
+  // ── Shot Creation Score ───────────────────────────────────────
+  {cat:'scoring',sub:'Shot Creation',name:'Shot Creation Score',type:'composite',norm:'lg',inv:false,
+   formula:'win-corr weighted avg percentile of 7 stats: Unassisted FGM%, ISO PPP, Pull-Up EFG%, '
+          +'Drive FG%, USG%, TOV% (inverted), Leverage Shooting. Min 2 of 7 non-NULL.',
+   min:'Composite gate (passes_gate "shot_creation"): drives/gp ≥ 2.0 (season total ÷ gp). '
+      +'REQUIRED for creator_score — if NULL, creator_score = NULL. League-wide percentiles.'},
+
+  {cat:'scoring',sub:'Shot Creation',name:'Unassisted FGM%',type:'metric',norm:'lg',inv:false,
+   formula:'pct_uast_fgm = unassisted FGM / total FGM',
+   min:'No individual gate beyond composite gate.'},
+
+  {cat:'scoring',sub:'Shot Creation',name:'ISO PPP',type:'metric',norm:'lg',inv:false,
+   formula:'iso_ppp (Synergy, offensive)',
+   min:'NULL if no ISO poss. NULL-skipped in composite (counts toward min_metrics only if non-NULL).'},
+
+  {cat:'scoring',sub:'Shot Creation',name:'Pull-Up EFG%',type:'metric',norm:'lg',inv:false,
+   formula:'(pull_up_fgm + 0.5×pull_up_fg3m) / pull_up_fga',
+   min:'Compute gate: ≥ 50 pull-up FGA (season). NULL below.'},
+
+  {cat:'scoring',sub:'Shot Creation',name:'Drive FG%',type:'metric',norm:'lg',inv:false,
+   formula:'drive_fgm / drive_fga',
    min:'NULL if drive_fga = 0.'},
-  {cat:'scoring',sub:'Shot Creation',name:'USG%',type:'metric',norm:'lg',
-   formula:'(FGA + 0.44×FTA + TOV) / (Team Poss / 5)',
-   min:'1000 min.'},
-  {cat:'scoring',sub:'Shot Creation',name:'TOV% (inverted)',type:'metric',norm:'lg',
-   formula:'100 − percentile(TOV / (FGA + 0.44×FTA + TOV))',
-   min:'Lower turnover rate = higher percentile.'},
-  {cat:'scoring',sub:'Shot Creation',name:'Leverage Shooting',type:'metric',norm:'lg',
-   formula:'SHOOTING field (NBA Stats leverageleaders)',
-   min:'247 players (manually imported). On/off shooting leverage.'},
-  {cat:'scoring',sub:'Shot Creation (extras)',name:'Creation Delta',type:'metric',norm:'lg',
-   formula:'Pull-Up EFG% − C&S EFG%',
-   min:'≥ 50 pull-up AND ≥ 50 C&S FGA. Display only.'},
 
-  // ─── PLAYMAKING ──────────────────────────────────────────────────────────
-  {cat:'playmaking',sub:'Overall',name:'Playmaker Score',type:'composite',norm:'lg',
-   formula:'Avg of available: Passing + Creation + Ball Handling scores',
-   min:'1000 min. Requires passing_score non-NULL. Creation gate: ≥ 3 pot AST/g + ≥ 40 touches/g + ≥ 30 GP (all positions). Ball Handling gate: ≥ 4 drives/g + ≥ 40 touches/g + ≥ 30 GP.'},
+  {cat:'scoring',sub:'Shot Creation',name:'USG%',type:'metric',norm:'lg',inv:false,
+   formula:'usg_pct from advanced game logs',
+   min:'No individual gate.'},
 
-  {cat:'playmaking',sub:'Passing',name:'Passing Score',type:'composite',norm:'lg',
-   formula:'Avg percentile of: Pot AST/BP TOV (required), AST%, Pass Quality Index. Min 2 of 3 — pot_ast_per_tov must be non-NULL.',
-   min:'All positions. Gate: ≥ 2.0 AST/g + ≥ 3.0 pot AST/g + ≥ 30 GP.'},
-  {cat:'playmaking',sub:'Passing',name:'Pot AST / BP TOV',type:'metric',norm:'lg',
-   formula:'(Potential AST/G) / (Bad Pass TOV/G)',
-   min:'Requires pot AST/g ≥ 3.0. PBP-derived bad_pass_tov specifically. Falls back to total TOV if PBP unavailable. REQUIRED anchor — NULL here = no passing score.'},
-  {cat:'playmaking',sub:'Passing',name:'AST%',type:'metric',norm:'lg',
-   formula:'100 × AST / (((MP / (Team MP / 5)) × Team FGM) − FGM)',
-   min:'Normalizes assists for team FGM context.'},
-  {cat:'playmaking',sub:'Passing',name:'Pass Quality Index',type:'metric',norm:'lg',
-   formula:'(AST Pts Created/G) / (Passes Made/G)',
+  {cat:'scoring',sub:'Shot Creation',name:'TOV% (inverted)',type:'metric',norm:'lg',inv:true,
+   formula:'tov_pct = tov / (fga + 0.44×fta + tov)\nInverted: percentile pool = 100 − rank(tov_pct)\nLower turnover rate → higher percentile',
+   min:'NULL if fga + fta + tov = 0. Lower is better — LOWER_BETTER set.'},
+
+  {cat:'scoring',sub:'Shot Creation',name:'Leverage Shooting',type:'metric',norm:'lg',inv:false,
+   formula:'leverage_shooting (NBA Stats leverageleaders — SHOOTING field)',
+   min:'~247 players. NULL-skipped if unavailable.'},
+
+  {cat:'scoring',sub:'Shot Creation (extras)',name:'Creation Delta',type:'metric',norm:'lg',inv:false,
+   formula:'pull_up_efg_pct − cs_efg_pct',
+   min:'Compute gate: ≥ 50 pull-up AND ≥ 50 C&S FGA (MIN_PULL_UP_FGA, MIN_CS_FGA). Display only.'},
+
+  // ══════════════════════════════════════════════════════════════
+  // PLAYMAKING
+  // ══════════════════════════════════════════════════════════════
+
+  {cat:'playmaking',sub:'Overall',name:'Playmaker Score',type:'composite',norm:'lg',inv:false,
+   formula:'Best 2 of available sub-scores: Passing + Creation + Ball Handling.\n'
+          +'If all 3 qualify, the lowest sub-score is dropped — ball handling never penalises\n'
+          +'a player who does not run PnR-BH as their primary role.',
+   min:'Requires passing_score non-NULL. Takes best 2 of available sub-scores.\n'
+      +'passing gate: AST/g ≥ 1.5 AND potential_ast/g ≥ 3.0 (no GP floor).'},
+
+  // ── Passing Score ─────────────────────────────────────────────
+  {cat:'playmaking',sub:'Passing',name:'Passing Score',type:'composite',norm:'lg',inv:false,
+   formula:'Win-corr weighted avg of: Pot AST/BP TOV, AST%, Pass Quality Index.\n'
+          +'Stats weighted by raw |r| with net_pts100. Min 2 of 3 non-null.',
+   min:'Gate: AST/g ≥ 1.5 AND potential_ast/g ≥ 3.0 (no GP floor).'},
+
+  {cat:'playmaking',sub:'Passing',name:'Pot AST / BP TOV',type:'metric',norm:'lg',inv:false,
+   formula:'(potential_ast/gp) / (bad_pass_tov/gp)\nFalls back to tov/g if bad_pass_tov = 0 or unavailable, '
+          +'but only when potential_ast/g ≥ 3.0',
+   min:'Required: potential_ast/g ≥ 3.0. Uses PBP-derived bad_pass_tov specifically. '
+      +'If pot_ast_per_tov = NULL → passing_score = NULL → playmaker_score = NULL.'},
+
+  {cat:'playmaking',sub:'Passing',name:'AST%',type:'metric',norm:'lg',inv:false,
+   formula:'ast_pct from advanced game logs',
+   min:'No individual gate.'},
+
+  {cat:'playmaking',sub:'Passing',name:'Pass Quality Index',type:'metric',norm:'lg',inv:false,
+   formula:'ast_pts_created_pg / (passes_made/gp)',
    min:'NULL if passes_made = 0.'},
-  {cat:'playmaking',sub:'Passing (extras)',name:'Potential AST / 75',type:'metric',norm:'lg',
-   formula:'(Potential AST / GP) × (75 / Poss/G)',
+
+  {cat:'playmaking',sub:'Passing (extras)',name:'Potential AST / 75',type:'metric',norm:'lg',inv:false,
+   formula:'(potential_ast/gp) × (75/poss_pg)',
    min:'Display only.'},
-  {cat:'playmaking',sub:'Passing (extras)',name:'AST Conversion Rate',type:'metric',norm:'lg',
-   formula:'AST / Potential AST',
+
+  {cat:'playmaking',sub:'Passing (extras)',name:'AST Conversion Rate',type:'metric',norm:'lg',inv:false,
+   formula:'ast / (potential_ast/gp)',
    min:'Display only.'},
-  {cat:'playmaking',sub:'Passing (extras)',name:'Pass → Score %',type:'metric',norm:'lg',
-   formula:'AST / (Passes Made / GP)',
-   min:'Display only.'},
-  {cat:'playmaking',sub:'Passing (extras)',name:'FT AST / 75',type:'metric',norm:'lg',
-   formula:'(FT AST / GP) × (75 / Poss/G)',
-   min:'Display only. Also in Creation composite.'},
-  {cat:'playmaking',sub:'Passing (extras)',name:'Drive AST / 75',type:'metric',norm:'lg',
-   formula:'(Drive AST / GP) × (75 / Poss/G)',
-   min:'≥ 2.0 drives/g. Display only.'},
-  {cat:'playmaking',sub:'Passing (extras)',name:'Secondary AST / 75',type:'metric',norm:'lg',
-   formula:'(Secondary AST / GP) × (75 / Poss/G)',
+
+  {cat:'playmaking',sub:'Passing (extras)',name:'Pass → Score %',type:'metric',norm:'lg',inv:false,
+   formula:'ast / (passes_made/gp)',
+   min:'NULL if passes_made = 0. Display only.'},
+
+  {cat:'playmaking',sub:'Passing (extras)',name:'Secondary AST / 75',type:'metric',norm:'lg',inv:false,
+   formula:'(secondary_ast/gp) × (75/poss_pg)',
    min:'Display only — hockey assists.'},
 
-  {cat:'playmaking',sub:'Creation',name:'Creation Score',type:'composite',norm:'lg',
-   formula:'Avg percentile of: Leverage Creation, AST Pts Created/G, FT AST/75. Min 2 of 3.',
-   min:'All positions. Gate: ≥ 3.0 pot AST/g + ≥ 40 touches/g + ≥ 30 GP. Style-agnostic — rewards all creation methods equally (post, drive, PnR).'},
-  {cat:'playmaking',sub:'Creation',name:'Leverage Creation',type:'metric',norm:'lg',
-   formula:'CREATION field (NBA Stats leverageleaders)',
-   min:'247 players (manually imported per season). On/off creation leverage.'},
-  {cat:'playmaking',sub:'Creation',name:'AST Pts Created/G',type:'metric',norm:'lg',
-   formula:'AST Pts Created / GP (NBA Tracking — passing endpoint)',
-   min:'Points created for teammates via assists per game.'},
-  {cat:'playmaking',sub:'Creation',name:'FT AST / 75',type:'metric',norm:'lg',
-   formula:'(FT AST / GP) × (75 / Poss/G)',
-   min:'Captures post passers and PnR passers whose value shows at the free-throw line.'},
-  {cat:'playmaking',sub:'Creation (extras)',name:'Gravity Score',type:'metric',norm:'lg',
-   formula:'AVGGRAVITYSCORE (NBA Stats gravityleaders)',
-   min:'247 players. Display only — not in composite (interior gravity negative for post-up bigs, making overall gravity unreliable).'},
-  {cat:'playmaking',sub:'Creation (extras)',name:'Gravity × MPG',type:'metric',norm:'lg',
-   formula:'On-Ball Perimeter Gravity × MPG',
-   min:'Mirrors GV-MP on NBA.com. Display only.'},
-  {cat:'playmaking',sub:'Creation (extras)',name:'On-Ball Perim Gravity',type:'metric',norm:'lg',
-   formula:'AVGONBALLPERIMETERGRAVITYSCORE (NBA Stats)',
-   min:'Display only.'},
-  {cat:'playmaking',sub:'Creation (extras)',name:'Off-Ball Perim Gravity',type:'metric',norm:'lg',
-   formula:'AVGOFFBALLPERIMETERGRAVITYSCORE (NBA Stats)',
-   min:'Display only — spacing threat.'},
-  {cat:'playmaking',sub:'Creation (extras)',name:'Leverage Full',type:'metric',norm:'lg',
-   formula:'FULL field (NBA Stats leverageleaders)',
-   min:'Display only. Combined on/off offense + defense leverage.'},
+  {cat:'playmaking',sub:'Passing (extras)',name:'Drive AST / 75',type:'metric',norm:'lg',inv:false,
+   formula:'(drive_ast/gp) × (75/poss_pg)',
+   min:'Requires drives/g ≥ 2.0 for non-NULL. Display only.'},
 
-  {cat:'playmaking',sub:'Ball Handling',name:'Ball Handling Score',type:'composite',norm:'lg',
-   formula:'Avg percentile of: Lost Ball/100 Touches (inverted), P&R BH PPP. BOTH required.',
-   min:'Gate: ≥ 4.0 drives/g + ≥ 40 touches/g + ≥ 30 GP. P&R BH PPP additionally requires ≥ 3.0 PnR BH FGA/g — players without sufficient PnR volume get NULL for entire composite.'},
-  {cat:'playmaking',sub:'Ball Handling',name:'Lost Ball / 100 Touches',type:'metric',norm:'lg',
-   formula:'(Lost Ball TOV/G) / (Touches/G) × 100 — inverted in composite (100 − percentile)',
-   min:'PBP-derived via PlayByPlayV3. Cascading fallback: direct lost_ball_tov → implied (TOV − bad pass TOV) → total TOV. Touches normalization prevents penalizing high-usage players for raw count.'},
-  {cat:'playmaking',sub:'Ball Handling',name:'P&R BH PPP',type:'metric',norm:'lg',
-   formula:'Pick-and-roll ball handler points per possession (Synergy)',
-   min:'≥ 3.0 PnR BH FGA/g (per-game avg). Below threshold → NULL in percentile pool → NULL for entire composite.'},
-  {cat:'playmaking',sub:'Ball Handling (extras)',name:'Bad Pass / 100 Touches',type:'metric',norm:'lg',
-   formula:'(Bad Pass TOV/G) / (Touches/G) × 100',
-   min:'PBP-derived. Display only — decision quality covered by Pot AST/BP TOV in passing.'},
-  {cat:'playmaking',sub:'Ball Handling (extras)',name:'Transition PPP',type:'metric',norm:'lg',
-   formula:'Transition points per possession (Synergy)',
-   min:'≥ 2.0 transition FGA/g. Display only.'},
-  {cat:'playmaking',sub:'Ball Handling (extras)',name:'Drive & Dish %',type:'metric',norm:'lg',
-   formula:'Drive Passes / (Drive FGA + Drive TOV + Drive Passes)',
-   min:'≥ 2.0 drives/g. Display only — style descriptor.'},
-  {cat:'playmaking',sub:'Ball Handling (extras)',name:'Drive Passes / 75',type:'metric',norm:'lg',
-   formula:'(Drive Passes/G) × (75 / Poss/G)',
-   min:'≥ 2.0 drives/g. Display only.'},
-  {cat:'playmaking',sub:'Ball Handling (extras)',name:'Ball Handler Load',type:'metric',norm:'lg',
-   formula:'(Time of Poss/G) / MPG',
-   min:'Display only. Fraction of floor time spent holding ball.'},
-  {cat:'playmaking',sub:'Ball Handling (extras)',name:'PM Gravity (computed)',type:'metric',norm:'lg',
-   formula:'(AST Pts Created/G) / (Time of Poss / MPG)',
-   min:'Display only. Points created per unit of possession time.'},
-  {cat:'playmaking',sub:'Shot Quality (extras)',name:'FG% Above Expected',type:'metric',norm:'lg',
-   formula:'FGPCTABOVEEXPECTED (NBA Stats shotqualityleaders)',
-   min:'130 players. Also used in Shooting composite. Display here for context.'},
-  {cat:'playmaking',sub:'Shot Quality (extras)',name:'Avg Shot Quality',type:'metric',norm:'lg',
-   formula:'AVGSHOTQUALITY (NBA Stats)',
-   min:'130 players. Display only.'},
+  // ── Creation Score ────────────────────────────────────────────
+  {cat:'playmaking',sub:'Creation',name:'Creation Score',type:'composite',norm:'lg',inv:false,
+   formula:'Win-corr weighted avg of: Leverage Creation, AST Pts Created/G, FT AST/75.\n'
+          +'Stats weighted by raw |r| with net_pts100. Min 2 of 3 non-null.',
+   min:'Gate: potential_ast/g ≥ 3.0 AND touches/g ≥ 40.0 (no GP floor).'},
 
-  // ─── DEFENSE ─────────────────────────────────────────────────────────────
-  {cat:'defense',sub:'Overall',name:'Defender Score',type:'composite',norm:'pos',
-   formula:'Avg of: Perimeter Def score + Interior Def score + Leverage Defense percentile (position-normalized)',
-   min:'1000 min. Leverage Defense averages in when available (247 players). Both sub-scores averaged if available.'},
-  {cat:'defense',sub:'Overall',name:'Leverage Defense',type:'metric',norm:'pos',
-   formula:'DEFENSE field (NBA Stats leverageleaders)',
-   min:'247 players (manually imported). On/off defensive leverage. Feeds directly into Defender Score overall composite.'},
+  {cat:'playmaking',sub:'Creation',name:'Leverage Creation',type:'metric',norm:'lg',inv:false,
+   formula:'leverage_creation (NBA Stats leverageleaders — CREATION field)',
+   min:'~247 players. NULL-skipped.'},
 
-  {cat:'defense',sub:'Perimeter Defense',name:'Perimeter Def Score',type:'composite',norm:'pos',
-   formula:'Avg percentile of: Def Delta 3PT, Def Delta Overall, Disruption/75, Contested Shots, STL. Min 1 of 5.',
-   min:'No composite gate. Individual metrics self-gate via FGA minimums.'},
-  {cat:'defense',sub:'Perimeter Defense',name:'Def Delta Overall',type:'metric',norm:'pos',
-   formula:'Normal Opp FG% − Actual Opp FG% when player is primary defender',
-   min:'≥ 150 opponent FGA (season). NULL below threshold.'},
-  {cat:'defense',sub:'Perimeter Defense',name:'Def Delta 3PT',type:'metric',norm:'pos',
-   formula:'Normal Opp 3PT% − Actual Opp 3PT% when player is primary defender',
-   min:'≥ 60 opponent 3PA (40% of 150). NULL below threshold.'},
-  {cat:'defense',sub:'Perimeter Defense',name:'Disruption / 75',type:'metric',norm:'pos',
-   formula:'(STL + Deflections×0.35 + Charges×0.80) × (75 / Poss/G)',
-   min:'NULL if all inputs zero.'},
-  {cat:'defense',sub:'Perimeter Defense',name:'Contested Shots',type:'metric',norm:'pos',
-   formula:'Season total contested shots (NBA hustle tracking)',
-   min:'1000 min.'},
-  {cat:'defense',sub:'Perimeter Defense',name:'Steals',type:'metric',norm:'pos',
-   formula:'Steals per game',
-   min:'1000 min.'},
-  {cat:'defense',sub:'Defense (extras)',name:'Def ISO PPP',type:'metric',norm:'pos',
-   formula:'ISO pts allowed per possession (Synergy) — previously inverted in old perimeter composite',
-   min:'Display only. Removed from composite — low samples bias against elite rim protectors.'},
-  {cat:'defense',sub:'Defense (extras)',name:'Def P&R PPP',type:'metric',norm:'pos',
-   formula:'P&R BH pts allowed per possession (Synergy)',
-   min:'Display only. Removed from composite — same bias issue.'},
-  {cat:'defense',sub:'Defense (extras)',name:'On-Ball Def Leverage',type:'metric',norm:'pos',
-   formula:'ONBALLDEF field (NBA Stats leverageleaders)',
-   min:'247 players. Display only.'},
-  {cat:'defense',sub:'Defense (extras)',name:'Def Rating',type:'metric',norm:'pos',
-   formula:'Points allowed per 100 possessions (on-court)',
+  {cat:'playmaking',sub:'Creation',name:'AST Pts Created/G',type:'metric',norm:'lg',inv:false,
+   formula:'ast_pts_created / gp (NBA Tracking — passing endpoint)',
+   min:'No individual gate.'},
+
+  {cat:'playmaking',sub:'Creation',name:'FT AST / 75',type:'metric',norm:'lg',inv:false,
+   formula:'(ft_ast/gp) × (75/poss_pg)',
+   min:'NULL if ft_ast = 0. Captures post/PnR passers whose value shows at the free-throw line.'},
+
+  {cat:'playmaking',sub:'Creation (extras)',name:'Gravity Score',type:'metric',norm:'lg',inv:false,
+   formula:'gravity_score (NBA Stats gravityleaders — AVGGRAVITYSCORE)',
+   min:'~247 players. Not in any composite (interior gravity is negative for post bigs, making overall gravity unreliable). Display only.'},
+
+  {cat:'playmaking',sub:'Creation (extras)',name:'Gravity × MPG',type:'metric',norm:'lg',inv:false,
+   formula:'gravity_onball_perimeter × min_per_game\nOnly computed for non-FC/C players (pos_group not in FC, C)',
+   min:'Position filter: excluded for FC and C. Display only.'},
+
+  {cat:'playmaking',sub:'Creation (extras)',name:'On-Ball Perim Gravity',type:'metric',norm:'lg',inv:false,
+   formula:'gravity_onball_perimeter (NBA Stats — AVGONBALLPERIMETERGRAVITYSCORE)',
+   min:'~247 players. Display only.'},
+
+  {cat:'playmaking',sub:'Creation (extras)',name:'Leverage Full',type:'metric',norm:'lg',inv:false,
+   formula:'leverage_full (NBA Stats leverageleaders — FULL field)',
+   min:'~247 players. Combined on/off offense + defense. Display only.'},
+
+  // ── Ball Handling / Decision Making Score ─────────────────────
+  {cat:'playmaking',sub:'Ball Handling',name:'Ball Handling Score',type:'composite',norm:'lg',inv:false,
+   formula:'Win-corr weighted avg of: Lost Ball/100 Touches (inv), P&R BH PPP.\n'
+          +'Stats weighted by raw |r| with net_pts100. Min 1 of 2 non-null.',
+   min:'Gate: drives/g ≥ 4.0 AND touches/g ≥ 40.0 (no GP floor).\n'
+      +'P&R BH PPP additionally requires pnr_bh_poss/g ≥ 5.0.\n'
+      +'Included in playmaker_score only if it is not the lowest of the 3 sub-scores (best 2 of 3 rule).'},
+
+  {cat:'playmaking',sub:'Ball Handling',name:'Lost Ball / 100 Touches',type:'metric',norm:'lg',inv:true,
+   formula:'(lost_ball_tov/gp) / (touches/gp) × 100\nFallback chain: direct lost_ball_tov → implied (tov − bad_pass_tov) → full tov\nInverted: 100 − rank(lost_ball_tov_pg)',
+   min:'PBP-derived via PlayByPlayV3. Touches normalization prevents penalizing high-usage players for raw count. '
+      +'Lower is better — in LOWER_BETTER set. Inverted in composite (lost_ball_tov_pg_inv).'},
+
+  {cat:'playmaking',sub:'Ball Handling',name:'P&R BH PPP',type:'metric',norm:'lg',inv:false,
+   formula:'pnr_bh_ppp (Synergy, offensive ball handler)',
+   min:'Percentile gate: pnr_bh_fga/gp < 0.5 (season total ÷ gp) → NULL before percentile ranking. '
+      +'Threshold is 0.5 FGA/g (not the 3.0 FGA/g shown in server.py which is server-side only).'},
+
+  {cat:'playmaking',sub:'Ball Handling (extras)',name:'Bad Pass / 100 Touches',type:'metric',norm:'lg',inv:true,
+   formula:'(bad_pass_tov/gp) / (touches/gp) × 100',
+   min:'Display only. Also in LOWER_BETTER. Decision quality covered in Pot AST/BP TOV (passing composite).'},
+
+  {cat:'playmaking',sub:'Ball Handling (extras)',name:'Drive & Dish %',type:'metric',norm:'lg',inv:false,
+   formula:'drive_passes_pg / (drive_fga + drive_tov + drive_passes_pg)',
+   min:'Requires drives/g ≥ 2.0. Display only.'},
+
+  {cat:'playmaking',sub:'Ball Handling (extras)',name:'Drive Passes / 75',type:'metric',norm:'lg',inv:false,
+   formula:'(drive_passes/gp) × (75/poss_pg)',
+   min:'Requires drives/g ≥ 2.0. Display only.'},
+
+  {cat:'playmaking',sub:'Ball Handling (extras)',name:'PM Gravity (computed)',type:'metric',norm:'lg',inv:false,
+   formula:'ast_pts_created_pg / (time_of_poss / min_per_game)',
+   min:'NULL if time_of_poss or min_pg = 0. Display only.'},
+
+  {cat:'playmaking',sub:'Ball Handling (extras)',name:'Ball Handler Load',type:'metric',norm:'lg',inv:false,
+   formula:'time_of_poss / min_per_game',
+   min:'Display only. Fraction of floor time holding ball.'},
+
+  // ══════════════════════════════════════════════════════════════
+  // DEFENSE
+  // ══════════════════════════════════════════════════════════════
+
+  {cat:'defense',sub:'Overall',name:'Defender Score',type:'composite',norm:'pos',inv:false,
+   formula:'win-corr weighted avg of: Perimeter Def score + Interior Def score + Leverage Defense percentile + Def Win Shares percentile + Matchup FG% (inverted) percentile. '
+          +'Anchor: d_net_pts100 percentile × 0.4 + skill_avg × 0.6 (when net pts data available). '
+          +'All sub-scores/signals averaged with catcomp weights when available.',
+   min:'Position-normalized for defender_score. No hard min-minutes cutoff. '
+      +'Leverage Defense, Def Win Shares (def_ws), and Matchup FG% (matchup_def_fg_pct) averaged in when non-NULL. '
+      +'Matchup FG% inverted in percentile pool (matchup_def_fg_pct_inv).'},
+
+  {cat:'defense',sub:'Overall',name:'Leverage Defense',type:'metric',norm:'pos',inv:false,
+   formula:'leverage_defense (NBA Stats leverageleaders — DEFENSE field)',
+   min:'~247 players. Feeds directly into defender_score extra signals pool.'},
+
+  {cat:'defense',sub:'Overall',name:'Def Win Shares',type:'metric',norm:'pos',inv:false,
+   formula:'def_ws (NBA Stats Defense Dash — DEF_WS)',
+   min:'Feeds directly into defender_score extra signals pool as position-normalized percentile.'},
+
+  {cat:'defense',sub:'Overall',name:'Matchup FG% Allowed',type:'metric',norm:'pos',inv:true,
+   formula:'matchup_def_fg_pct = weighted avg opponent FG% when guarded (min 50 matchup FGA)\nInverted: matchup_def_fg_pct_inv = 100 − rank',
+   min:'Min 50 total matchup FGA (season). Lower is better — inverted percentile. '
+      +'Feeds into defender_score extra signals pool.'},
+
+  // ── Perimeter Defense Score ───────────────────────────────────
+  {cat:'defense',sub:'Perimeter Defense',name:'Perimeter Def Score',type:'composite',norm:'pos',inv:false,
+   formula:'win-corr weighted avg percentile of 6 stats: Def Delta 3PT, Def Delta Overall, Disruption/75, Contested Shots, STL, Def Spot-Up PPP (inverted). '
+          +'Min 2 of 6 non-NULL.',
+   min:'No composite gate (gate_key = None). Individual metrics self-gate via FGA/poss minimums. '
+      +'Position-normalized percentiles.'},
+
+  {cat:'defense',sub:'Perimeter Defense',name:'Def Delta Overall',type:'metric',norm:'pos',inv:false,
+   formula:'normal_fg_pct − d_fg_pct_overall\nnormal_fg_pct = league baseline FG% for those shot types',
+   min:'Compute gate: d_fga_overall ≥ 150 (MIN_DEF_FGA) AND normal_fg_pct > 0. NULL below threshold.'},
+
+  {cat:'defense',sub:'Perimeter Defense',name:'Def Delta 3PT',type:'metric',norm:'pos',inv:false,
+   formula:'ns_fg3_pct − d_fg_pct_3pt',
+   min:'Compute gate: d_fga_3pt ≥ 60 (MIN_DEF_FGA × 0.4). NULL below threshold.'},
+
+  {cat:'defense',sub:'Perimeter Defense',name:'Disruption / 75',type:'metric',norm:'pos',inv:false,
+   formula:'(stl + deflections×0.35 + charges_drawn×0.80) × (75/poss_pg)\n(deflections and charges are per-game averages from season totals ÷ gp)',
+   min:'NULL if stl + deflections + charges = 0. Position-normalized.'},
+
+  {cat:'defense',sub:'Perimeter Defense',name:'Contested Shots',type:'metric',norm:'pos',inv:false,
+   formula:'contested_shots (season total, NBA hustle tracking)',
+   min:'No individual gate. Position-normalized.'},
+
+  {cat:'defense',sub:'Perimeter Defense',name:'Steals',type:'metric',norm:'pos',inv:false,
+   formula:'stl (per-game average)',
+   min:'No individual gate. Position-normalized.'},
+
+  {cat:'defense',sub:'Perimeter Defense',name:'Def Spot-Up PPP (inv)',type:'metric',norm:'pos',inv:true,
+   formula:'def_spotup_ppp (Synergy, defensive spot-up)\nInverted: def_spotup_ppp_inv = 100 − rank',
+   min:'Percentile gate: def_spotup_poss/gp < 1.5 → NULL before percentile ranking (def_playtype_qualified). '
+      +'Lower is better — LOWER_BETTER set.'},
+
+  {cat:'defense',sub:'Defense (extras)',name:'Def ISO PPP',type:'metric',norm:'pos',inv:true,
+   formula:'def_iso_ppp (Synergy, defensive isolation)',
+   min:'Display only. Not currently in any composite. Lower is better.'},
+
+  {cat:'defense',sub:'Defense (extras)',name:'Def P&R BH PPP',type:'metric',norm:'pos',inv:true,
+   formula:'def_pnr_bh_ppp (Synergy, defensive PnR ball handler)',
+   min:'Display only. Not currently in any composite. Lower is better.'},
+
+  {cat:'defense',sub:'Defense (extras)',name:'On-Ball Def Leverage',type:'metric',norm:'pos',inv:false,
+   formula:'leverage_onball_def (NBA Stats leverageleaders — ONBALLDEF)',
+   min:'~247 players. Display only.'},
+
+  {cat:'defense',sub:'Defense (extras)',name:'Def Rating',type:'metric',norm:'pos',inv:false,
+   formula:'def_rating from advanced game logs (points allowed per 100 poss on-court)',
    min:'Display only — team-context dependent.'},
-  {cat:'defense',sub:'Defense (extras)',name:'Box Out / 75',type:'metric',norm:'pos',
-   formula:'(Box Outs / GP) × (75 / Poss/G)',
-   min:'Moved from Interior Defense composite to Rebounding composite.'},
-  {cat:'defense',sub:'Defense (extras)',name:'Leverage Full',type:'metric',norm:'pos',
-   formula:'FULL field (NBA Stats leverageleaders)',
-   min:'Display only. Combined offense + defense leverage.'},
 
-  {cat:'defense',sub:'Interior Defense',name:'Interior Def Score',type:'composite',norm:'pos',
-   formula:'Avg percentile of: Rim Protection Score, Def Delta 2PT, DREB%, Blocks. Min 1 of 4.',
-   min:'Gate: ≥ 50 rim FGA defended (server gate). Box Out/75 moved to Rebounding composite (hustle).'},
-  {cat:'defense',sub:'Interior Defense',name:'Rim Protection Score',type:'metric',norm:'pos',
-   formula:'(0.65 − Rim Opp FG%) × Rim FGA × 2',
-   min:'≥ 20 rim FGA defended (compute gate). ≥ 50 for composite inclusion (server gate).'},
-  {cat:'defense',sub:'Interior Defense',name:'Def Delta 2PT',type:'metric',norm:'pos',
-   formula:'Normal Opp 2PT% − Actual Opp 2PT% when player is primary defender',
-   min:'≥ 90 opponent 2PA (60% of 150). NULL below threshold.'},
-  {cat:'defense',sub:'Interior Defense',name:'DREB%',type:'metric',norm:'pos',
-   formula:'DREB / (DREB + Opp OREB)',
-   min:'1000 min.'},
-  {cat:'defense',sub:'Interior Defense',name:'Blocks',type:'metric',norm:'pos',
-   formula:'Blocks per game',
-   min:'1000 min.'},
+  // ── Interior Defense Score ────────────────────────────────────
+  {cat:'defense',sub:'Interior Defense',name:'Interior Def Score',type:'composite',norm:'pos',inv:false,
+   formula:'win-corr weighted avg percentile of 6 stats: Rim Protection Score, Def Delta 2PT, DREB%, BLK, Def Post PPP (inv), Def Roll Man PPP (inv). '
+          +'Min 2 of 6 non-NULL.',
+   min:'Composite gate (passes_gate "interior_def"): def_rim_fga/gp ≥ 2.5 (season total ÷ gp). '
+      +'Position-normalized percentiles.'},
 
-  // ─── HUSTLE ──────────────────────────────────────────────────────────────
-  {cat:'hustle',sub:'Overall',name:'Hustle Score',type:'composite',norm:'pos',
-   formula:'Avg of: Activity score + Rebounding score',
-   min:'1000 min.'},
+  {cat:'defense',sub:'Interior Defense',name:'Rim Protection Score',type:'metric',norm:'pos',inv:false,
+   formula:'(RIM_XFG_BASELINE − def_rim_fg_pct) × def_rim_fga × 2\nwhere RIM_XFG_BASELINE = 0.650',
+   min:'Compute gate: def_rim_fga ≥ 20 (MIN_RIM_FGA). '
+      +'Also subject to composite gate (def_rim_fga/gp ≥ 2.5) for inclusion in interior_def_score.'},
 
-  {cat:'hustle',sub:'Activity',name:'Activity Score',type:'composite',norm:'pos',
-   formula:'Avg percentile of: Motor Score, Hustle Composite, Screen Assist Rate. Min 1 of 3.',
-   min:'No gate. All metrics position-normalized.'},
-  {cat:'hustle',sub:'Activity',name:'Motor Score',type:'metric',norm:'pos',
-   formula:'(Dist Offense + Dist Defense) / MPG × 36',
-   min:'distance > 0; MPG > 0.'},
-  {cat:'hustle',sub:'Activity',name:'Hustle Composite',type:'metric',norm:'pos',
-   formula:'(Deflections×0.35 + Charges×0.80 + Loose Balls×0.65 + Scr AST Pts×0.10) × (75/Poss/G)',
-   min:'NULL if all inputs zero.'},
-  {cat:'hustle',sub:'Activity',name:'Screen Assist Rate',type:'metric',norm:'pos',
-   formula:'(Screen AST Pts / GP) × (75 / Poss/G)',
+  {cat:'defense',sub:'Interior Defense',name:'Def Delta 2PT',type:'metric',norm:'pos',inv:false,
+   formula:'ns_fg2_pct − d_fg_pct_2pt',
+   min:'Compute gate: d_fga_2pt ≥ 90 (MIN_DEF_FGA × 0.6). NULL below threshold.'},
+
+  {cat:'defense',sub:'Interior Defense',name:'DREB%',type:'metric',norm:'pos',inv:false,
+   formula:'dreb_pct from advanced game logs',
+   min:'No individual gate. Position-normalized. Also used in rebounding_score.'},
+
+  {cat:'defense',sub:'Interior Defense',name:'Blocks',type:'metric',norm:'pos',inv:false,
+   formula:'blk (per-game average)',
+   min:'No individual gate. Position-normalized.'},
+
+  {cat:'defense',sub:'Interior Defense',name:'Def Post PPP (inv)',type:'metric',norm:'pos',inv:true,
+   formula:'def_post_ppp (Synergy, defensive post-up)\nInverted: def_post_ppp_inv = 100 − rank',
+   min:'Percentile gate: def_post_poss/gp < 1.5 → NULL before percentile ranking. '
+      +'Lower is better — LOWER_BETTER set.'},
+
+  {cat:'defense',sub:'Interior Defense',name:'Def Roll Man PPP (inv)',type:'metric',norm:'pos',inv:true,
+   formula:'def_pnr_roll_ppp (Synergy, defensive PnR roll man)\nInverted: def_pnr_roll_ppp_inv = 100 − rank',
+   min:'Percentile gate: def_pnr_roll_poss/gp < 1.5 → NULL before percentile ranking. '
+      +'Lower is better — LOWER_BETTER set.'},
+
+  {cat:'defense',sub:'Defense (extras)',name:'Leverage Full',type:'metric',norm:'pos',inv:false,
+   formula:'leverage_full (NBA Stats leverageleaders — FULL field)',
+   min:'~247 players. Display only.'},
+
+  // ══════════════════════════════════════════════════════════════
+  // HUSTLE
+  // ══════════════════════════════════════════════════════════════
+
+  {cat:'hustle',sub:'Overall',name:'Hustle Score',type:'composite',norm:'pos',inv:false,
+   formula:'win-corr weighted avg of sub-scores: Activity + Rebounding. '
+          +'Anchor: leverage_full percentile × 0.4 + skill_avg × 0.6 (when data available).',
+   min:'No gate. Both sub-scores averaged in when non-NULL. Position-normalized.'},
+
+  // ── Activity Score ────────────────────────────────────────────
+  {cat:'hustle',sub:'Activity',name:'Activity Score',type:'composite',norm:'pos',inv:false,
+   formula:'win-corr weighted avg percentile of 3 stats: Motor Score, Hustle Composite, Screen Assist Rate. '
+          +'Min 2 of 3 non-NULL.',
+   min:'No composite gate (gate_key = None). Position-normalized percentiles.'},
+
+  {cat:'hustle',sub:'Activity',name:'Motor Score',type:'metric',norm:'pos',inv:false,
+   formula:'(dist_miles_off + dist_miles_def) / min_per_game × 36',
+   min:'Compute gate: min_total ≥ MIN_MINUTES_TOTAL (1000) AND dist_miles > 0 AND min_pg > 0. '
+      +'Only metric with an explicit 1000-min hard cutoff in compute code.'},
+
+  {cat:'hustle',sub:'Activity',name:'Hustle Composite',type:'metric',norm:'pos',inv:false,
+   formula:'(deflections_pg×0.35 + charges_pg×0.80 + loose_balls×0.65 + screen_ast_pts×0.10) × (75/poss_pg)\ndeflections, charges: season totals ÷ gp; loose_balls, screen_ast_pts: season totals ÷ gp',
+   min:'NULL if composite result = 0. Position-normalized.'},
+
+  {cat:'hustle',sub:'Activity',name:'Screen Assist Rate',type:'metric',norm:'pos',inv:false,
+   formula:'(screen_ast_pts/gp) × (75/poss_pg)',
    min:'NULL if screen_ast_pts = 0.'},
-  {cat:'hustle',sub:'Activity (extras)',name:'Deflections',type:'metric',norm:'pos',
-   formula:'Season total deflections',
-   min:'Display only — factored into Hustle Composite.'},
-  {cat:'hustle',sub:'Activity (extras)',name:'Charges Drawn',type:'metric',norm:'pos',
-   formula:'Season total charges drawn',
-   min:'Display only — factored into Hustle Composite.'},
-  {cat:'hustle',sub:'Activity (extras)',name:'Disruption / 75',type:'metric',norm:'pos',
-   formula:'(STL + Deflections×0.35 + Charges×0.80) × (75 / Poss/G)',
-   min:'Display only. Also shown in Defense/Perimeter.'},
-  {cat:'hustle',sub:'Activity (extras)',name:'Screen Assists',type:'metric',norm:'pos',
-   formula:'Season total screen assists',
+
+  {cat:'hustle',sub:'Activity (extras)',name:'Deflections',type:'metric',norm:'pos',inv:false,
+   formula:'deflections (season total — stored; displayed as /gp)',
+   min:'Display only. Factored into Hustle Composite and Disruption/75.'},
+
+  {cat:'hustle',sub:'Activity (extras)',name:'Charges Drawn',type:'metric',norm:'pos',inv:false,
+   formula:'charges_drawn (season total)',
+   min:'Display only. Factored into Hustle Composite.'},
+
+  {cat:'hustle',sub:'Activity (extras)',name:'Loose Ball Rate / 75',type:'metric',norm:'pos',inv:false,
+   formula:'(loose_balls/gp) × (75/poss_pg)',
+   min:'NULL if loose_balls = 0. Display only.'},
+
+  {cat:'hustle',sub:'Activity (extras)',name:'Screen Assists',type:'metric',norm:'pos',inv:false,
+   formula:'screen_assists (season total)',
    min:'Display only.'},
 
-  {cat:'hustle',sub:'Rebounding',name:'Rebounding Score',type:'composite',norm:'pos',
-   formula:'Avg percentile of: DREB%, OREB%, Box Out/75. Min 1 of 3.',
-   min:'No gate. Box Out/75 moved here from Interior Defense composite.'},
-  {cat:'hustle',sub:'Rebounding',name:'DREB%',type:'metric',norm:'pos',
-   formula:'DREB / (DREB + Opp OREB)',
-   min:'1000 min.'},
-  {cat:'hustle',sub:'Rebounding',name:'OREB%',type:'metric',norm:'pos',
-   formula:'OREB / (OREB + Opp DREB)',
-   min:'1000 min.'},
-  {cat:'hustle',sub:'Rebounding',name:'Box Out / 75',type:'metric',norm:'pos',
-   formula:'(Box Outs / GP) × (75 / Poss/G)',
-   min:'Moved from Interior Defense composite.'},
-  {cat:'hustle',sub:'Rebounding (extras)',name:'Loose Balls / 75',type:'metric',norm:'pos',
-   formula:'(Loose Balls Recovered / GP) × (75 / Poss/G)',
-   min:'Display only — factored into Hustle Composite.'},
-  {cat:'hustle',sub:'Rebounding (extras)',name:'Box Outs',type:'metric',norm:'pos',
-   formula:'Season total box outs',
+  // ── Rebounding Score ──────────────────────────────────────────
+  {cat:'hustle',sub:'Rebounding',name:'Rebounding Score',type:'composite',norm:'pos',inv:false,
+   formula:'win-corr weighted avg percentile of 3 stats: DREB%, OREB%, Box Out/75. '
+          +'Min 2 of 3 non-NULL.',
+   min:'No composite gate (gate_key = None). Position-normalized percentiles.'},
+
+  {cat:'hustle',sub:'Rebounding',name:'DREB%',type:'metric',norm:'pos',inv:false,
+   formula:'dreb_pct from advanced game logs',
+   min:'No individual gate. Also used in interior_def_score.'},
+
+  {cat:'hustle',sub:'Rebounding',name:'OREB%',type:'metric',norm:'pos',inv:false,
+   formula:'oreb_pct from advanced game logs',
+   min:'No individual gate.'},
+
+  {cat:'hustle',sub:'Rebounding',name:'Box Out / 75',type:'metric',norm:'pos',inv:false,
+   formula:'(box_outs/gp) × (75/poss_pg)',
+   min:'NULL if box_outs = 0. Moved from Interior Defense composite (previously there, now here only).'},
+
+  {cat:'hustle',sub:'Rebounding (extras)',name:'Box Outs',type:'metric',norm:'pos',inv:false,
+   formula:'box_outs (season total)',
    min:'Display only.'},
 
-  // ─── METRICS ─────────────────────────────────────────────────────────────
-  {cat:'metrics',sub:'Overall',name:'BPM (computed)',type:'metric',norm:'lg',
-   formula:'−2.611 + 0.318×AST% + 0.135×REB%×3 + 1.064×(TS%−0.5)×USG%/25 + 0.295×STL% + 0.396×BLK% − 0.257×(TOV/poss) + pos_adj\npos_adj: G=0 / GF=−0.5 / F=−1.0 / FC=−1.5 / C=−2.0',
-   min:'USG% > 0; TS% > 0.'},
-  {cat:'metrics',sub:'Overall',name:'Net Rating',type:'metric',norm:'lg',
-   formula:'Off Rating − Def Rating (on-court)',
-   min:'1000 min.'},
-  {cat:'metrics',sub:'Overall',name:'PIE',type:'metric',norm:'lg',
-   formula:'(PTS+FGM+FTM−FGA−FTA+DREB+0.5×OREB+AST+STL+0.5×BLK−PF−TOV) / game totals',
-   min:'1000 min.'},
-  {cat:'metrics',sub:'External',name:'Net Points / 100',type:'metric',norm:'lg',
-   formula:'Luck-adjusted on/off net rating per 100 poss (ESPN Analytics). Off/Def split available.',
-   min:'Available all seasons.'},
-  {cat:'metrics',sub:'External',name:'DARKO DPM',type:'metric',norm:'lg',
-   formula:'Bayesian model: box score priors + RAPM. Off/Def/Box components. (darko.app)',
-   min:'2025-26 season onwards only.'},
-  {cat:'metrics',sub:'External',name:'LEBRON',type:'metric',norm:'lg',
-   formula:'boxPIPM + luck-adjusted RAPM + offensive archetypes. Off/Def split available. (BBall Index)',
-   min:'2025-26 season onwards only.'},
-  {cat:'metrics',sub:'External',name:'WAR',type:'metric',norm:'lg',
-   formula:'LEBRON / league wins-per-point constant (~2.7)',
-   min:'2025-26 season onwards only.'},
+  // ══════════════════════════════════════════════════════════════
+  // METRICS
+  // ══════════════════════════════════════════════════════════════
+
+  {cat:'metrics',sub:'Derived',name:'BPM (computed)',type:'metric',norm:'lg',inv:false,
+   formula:'−2.611 + 0.318×ast_pct×100 + 0.449×reb_pct×100×0.3 + 1.064×(ts_pct−0.5)×usg_pct×100/25 '
+          +'+ 0.295×stl_pct×100 + 0.396×blk_pct×100 − 0.257×(tov_pg/poss_pg)×100 + pos_adj\n'
+          +'pos_adj: G=0 / GF=−0.5 / F=−1.0 / FC=−1.5 / C=−2.0',
+   min:'Requires min_total ≥ 1000 AND usg_pct > 0 AND ts_pct > 0.'},
+
+  {cat:'metrics',sub:'Derived',name:'Contested FG Making',type:'metric',norm:'lg',inv:false,
+   formula:'player_cont_efg − LG_CONTESTED_EFG (0.398)\nwhere cont = VT (0-2ft) + TG (2-4ft) defender distance bands',
+   min:'Compute gate: contested FGA ≥ 50 (sum of cd_fga_vt + cd_fga_tg). Display only.'},
+
+  {cat:'metrics',sub:'Derived',name:'Open FG Making',type:'metric',norm:'lg',inv:false,
+   formula:'player_open_efg − LG_OPEN_EFG (0.548)\nwhere open = OP (4-6ft) + WO (6ft+) defender distance bands',
+   min:'Compute gate: open FGA ≥ 50 (sum of cd_fga_op + cd_fga_wo). Display only.'},
+
+  {cat:'metrics',sub:'External',name:'Net Points / 100',type:'metric',norm:'lg',inv:false,
+   formula:'net_pts100 (ESPN Analytics — luck-adjusted on/off net rating per 100 poss). Off/Def split: o_net_pts100, d_net_pts100.',
+   min:'Available all seasons. Used as win-correlation anchor for all composite weighting.'},
+
+  {cat:'metrics',sub:'External',name:'DARKO DPM',type:'metric',norm:'lg',inv:false,
+   formula:'darko_dpm / darko_odpm / darko_ddpm / darko_box (darko.app)',
+   min:'2025-26+ season only.'},
+
+  {cat:'metrics',sub:'External',name:'LEBRON / WAR',type:'metric',norm:'lg',inv:false,
+   formula:'lebron / o_lebron / d_lebron (BBall Index)\nwar = lebron / league wins-per-point constant (~2.7)',
+   min:'2025-26+ season only.'},
+
+  // ── Weighting Methodology ─────────────────────────────────────
+  {cat:'metrics',sub:'Methodology',name:'Win-Correlation Weighting',type:'composite',norm:'lg',inv:false,
+   formula:'weight = raw |Pearson r(stat, net_pts100)|\n'
+          +'No min-max normalization — the raw r IS the weight.\n'
+          +'A stat with r=0.25 gets 5× the weight of r=0.05.\n'
+          +'Lower-is-better stats: r sign flipped before computing |r|.\n'
+          +'Stats with no correlation data → fallback weight = 1.0.',
+   min:'Pearson r computed across ≥ 500 min players with net_pts100 data. '
+      +'Applied at the sub-composite level only — category scores are flat averages.'},
+
+  {cat:'metrics',sub:'Methodology',name:'Percentile Normalization',type:'composite',norm:'lg',inv:false,
+   formula:'League-wide (lg): all positions ranked together.\n'
+          +'Position-normalized (pos): all positions ranked together in the same pool, but the pct_pos maps use ALL_METRICS_POS — same players, same pool. '
+          +'(There is no separate ranking per position group — "pos" label here denotes WHICH percentile map is used, not separate-pool ranking.)',
+   min:'No minimum-minutes cutoff on the composite runner itself. '
+      +'Motor Score is the only metric with an explicit 1000-min cutoff in compute code. '
+      +'Volume gates (FGA/g, touches/g, drives/g, etc.) gate out ineligible players stat-by-stat.'},
+
+  {cat:'metrics',sub:'Methodology',name:'min_metrics Rule',type:'composite',norm:'lg',inv:false,
+   formula:'Composites with 2 stats → need ≥ 1 non-NULL to score.\n'
+          +'Composites with 3+ stats → need ≥ 2 non-NULL to score.',
+   min:'Prevents one volume-gated stat from nulling the whole composite. '
+      +'A player missing pnr_roll_ppp can still score finishing_score from other stats.'},
+
+  {cat:'metrics',sub:'Methodology',name:'Impact Score',type:'composite',norm:'lg',inv:false,
+   formula:'Flat avg of available category scores: creator + playmaker + defender + hustle.\n'
+          +'No anchor, no blending with net_pts100.\n'
+          +'Currently dormant — not displayed in the frontend.',
+   min:'Flat average of whichever category scores are non-null. No hard requirements.'},
+
+  {cat:'metrics',sub:'Methodology',name:'VW Metrics (Volume-Weighted)',type:'metric',norm:'lg',inv:false,
+   formula:'all3_efg_vw, midrange_efg_vw, corner3_efg_vw, above_break3_efg_vw, paint_efg_vw\n'
+          +'These 5 are excluded from percentile pool when value = 0.0 (not just NULL). '
+          +'A zero is meaningfully different from NULL — it means a player attempted shots but was exactly average.',
+   min:'VW_METRICS set in compute_composites. Prevents 0.0 from pulling down the floor of the percentile distribution.'},
 ];
 
 const catColors={scoring:'cat-scoring',playmaking:'cat-playmaking',defense:'cat-defense',hustle:'cat-hustle',metrics:'cat-metrics'};
@@ -404,6 +594,7 @@ let activeCat='all',activeNorm=null,activeType=null,searchVal='';
 
 function normTag(n){return n==='pos'?'<span class="tag tag-pos">Position</span>':'<span class="tag tag-lg">League</span>';}
 function typeTag(t){return t==='composite'?'<span class="tag tag-comp">Composite</span>':'<span class="tag tag-raw">Raw</span>';}
+function invTag(inv){return inv?'<span class="tag tag-inv">Inverted</span>':'';}
 
 function render(){
   const q=searchVal.toLowerCase();
@@ -419,7 +610,7 @@ function render(){
     <tr class="${r.type==='composite'?'composite':''}">
       <td><span class="cat-badge ${catColors[r.cat]}">${catLabels[r.cat]}</span></td>
       <td><span class="sub-text">${r.sub}</span></td>
-      <td><span class="stat-name">${r.name}</span><br>${typeTag(r.type)}</td>
+      <td><span class="stat-name">${r.name}</span><br>${typeTag(r.type)}${invTag(r.inv)}</td>
       <td><span class="formula">${r.formula.replace(/\n/g,'<br>')}</span></td>
       <td><span class="min-req">${r.min}</span></td>
       <td>${normTag(r.norm)}</td>
