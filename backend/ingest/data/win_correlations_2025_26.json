@@ -1,0 +1,181 @@
+{
+  "season": "2025-26",
+  "season_type": "Regular Season",
+  "n_players": 360,
+  "min_minutes_corr": 500,
+  "correlations": {
+    "def_ws": 0.6534,
+    "usg_pct": 0.3844,
+    "matchup_def_fg_pct_adj": -0.1903,
+    "ft_ast_per75": 0.1014,
+    "screen_assist_rate": 0.1295,
+    "leverage_rebounds": 0.4784,
+    "midrange_efg_vw": 0.3492,
+    "box_out_rate": 0.1963,
+    "gravity_offball_perimeter": 0.3584,
+    "ast_pts_created_pg": 0.3608,
+    "drive_pts_per_drive": 0.4474,
+    "hustle_composite": 0.2101,
+    "def_disruption_rate": 0.1265,
+    "lost_ball_tov_pg": 0.0278,
+    "pnr_roll_ppp": 0.2584,
+    "def_pnr_roll_ppp": 0.1031,
+    "oreb_pct": 0.2036,
+    "drive_fg_pct": 0.1929,
+    "leverage_creation": 0.4266,
+    "contested_shots": 0.2813,
+    "leverage_defense": 0.5451,
+    "all3_efg_vw": 0.3348,
+    "dreb_pct": 0.2766,
+    "leverage_turnovers": 0.3948,
+    "blk": 0.2909,
+    "pull_up_efg_pct": 0.0877,
+    "pnr_bh_ppp": 0.3377,
+    "gravity_onball_interior": 0.4221,
+    "pct_uast_fgm": 0.295,
+    "ast_pct": 0.2033,
+    "pass_quality_index": 0.2524,
+    "gravity_onball_perimeter": 0.4463,
+    "iso_ppp": 0.2434,
+    "gravity_offball_interior": 0.4653,
+    "def_spotup_ppp": 0.0929,
+    "leverage_shooting": 0.6644,
+    "def_delta_3pt": 0.1455,
+    "sq_fg_pct_above_expected": 0.5016,
+    "stl": 0.3936,
+    "paint_efg_vw": 0.4107,
+    "pts_2nd_chance": 0.5824,
+    "pot_ast_per_tov": 0.0387,
+    "fta": 0.5789,
+    "rim_protection_score": 0.1471,
+    "def_post_ppp": 0.0695
+  },
+  "weights": {
+    "def_ws": 0.9844,
+    "usg_pct": 0.6041,
+    "matchup_def_fg_pct_adj": 0.3297,
+    "ft_ast_per75": 0.2041,
+    "screen_assist_rate": 0.2438,
+    "leverage_rebounds": 0.737,
+    "midrange_efg_vw": 0.5544,
+    "box_out_rate": 0.3382,
+    "gravity_offball_perimeter": 0.5674,
+    "ast_pts_created_pg": 0.5708,
+    "drive_pts_per_drive": 0.6932,
+    "hustle_composite": 0.3577,
+    "def_disruption_rate": 0.2395,
+    "lost_ball_tov_pg": 0.1,
+    "pnr_roll_ppp": 0.426,
+    "def_pnr_roll_ppp": 0.2065,
+    "oreb_pct": 0.3485,
+    "drive_fg_pct": 0.3334,
+    "leverage_creation": 0.6638,
+    "contested_shots": 0.4584,
+    "leverage_defense": 0.8313,
+    "all3_efg_vw": 0.534,
+    "dreb_pct": 0.4517,
+    "leverage_turnovers": 0.6189,
+    "blk": 0.472,
+    "pull_up_efg_pct": 0.1847,
+    "pnr_bh_ppp": 0.5381,
+    "gravity_onball_interior": 0.6574,
+    "pct_uast_fgm": 0.4778,
+    "ast_pct": 0.3481,
+    "pass_quality_index": 0.4175,
+    "gravity_onball_perimeter": 0.6917,
+    "iso_ppp": 0.4048,
+    "gravity_offball_interior": 0.7185,
+    "def_spotup_ppp": 0.192,
+    "leverage_shooting": 1.0,
+    "def_delta_3pt": 0.2664,
+    "sq_fg_pct_above_expected": 0.7698,
+    "stl": 0.6172,
+    "paint_efg_vw": 0.6413,
+    "pts_2nd_chance": 0.8841,
+    "pot_ast_per_tov": 0.1154,
+    "fta": 0.8791,
+    "rim_protection_score": 0.2687,
+    "def_post_ppp": 0.159
+  },
+  "subcomp_weights": {
+    "finishing_score": {
+      "paint_efg_vw": 0.4107,
+      "drive_pts_per_drive": 0.4474,
+      "pnr_roll_ppp": 0.2584,
+      "pts_2nd_chance": 0.5824
+    },
+    "shooting_score": {
+      "all3_efg_vw": 0.3348,
+      "midrange_efg_vw": 0.3492,
+      "sq_fg_pct_above_expected": 0.5016
+    },
+    "shot_creation_score": {
+      "pct_uast_fgm": 0.295,
+      "iso_ppp": 0.2434,
+      "pull_up_efg_pct": 0.0877,
+      "drive_fg_pct": 0.1929,
+      "usg_pct": 0.3844,
+      "leverage_shooting": 0.6644,
+      "fta": 0.5789
+    },
+    "passing_score": {
+      "pot_ast_per_tov": 0.0387,
+      "ast_pct": 0.2033,
+      "pass_quality_index": 0.2524
+    },
+    "creation_score": {
+      "leverage_creation": 0.4266,
+      "ast_pts_created_pg": 0.3608,
+      "ft_ast_per75": 0.1014
+    },
+    "decision_making_score": {
+      "lost_ball_tov_pg": 0.0278,
+      "pnr_bh_ppp": 0.3377
+    },
+    "perimeter_def_score": {
+      "def_delta_3pt": 0.1455,
+      "def_disruption_rate": 0.1265,
+      "contested_shots": 0.2813,
+      "stl": 0.3936,
+      "def_spotup_ppp": 0.0929
+    },
+    "interior_def_score": {
+      "rim_protection_score": 0.1471,
+      "dreb_pct": 0.2766,
+      "blk": 0.2909,
+      "def_post_ppp": 0.0695,
+      "def_pnr_roll_ppp": 0.1031
+    },
+    "activity_score": {
+      "hustle_composite": 0.2101,
+      "screen_assist_rate": 0.1295,
+      "leverage_rebounds": 0.4784,
+      "leverage_turnovers": 0.3948
+    },
+    "rebounding_score": {
+      "dreb_pct": 0.2766,
+      "oreb_pct": 0.2036,
+      "box_out_rate": 0.1963
+    },
+    "gravity_perimeter_score": {
+      "gravity_onball_perimeter": 0.4463,
+      "gravity_offball_perimeter": 0.3584
+    },
+    "gravity_interior_score": {
+      "gravity_onball_interior": 0.4221,
+      "gravity_offball_interior": 0.4653
+    },
+    "gravity_score": {
+      "gravity_onball_perimeter": 0.4463,
+      "gravity_offball_perimeter": 0.3584,
+      "gravity_onball_interior": 0.4221,
+      "gravity_offball_interior": 0.4653
+    },
+    "defender_extras_score": {
+      "leverage_defense": 0.5451,
+      "def_ws": 0.6534,
+      "matchup_def_fg_pct_adj": 0.1903
+    }
+  },
+  "catcomp_weights": {}
+}
