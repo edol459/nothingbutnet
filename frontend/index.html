@@ -575,15 +575,15 @@ td.c-primary{min-width:140px}
 
 <!-- Category tab bar -->
 <div class="cat-bar" id="cat-bar">
-  <button class="cat-tab active" data-cat="scoring" style="--dot-color:#3b82f6"><div class="cat-tab-dot" style="background:#3b82f6"></div>Scoring</button>
+  <button class="cat-tab active" data-cat="metrics" style="--dot-color:var(--purple)"><div class="cat-tab-dot" style="background:var(--purple)"></div>Overall</button>
+  <div class="cat-tab-sep"></div>
+  <button class="cat-tab" data-cat="scoring" style="--dot-color:#3b82f6"><div class="cat-tab-dot" style="background:#3b82f6"></div>Scoring</button>
   <div class="cat-tab-sep"></div>
   <button class="cat-tab" data-cat="playmaking" style="--dot-color:#22c55e"><div class="cat-tab-dot" style="background:#22c55e"></div>Playmaking</button>
   <div class="cat-tab-sep"></div>
   <button class="cat-tab" data-cat="defense" style="--dot-color:#ef4444"><div class="cat-tab-dot" style="background:#ef4444"></div>Defense</button>
   <div class="cat-tab-sep"></div>
   <button class="cat-tab" data-cat="hustle" style="--dot-color:#eab308"><div class="cat-tab-dot" style="background:#eab308"></div>Intangibles</button>
-  <div class="cat-tab-sep"></div>
-  <button class="cat-tab" data-cat="metrics" style="--dot-color:var(--purple)"><div class="cat-tab-dot" style="background:var(--purple)"></div>Metrics</button>
   <div class="cat-tab-sep"></div>
   <button class="cat-tab" id="builder-tab" style="--dot-color:#f59e0b"><div class="cat-tab-dot" style="background:#f59e0b"></div>Builder</button>
 </div>
@@ -638,6 +638,34 @@ td.c-primary{min-width:140px}
         <div class="filter-dot"></div>
       </button>
       <span class="result-count" id="result-count"></span>
+    </div>
+
+    <!-- ASAP Spotlight — shown only on Overall tab -->
+    <div id="asap-spotlight" style="display:none">
+      <div class="b-spotlight visible" id="asap-spot-inner" style="cursor:pointer">
+        <div class="b-shot-wrap">
+          <img class="b-shot-img" id="asap-spot-img" src="" alt="" onerror="this.style.opacity=0">
+          <div class="b-shot-fallback">🏀</div>
+        </div>
+        <div class="b-spot-info">
+          <div class="b-spot-rank-label" id="asap-spot-rank">#1 Overall</div>
+          <div class="b-spot-name" id="asap-spot-name">—</div>
+          <div class="b-spot-meta" id="asap-spot-meta"></div>
+        </div>
+        <div class="b-spot-score">
+          <div class="b-spot-score-val" id="asap-spot-score">—</div>
+          <div class="b-spot-score-label">ASAP</div>
+        </div>
+        <div class="b-donut-wrap">
+          <svg class="b-donut-svg" id="asap-donut-svg" viewBox="0 0 100 100"></svg>
+          <div class="b-donut-center">
+            <div class="b-donut-center-n" id="asap-donut-n">—</div>
+            <div class="b-donut-center-label">stats</div>
+          </div>
+        </div>
+        <div class="b-legend" id="asap-cat-legend"></div>
+        <div id="asap-stat-legend" style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;max-height:160px;overflow-y:auto"></div>
+      </div>
     </div>
 
     <!-- Table -->
@@ -860,12 +888,9 @@ const NAV = {
         overall: { key:'finishing_score', label:'Finishing Avg Percentile', fmt:'1f', isOverall:true },
         metrics: [
           { key:'paint_efg_vw',        label:'Paint EFG+',      fmt:'3f', badge:'PAINT' },
-          { key:'paint_scoring_rate',  label:'Paint Scoring',   fmt:'2f', badge:'PSR'   },
           { key:'drive_pts_per_drive', label:'Pts Per Drive',   fmt:'2f', badge:'DRV'   },
-          { key:'drive_foul_rate',     label:'Drive Foul Rate', fmt:'3f', badge:'FOUL'  },
           { key:'pnr_roll_ppp',        label:'Roll Man PPP',    fmt:'2f', badge:'ROLL'  },
-          { key:'post_ppp',            label:'Post PPP',        fmt:'2f', badge:'POST'  },
-          { key:'transition_ppp',      label:'Transition PPP',  fmt:'2f', badge:'TRANS' },
+          { key:'pts_2nd_chance',      label:'2nd Chance Pts',  fmt:'1f', badge:'2ND'   },
         ],
         cols:['pts','fg_pct','paint_efg_vw','drive_pts_per_drive','pnr_roll_ppp'],
       },
@@ -888,7 +913,7 @@ const NAV = {
           { key:'pull_up_efg_pct',   label:'Pull-Up EFG%',     fmt:'pct', badge:'PU'   },
           { key:'drive_fg_pct',      label:'Drive FG%',         fmt:'pct', badge:'DRV'  },
           { key:'usg_pct',           label:'Usage %',           fmt:'pct', badge:'USG'  },
-          { key:'tov_pct',           label:'TOV %',             fmt:'pct', badge:'TOV%' },
+          { key:'fta',               label:'FTA / Game',        fmt:'1f',  badge:'FTA'  },
           { key:'leverage_shooting', label:'Leverage Shooting', fmt:'3f',  badge:'LSHT' },
         ],
         cols:['pts','usg_pct','ts_pct','iso_ppp'],
@@ -898,9 +923,11 @@ const NAV = {
         overall: null,
         metrics: [
           { key:'ts_pct',               label:'True Shooting %',    fmt:'pct', badge:'TS%'  },
+          { key:'efg_pct',              label:'Eff FG%',             fmt:'pct', badge:'EFG%' },
+          { key:'tov_pct',              label:'TOV %',               fmt:'pct', badge:'TOV%' },
+          { key:'drive_foul_rate',      label:'Drive Foul Rate',     fmt:'3f',  badge:'FOUL' },
           { key:'cs_efg_pct',           label:'Catch & Shoot EFG%', fmt:'pct', badge:'C&S'  },
           { key:'spotup_efg_pct',       label:'Spot-Up EFG%',       fmt:'pct', badge:'SPT'  },
-          { key:'efg_pct',              label:'Eff FG%',             fmt:'pct', badge:'EFG%' },
           { key:'sq_avg_shot_quality',  label:'Avg Shot Quality',    fmt:'3f',  badge:'SQ'   },
           { key:'creation_premium',     label:'Creation Delta',      fmt:'3f',  badge:'CΔ'   },
           { key:'clutch_net_rating',    label:'Clutch Rating',       fmt:'1f',  badge:'CLCH' },
@@ -936,6 +963,7 @@ const NAV = {
           { key:'leverage_creation',  label:'Leverage Creation',  fmt:'3f', badge:'LEV'  },
           { key:'ast_pts_created_pg', label:'AST Pts Created/G',  fmt:'1f', badge:'APC'  },
           { key:'ft_ast_per75',       label:'FT AST / 75',        fmt:'2f', badge:'FTA'  },
+          { key:'ft_ast_per75',       label:'FT AST / 75',        fmt:'2f', badge:'FTA'  },
         ],
         cols:['ast','usg_pct','ast_pts_created_pg','leverage_creation'],
       },
@@ -966,24 +994,20 @@ const NAV = {
           { key:'potential_ast_per75',      label:'Pot AST / 75',          fmt:'1f', badge:'POT'  },
           { key:'ast_conversion_rate',      label:'AST Conv %',            fmt:'pct',badge:'CONV' },
           { key:'pass_to_score_pct',        label:'Pass → Score %',        fmt:'pct',badge:'P2S'  },
-          { key:'ft_ast_per75',             label:'FT AST / 75',           fmt:'2f', badge:'FTA'  },
           { key:'drive_ast_per75',          label:'Drive AST / 75',        fmt:'2f', badge:'DRVA' },
           { key:'secondary_ast_per75',      label:'Sec AST / 75',          fmt:'2f', badge:'SEC'  },
           { key:'bad_pass_tov_pg',          label:'Bad Pass / 100 Touches', fmt:'2f', badge:'BP'  },
           { key:'drive_and_dish_rate',      label:'Drive & Dish %',        fmt:'pct',badge:'D&D'  },
           { key:'drive_passes_per75',       label:'Drive Passes / 75',     fmt:'2f', badge:'DRVP' },
-          { key:'transition_ppp',           label:'Transition PPP',        fmt:'2f', badge:'TRANS'},
           { key:'ball_handler_load',        label:'Ball Handler Load',     fmt:'3f', badge:'BHL'  },
           { key:'playmaking_gravity',       label:'PM Gravity (computed)', fmt:'2f', badge:'PMG'  },
-          { key:'gravity_score',            label:'Gravity Score',         fmt:'2f', badge:'GRAV' },
           { key:'gravity_creation',         label:'Gravity × MPG',         fmt:'1f', badge:'GMP'  },
           { key:'gravity_onball_perimeter', label:'On-Ball Perim Gravity', fmt:'2f', badge:'OBGR' },
           { key:'gravity_offball_perimeter',label:'Off-Ball Perim Gravity',fmt:'2f', badge:'FBGR' },
           { key:'leverage_full',            label:'Leverage Full',         fmt:'3f', badge:'LEVF' },
           { key:'sq_avg_shot_quality',      label:'Avg Shot Quality',      fmt:'3f', badge:'SQ'   },
-          { key:'sq_fg_pct_above_expected', label:'FG% Above Expected',    fmt:'3f', badge:'FG+'  },
         ],
-        cols:['ast','ast_to','gravity_score','leverage_full'],
+        cols:['ast','ast_to','gravity_perimeter_score','leverage_full'],
       },
     ],
     cols:['ast','ast_to','ast_pct','potential_ast_per75','pot_ast_per_tov'],
@@ -998,7 +1022,6 @@ const NAV = {
         overall: { key:'perimeter_def_score', label:'Perimeter Def Avg Percentile', fmt:'1f', isOverall:true },
         metrics: [
           { key:'def_delta_3pt',       label:'Def Delta 3PT',       fmt:'3f', badge:'3PT'  },
-          { key:'def_delta_overall',   label:'Def Delta',           fmt:'3f', badge:'DΔ'   },
           { key:'def_disruption_rate', label:'Disruption/75',       fmt:'2f', badge:'DISR' },
           { key:'contested_shots',     label:'Contested Shots',     fmt:'1f', badge:'CONT' },
           { key:'stl',                 label:'Steals',              fmt:'1f', badge:'STL'  },
@@ -1011,7 +1034,6 @@ const NAV = {
         overall: { key:'interior_def_score', label:'Interior Def Avg Percentile', fmt:'1f', isOverall:true },
         metrics: [
           { key:'rim_protection_score', label:'Rim Protection',     fmt:'1f',  badge:'RIM'  },
-          { key:'def_delta_2pt',        label:'Def Delta 2PT',      fmt:'3f',  badge:'2PT'  },
           { key:'dreb_pct',             label:'DREB %',             fmt:'pct', badge:'DRB%' },
           { key:'blk',                  label:'Blocks',             fmt:'1f',  badge:'BLK'  },
           { key:'def_post_ppp',         label:'Def Post PPP',       fmt:'2f',  badge:'DPST' },
@@ -1023,9 +1045,9 @@ const NAV = {
         key:'overall_def', label:'Overall',
         overall: null,
         metrics: [
-          { key:'leverage_defense',   label:'Leverage Defense',    fmt:'3f', badge:'LEVD' },
-          { key:'def_ws',             label:'Def Win Shares',      fmt:'2f', badge:'DWS'  },
-          { key:'matchup_def_fg_pct', label:'Matchup FG% Allowed', fmt:'pct',badge:'MFGA' },
+          { key:'leverage_defense',      label:'Leverage Defense',    fmt:'3f', badge:'LEVD' },
+          { key:'def_ws',                label:'Def Win Shares',      fmt:'2f', badge:'DWS'  },
+          { key:'matchup_def_fg_pct_adj',label:'Matchup FG% Adj',    fmt:'pct',badge:'MFGA' },
         ],
         cols:['stl','blk','dreb_pct','def_rating','leverage_defense'],
       },
@@ -1033,15 +1055,16 @@ const NAV = {
         key:'defense_extras', label:'Extras',
         overall: null,
         metrics: [
-          { key:'def_rating',          label:'Def Rating',      fmt:'1f', badge:'DRTG' },
-          { key:'def_delta_overall',   label:'Def Delta',       fmt:'3f', badge:'DΔ'   },
-          { key:'off_ws',              label:'Off Win Shares',  fmt:'2f', badge:'OWS'  },
-          { key:'ws_48',               label:'WS/48',           fmt:'3f', badge:'WS48' },
-          { key:'def_iso_ppp',         label:'Def ISO PPP',     fmt:'2f', badge:'DISO' },
-          { key:'def_pnr_bh_ppp',      label:'Def P&R PPP',     fmt:'2f', badge:'DPNR' },
-          { key:'leverage_onball_def', label:'On-Ball Def Lev', fmt:'3f', badge:'OBDL' },
-          { key:'box_out_rate',        label:'Box Out / 75',    fmt:'2f', badge:'BOX'  },
-          { key:'leverage_full',       label:'Leverage Full',   fmt:'3f', badge:'LEVF' },
+          { key:'def_rating',          label:'Def Rating',        fmt:'1f', badge:'DRTG' },
+          { key:'def_delta_overall',   label:'Def Delta Overall', fmt:'3f', badge:'DΔ'   },
+          { key:'def_delta_2pt',       label:'Def Delta 2PT',     fmt:'3f', badge:'Δ2PT' },
+          { key:'matchup_def_fg_pct',  label:'Matchup FG% Raw',   fmt:'pct',badge:'MFG'  },
+          { key:'off_ws',              label:'Off Win Shares',    fmt:'2f', badge:'OWS'  },
+          { key:'ws_48',               label:'WS/48',             fmt:'3f', badge:'WS48' },
+          { key:'def_iso_ppp',         label:'Def ISO PPP',       fmt:'2f', badge:'DISO' },
+          { key:'def_pnr_bh_ppp',      label:'Def P&R PPP',       fmt:'2f', badge:'DPNR' },
+          { key:'leverage_onball_def', label:'On-Ball Def Lev',   fmt:'3f', badge:'OBDL' },
+          { key:'leverage_full',       label:'Leverage Full',     fmt:'3f', badge:'LEVF' },
         ],
         cols:['stl','blk','def_iso_ppp','def_pnr_bh_ppp'],
       },
@@ -1057,10 +1080,12 @@ const NAV = {
         key:'activity', label:'Hustle',
         overall: { key:'activity_score', label:'Hustle Avg Percentile', fmt:'1f', isOverall:true },
         metrics: [
-          { key:'hustle_composite',  label:'Hustle Comp',      fmt:'2f', badge:'COMP' },
-          { key:'screen_assist_rate',label:'Scr AST Pts/75',   fmt:'2f', badge:'SCR'  },
+          { key:'hustle_composite',   label:'Hustle Comp',       fmt:'2f', badge:'COMP' },
+          { key:'screen_assist_rate', label:'Scr AST Pts/75',    fmt:'2f', badge:'SCR'  },
+          { key:'leverage_rebounds',  label:'Leverage Rebounds',  fmt:'3f', badge:'LREB' },
+          { key:'leverage_turnovers', label:'Leverage TOV (inv)', fmt:'3f', badge:'LTOV' },
         ],
-        cols:['deflections','charges_drawn','stl','hustle_composite'],
+        cols:['deflections','charges_drawn','stl','hustle_composite','leverage_rebounds'],
       },
       {
         key:'rebounding_h', label:'Rebounding',
@@ -1074,14 +1099,14 @@ const NAV = {
       },
       {
         key:'gravity', label:'Gravity',
-        overall: { key:'gravity_score', label:'Gravity Avg Percentile', fmt:'1f', isOverall:true },
+        overall: { key:'gravity_score', label:'Gravity Score', fmt:'2f', isOverall:true },
         metrics: [
           { key:'gravity_onball_perimeter',  label:'On-Ball Perimeter',  fmt:'2f', badge:'OBP' },
           { key:'gravity_offball_perimeter', label:'Off-Ball Perimeter', fmt:'2f', badge:'FBP' },
           { key:'gravity_onball_interior',   label:'On-Ball Interior',   fmt:'2f', badge:'OBI' },
           { key:'gravity_offball_interior',  label:'Off-Ball Interior',  fmt:'2f', badge:'FBI' },
         ],
-        cols:['gravity_score','gravity_onball_perimeter','gravity_offball_perimeter','gravity_onball_interior'],
+        cols:['gravity_score','gravity_perimeter_score','gravity_interior_score','gravity_onball_perimeter','gravity_offball_perimeter','gravity_onball_interior'],
       },
       {
         key:'hustle_extras', label:'Extras',
@@ -1098,15 +1123,15 @@ const NAV = {
         cols:['deflections','charges_drawn','screen_assists','loose_balls','box_outs'],
       },
     ],
-    cols:['gravity_score','hustle_composite','dreb_pct','oreb_pct'],
+    cols:['gravity_perimeter_score','gravity_interior_score','hustle_composite','dreb_pct','oreb_pct'],
   },
 
   metrics: {
-    label: 'Metrics',
+    label: 'Overall',
     overall: null,
     flat: true,
     subs: [],
-    cols:['pts','ast','reb','net_rating','ts_pct','usg_pct'],
+    cols:['asap_score','net_rating','ts_pct','usg_pct','pts','ast'],
     get flatMetrics() {
       const season     = ST?.season || '2024-25';
       const showDarko  = season >= '2025-26';
@@ -1135,6 +1160,7 @@ const NAV = {
       const netPtsActive = NETPTS_OPTIONS.some(o => o.key === ST.sort);
 
       return [
+        { key:'asap_score',   label:'ASAP',     fmt:'1f', badge:'ASAP' },
         { key:'bpm_computed', label:'BPM',      fmt:'1f', badge:'BPM' },
         { key:'net_rating',   label:'NET RTG',  fmt:'1f', badge:'NET' },
         { key:'pie',          label:'PIE',      fmt:'pct',badge:'PIE' },
@@ -1192,6 +1218,7 @@ const COL_DEF = {
   loose_balls:{label:'LBALL',fmt:'1f',cls:''},
   box_outs:{label:'BOX',fmt:'1f',cls:''},
   net_rating:{label:'NET',fmt:'1f',cls:''},
+  asap_score:{label:'ASAP',fmt:'1f',cls:'highlight'},
   paint_efg_vw:{label:'PNT+',fmt:'3f',cls:''},
   midrange_efg_vw:{label:'MID+',fmt:'3f',cls:''},
   all3_efg_vw:{label:'3PT+',fmt:'3f',cls:''},
@@ -1210,7 +1237,7 @@ const COL_DEF = {
   def_spotup_ppp:{label:'D-SU',fmt:'2f',cls:'lower-better'},
   def_pnr_roll_ppp:{label:'D-ROLL',fmt:'2f',cls:'lower-better'},
   matchup_def_fg_pct:{label:'MU-FG%',fmt:'pct',cls:'lower-better'},
-  finishing_score:{formula:'Win-corr weighted avg of: Paint EFG+, Paint Scoring Rate, Pts/Drive, Drive Foul Rate, Roll Man PPP, Post PPP, Transition PPP',desc:'Finishing sub-composite (position-normalized). Stats weighted by raw |r| with net_pts100. Min 2 of 7 non-null. Gate: 3 paint touches/g. Requires paint_efg_vw OR paint_scoring_rate non-null.',source:'Composite'},
+  finishing_score:{formula:'Win-corr weighted avg of: Paint EFG+, Pts/Drive, Drive Foul Rate, Roll Man PPP, Post PPP',desc:'Finishing sub-composite (position-normalized). Stats weighted by raw |r| with net_pts100. Min 2 of 5 non-null. Gate: 3 paint touches/g. Requires paint_efg_vw non-null. Paint Scoring Rate removed (r≈0). Transition PPP removed.',source:'Composite'},
   def_post_ppp:{formula:'Post-up PPP allowed (Synergy, defensive)',desc:'Points per possession allowed on post-up plays. Lower is better — inverted percentile used in Interior Defense composite. Gate: ≥ 1.5 post poss/g.',source:'Synergy'},
   def_spotup_ppp:{formula:'Spot-up PPP allowed (Synergy, defensive)',desc:'Points per possession allowed on catch-and-shoot / spot-up plays. Lower is better — inverted percentile in Perimeter Defense composite. Gate: ≥ 1.5 spotup poss/g.',source:'Synergy'},
   def_pnr_roll_ppp:{formula:'PnR Roll Man PPP allowed (Synergy, defensive)',desc:'Points per possession allowed defending the roll man. Lower is better — inverted percentile in Interior Defense composite. Gate: ≥ 1.5 poss/g.',source:'Synergy'},
@@ -1233,9 +1260,9 @@ const COL_DEF = {
 
 // ── State ─────────────────────────────────
 const ST = {
-  cat:     'scoring',
+  cat:     'metrics',
   sub:     null,
-  sort:    'creator_score',
+  sort:    'asap_score',
   sortFmt: '1f',
   isOverall: true,
   dir:     'desc',
@@ -1329,7 +1356,7 @@ const METRIC_INFO = {
   drive_passes_per75:{formula:'(Drive Passes / GP) × (75 / Poss/G)',desc:'Passes made out of drives per 75 possessions.',source:'Computed'},
   lost_ball_tov_pg:{formula:'(Lost Ball TOV / GP) / (Touches / GP) × 100',desc:'Lost ball turnovers per 100 touches. Lower is better. Used inverted in Decision Making composite.',source:'Computed'},
   bad_pass_tov_pg:{formula:'(Bad Pass TOV / GP) / (Touches / GP) × 100',desc:'Bad pass turnovers per 100 touches. Lower is better.',source:'Computed'},
-  gravity_score:{formula:'AVGGRAVITYSCORE (NBA)',desc:'Average gravity score from NBA tracking — how much defenders shift toward a player.',source:'NBA Stats'},
+  gravity_score:{formula:'Win-corr weighted avg of: On-Ball Perim Gravity, Off-Ball Perim Gravity, On-Ball Interior Gravity, Off-Ball Interior Gravity',desc:'Overall gravity composite — all 4 NBA gravity dimensions, win-weighted by |r| with net_pts100. All positions. Min 2 of 4 non-null.',source:'Composite'},
   gravity_creation:{formula:'On-Ball Perimeter Gravity × MPG',desc:'Display metric — on-ball perimeter gravity × minutes per game.',source:'Computed'},
   gravity_onball_perimeter:{formula:'AVGONBALLPERIMETERGRAVITYSCORE (NBA)',desc:'Gravity score specifically when handling the ball on the perimeter.',source:'NBA Stats'},
   gravity_offball_perimeter:{formula:'AVGOFFBALLPERIMETERGRAVITYSCORE (NBA)',desc:'Gravity score when moving off the ball on the perimeter.',source:'NBA Stats'},
@@ -1364,6 +1391,9 @@ const METRIC_INFO = {
   screen_assist_rate:{formula:'(Scr AST Pts / GP) × (75 / Poss/G)',desc:'Points created by screens per 75 possessions.',source:'Computed'},
   screen_assists:{formula:null,desc:'Screens set that directly led to a made shot.',source:'Hustle'},
   loose_balls:{formula:null,desc:'Total loose balls recovered.',source:'Hustle'},
+  gravity_perimeter_score:{formula:'Win-weighted avg of on-ball + off-ball perimeter gravity. G/GF/F only.',source:'Composite'},
+  gravity_interior_score:{formula:'Win-weighted avg of on-ball + off-ball interior gravity. FC/C only.',source:'Composite'},
+  asap_score:{formula:'All non-extra stats, win-weighted, coverage penalty',desc:'Advanced Stat Average Percentile. Every composite stat win-weighted by its correlation with net points per 100. Coverage penalty rewards players who qualify for more stats.',source:'Composite'},
   bpm_computed:{formula:'−2.611 + 0.318×AST% + ...',desc:'Box Plus/Minus approximation. Points contributed per 100 possessions above average.',source:'Computed'},
   net_rating:{formula:'Off Rtg − Def Rtg',desc:'Net rating while on the floor.',source:'Advanced'},
   pie:{formula:'(PTS+FGM+FTM−FGA−FTA+DREB+0.5×OREB+AST+STL+0.5×BLK−PF−TOV) / Total',desc:'Player Impact Estimate.',source:'Advanced'},
@@ -1384,7 +1414,7 @@ const METRIC_INFO = {
   playmaker_score:{formula:'Best 2 of available sub-scores: Passing + Creation + Ball Handling',desc:'Overall Playmaking composite. Requires passing_score (gate: 1.5 AST/g + 3 pot AST/g). Takes the best 2 of however many sub-scores qualify — ball handling never penalises a player who does not run PnR-BH.',source:'Composite'},
   defender_score:{formula:'Flat avg of available inputs: Perimeter Def + Interior Def + Leverage Defense + Def Win Shares + Matchup FG% (inv)',desc:'Overall Defense composite. Flat unweighted average of all non-null inputs. No anchors. Sub-composites are win-corr weighted internally.',source:'Composite'},
   intangibles_score:{formula:'Flat avg of sub-scores: Activity + Rebounding',desc:'Overall Hustle composite. Flat unweighted average of activity_score and rebounding_score. Sub-scores are win-corr weighted internally.',source:'Composite'},
-  finishing_score:{formula:'Win-corr weighted avg of: Paint EFG+, Paint Scoring Rate, Pts/Drive, Drive Foul Rate, Roll Man PPP, Post PPP, Transition PPP',desc:'Finishing sub-composite (position-normalized). Each stat weighted by raw |r| with net_pts100. Min 2 of 7 non-null. Gate: 3 paint touches/g. Requires paint_efg_vw OR paint_scoring_rate non-null.',source:'Composite'},
+
   shooting_score:{formula:'Win-corr weighted avg of: All3 EFG+, Midrange EFG+, FG% Above Expected',desc:'Shooting sub-composite (league-wide). Stats weighted by raw |r| with net_pts100. Min 2 of 3 non-null. Gate: 3 FGA/g. Catch & Shoot EFG% is display-only in Extras.',source:'Composite'},
   shot_creation_score:{formula:'Win-corr weighted avg of: Unassisted FGM%, ISO PPP, Drive FG%, USG%, TOV% (inv), Leverage Shooting',desc:'Shot Creation sub-composite. Stats weighted by raw |r| with net_pts100. Min 2 of 6 non-null. Gate: 2 drives/g. Pull-Up EFG% moved to Shooting composite.',source:'Composite'},
   creation_score:{formula:'Win-corr weighted avg of: Leverage Creation, AST Pts Created/G, FT AST/75',desc:'Playmaking Creation sub-composite. Stats weighted by raw |r| with net_pts100. Min 2 of 3 non-null. Gate: 3 pot AST/g + 40 touches/g.',source:'Composite'},
@@ -1403,19 +1433,21 @@ const CATCOMP_KEYS = new Set([
 const SUBCOMP_KEYS = new Set([
   'finishing_score','shooting_score','shot_creation_score',
   'passing_score','creation_score','decision_making_score',
-  'perimeter_def_score','interior_def_score','activity_score','rebounding_score',
+  'perimeter_def_score','interior_def_score','defender_extras_score',
+  'activity_score','rebounding_score',
+  'gravity_score','gravity_perimeter_score','gravity_interior_score',
 ]);
 
 // Human-readable labels for weight table rows
 const WEIGHT_STAT_LABELS = {
-  paint_efg_vw:'Paint EFG+', paint_scoring_rate:'Paint Scoring Rate',
+  paint_efg_vw:'Paint EFG+', ts_pct:'True Shooting %',
   drive_pts_per_drive:'Pts Per Drive', drive_foul_rate:'Drive Foul Rate',
-  pnr_roll_ppp:'Roll Man PPP', post_ppp:'Post PPP', transition_ppp:'Transition PPP',
+  pnr_roll_ppp:'Roll Man PPP', post_ppp:'Post PPP',
   spotup_efg_pct:'C&S EFG%', all3_efg_vw:'All-3 EFG+', midrange_efg_vw:'Midrange EFG+',
   sq_fg_pct_above_expected:'FG% Above Expected',
   pct_uast_fgm:'Unassisted FGM%', iso_ppp:'ISO PPP', pull_up_efg_pct:'Pull-Up EFG%',
-  drive_fg_pct:'Drive FG%', usg_pct:'Usage %', tov_pct:'TOV% (inv)',
-  leverage_shooting:'Leverage Shooting',
+  fta:'FTA / Game',
+  drive_fg_pct:'Drive FG%', usg_pct:'Usage %', tov_pct:'TOV% (inv)', leverage_shooting:'Leverage Shooting',
   pot_ast_per_tov:'Pot AST / BP TOV', ast_pct:'Assist %', pass_quality_index:'Pass Quality Index',
   leverage_creation:'Leverage Creation', ast_pts_created_pg:'AST Pts Created/G',
   ft_ast_per75:'FT AST / 75',
@@ -1426,14 +1458,23 @@ const WEIGHT_STAT_LABELS = {
   rim_protection_score:'Rim Protection', def_delta_2pt:'Def Delta 2PT',
   dreb_pct:'DREB %', blk:'Blocks', def_post_ppp:'Def Post PPP (inv)',
   def_pnr_roll_ppp:'Def Roll PPP (inv)',
+  leverage_defense:'Leverage Defense', def_ws:'Def Win Shares',
+  matchup_def_fg_pct_adj:'Matchup FG% Adj',
   motor_score:'Motor Score', hustle_composite:'Hustle Composite',
   screen_assist_rate:'Screen AST Rate', oreb_pct:'OREB %', box_out_rate:'Box Out / 75',
+  leverage_rebounds:'Leverage Rebounds', leverage_turnovers:'Leverage TOV (inv)',
+  pts_2nd_chance:'2nd Chance Pts',
+  gravity_onball_perimeter:'On-Ball Perim Gravity', gravity_offball_perimeter:'Off-Ball Perim Gravity',
+  gravity_onball_interior:'On-Ball Interior Gravity', gravity_offball_interior:'Off-Ball Interior Gravity',
   // Sub-composite labels (for category tooltips)
   finishing_score:'Finishing', shooting_score:'Shooting',
   shot_creation_score:'Shot Creation', passing_score:'Passing',
   creation_score:'Creation', decision_making_score:'Ball Handling',
   perimeter_def_score:'Perimeter Defense', interior_def_score:'Interior Defense',
+  defender_extras_score:'Def Extras (WS + Leverage)',
   activity_score:'Activity', rebounding_score:'Rebounding',
+  gravity_score:'Gravity', gravity_perimeter_score:'Perimeter Gravity',
+  gravity_interior_score:'Interior Gravity',
 };
 
 function buildWeightTable(statWeights) {
@@ -1811,7 +1852,7 @@ async function fetchPlayers() {
     ST.data=data.players||[]; ST.total=data.total||0;
     const vals=ST.data.map(p=>parseFloat(p[sortKey])).filter(v=>!isNaN(v)&&v>0);
     ST.maxVal=vals.length?Math.max(...vals):100;
-    renderRows(); renderPagination();
+    renderRows(); renderPagination(); renderAsapSpotlight();
     document.getElementById('result-count').textContent=`${ST.total.toLocaleString()} players`;
   } catch(e) {
     document.getElementById('tbody').innerHTML=`<tr><td colspan="20" style="text-align:center;padding:40px;font-family:var(--fm);font-size:11px;color:var(--text3)">Cannot connect — is the server running at ${API}?</td></tr>`;
@@ -1829,6 +1870,121 @@ function showSkeletons() {
   ).join('');
 }
 
+async function renderAsapSpotlight(player){
+  const el=document.getElementById('asap-spotlight');
+  if(ST.cat!=='metrics'||ST.sort!=='asap_score'||!ST.data.length){el.style.display='none';return;}
+  el.style.display='block';
+  if(!BUILDER.percentilesLoaded) await fetchPlayerPercentiles();
+
+  const p=player||ST.data[0];
+  const pid=String(p.player_id);
+  const rank=ST.data.findIndex(r=>String(r.player_id)===pid)+1||(1);
+
+  // Header
+  const img=document.getElementById('asap-spot-img');
+  img.style.opacity='1';
+  img.src=`https://cdn.nba.com/headshots/nba/latest/1040x760/${p.player_id}.png`;
+  document.getElementById('asap-spot-rank').textContent=`#${rank} Overall`;
+  document.getElementById('asap-spot-name').textContent=p.player_name;
+  document.getElementById('asap-spot-meta').textContent=[p.position_group,p.team_abbreviation||p.team_abbr].filter(Boolean).join(' · ');
+  document.getElementById('asap-spot-score').textContent=p.asap_score!=null?parseFloat(p.asap_score).toFixed(1):'—';
+
+  // Per-stat percentiles from JSON
+  const SERVER_KEY_MAP_LOCAL={
+    'lost_ball_tov_pg':'lost_ball_tov_pg_inv','tov_pct':'tov_pct_inv',
+    'def_spotup_ppp':'def_spotup_ppp_inv','def_post_ppp':'def_post_ppp_inv',
+    'def_pnr_roll_ppp':'def_pnr_roll_ppp_inv','def_iso_ppp':'def_iso_ppp_inv',
+    'def_pnr_bh_ppp':'def_pnr_bh_ppp_inv',
+  };
+  const ASAP_KEYS=[...new Set([
+    'paint_efg_vw','drive_pts_per_drive','drive_foul_rate','pnr_roll_ppp','post_ppp',
+    'all3_efg_vw','midrange_efg_vw','sq_fg_pct_above_expected',
+    'pct_uast_fgm','iso_ppp','pull_up_efg_pct','drive_fg_pct','usg_pct','leverage_shooting',
+    'pot_ast_per_tov','ast_pct','pass_quality_index',
+    'leverage_creation','ast_pts_created_pg','ft_ast_per75',
+    'lost_ball_tov_pg','pnr_bh_ppp',
+    'def_delta_3pt','def_delta_overall','def_disruption_rate','contested_shots','stl','def_spotup_ppp',
+    'rim_protection_score','def_delta_2pt','dreb_pct','blk','def_post_ppp','def_pnr_roll_ppp',
+    'hustle_composite','screen_assist_rate',
+    'oreb_pct','box_out_rate',
+    'gravity_onball_perimeter','gravity_offball_perimeter',
+    'gravity_onball_interior','gravity_offball_interior',
+  ])];
+  const STAT_LABEL={
+    paint_efg_vw:'Paint EFG+',drive_pts_per_drive:'Pts/Drive',
+    drive_foul_rate:'Drive Foul%',pnr_roll_ppp:'Roll Man PPP',post_ppp:'Post PPP',
+    all3_efg_vw:'3PT EFG+',midrange_efg_vw:'Mid EFG+',sq_fg_pct_above_expected:'FG% Above Exp',
+    pct_uast_fgm:'Unassisted%',iso_ppp:'ISO PPP',pull_up_efg_pct:'Pull-Up EFG%',drive_fg_pct:'Drive FG%',
+    usg_pct:'Usage%',leverage_shooting:'Leverage Shooting',pot_ast_per_tov:'Pot AST/TOV',
+    ast_pct:'AST%',pass_quality_index:'Pass Quality',leverage_creation:'Leverage Creation',
+    ast_pts_created_pg:'AST Pts/G',ft_ast_per75:'FT AST/75',lost_ball_tov_pg:'Lost Ball/100',
+    pnr_bh_ppp:'PnR BH PPP',def_delta_3pt:'Def Δ 3PT',def_delta_overall:'Def Δ Overall',
+    def_disruption_rate:'Disruption/75',contested_shots:'Contested Shots',stl:'Steals',
+    def_spotup_ppp:'Def SpotUp PPP',rim_protection_score:'Rim Protection',def_delta_2pt:'Def Δ 2PT',
+    dreb_pct:'DREB%',blk:'Blocks',def_post_ppp:'Def Post PPP',def_pnr_roll_ppp:'Def Roll PPP',
+    hustle_composite:'Hustle Comp',screen_assist_rate:'Screen AST/75',oreb_pct:'OREB%',
+    box_out_rate:'Box Out/75',gravity_onball_perimeter:'On-Ball Perim',
+    gravity_offball_perimeter:'Off-Ball Perim',gravity_onball_interior:'On-Ball Int',
+    gravity_offball_interior:'Off-Ball Int',
+  };
+
+  let qualStats=[];
+  if(BUILDER.percentilesLoaded){
+    for(const key of ASAP_KEYS){
+      const sKey=SERVER_KEY_MAP_LOCAL[key]||key;
+      const lgMap=BUILDER.pctiles[sKey];
+      const posMap=BUILDER.pctiles[sKey+'__pos'];
+      const v=(lgMap&&lgMap[pid]!=null)?lgMap[pid]:(posMap&&posMap[pid]!=null)?posMap[pid]:null;
+      if(v!=null) qualStats.push({key,pct:v});
+    }
+    qualStats.sort((a,b)=>b.pct-a.pct);
+  }
+
+  // Donut — category scores
+  const DONUT_CATS=[
+    {key:'creator_score',    label:'Scoring',    color:'#3b82f6'},
+    {key:'playmaker_score',  label:'Playmaking', color:'#22c55e'},
+    {key:'defender_score',   label:'Defense',    color:'#ef4444'},
+    {key:'intangibles_score',label:'Intangibles',color:'#eab308'},
+  ];
+  const slices=DONUT_CATS.map(c=>({...c,val:parseFloat(p[c.key])||0})).filter(c=>c.val>0);
+  const total=slices.reduce((s,c)=>s+c.val,0);
+  const svg=document.getElementById('asap-donut-svg');
+  const R=38,cx=50,cy=50,stroke=14;
+  let html=''; let angle=0;
+  for(const s of slices){
+    const deg=(s.val/total)*360; const GAP=2;
+    const r1=(angle+GAP/2)*(Math.PI/180),r2=(angle+deg-GAP/2)*(Math.PI/180);
+    const x1=cx+R*Math.cos(r1),y1=cy+R*Math.sin(r1),x2=cx+R*Math.cos(r2),y2=cy+R*Math.sin(r2);
+    if(deg>GAP) html+=`<path d="M${x1.toFixed(2)} ${y1.toFixed(2)} A${R} ${R} 0 ${deg-GAP>180?1:0} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}" fill="none" stroke="${s.color}" stroke-width="${stroke}" stroke-linecap="round"/>`;
+    angle+=deg;
+  }
+  svg.innerHTML=html;
+  document.getElementById('asap-donut-n').textContent=qualStats.length||'—';
+
+  // Category legend
+  const maxCat=Math.max(...slices.map(s=>s.val),1);
+  document.getElementById('asap-cat-legend').innerHTML=slices.map(s=>{
+    const pctColor=s.val>=75?'var(--green,#22c55e)':s.val>=45?'var(--text2)':'var(--red,#ef4444)';
+    return `<div class="b-legend-row">
+      <div class="b-legend-dot" style="background:${s.color}"></div>
+      <div class="b-legend-name">${s.label}</div>
+      <div class="b-legend-bar-wrap"><div class="b-legend-bar-fill" style="width:${Math.round(s.val/maxCat*100)}%;background:${s.color}"></div></div>
+      <div class="b-legend-pct" style="color:${pctColor}">${s.val.toFixed(0)}p</div>
+    </div>`;
+  }).join('');
+
+  // Per-stat legend (same style as builder breakdown, scrollable)
+  document.getElementById('asap-stat-legend').innerHTML=qualStats.map(s=>{
+    const pctColor=s.pct>=75?'var(--green,#22c55e)':s.pct>=45?'var(--text2)':'var(--red,#ef4444)';
+    return `<div class="b-legend-row" style="gap:6px">
+      <div class="b-legend-name" style="font-size:10px">${STAT_LABEL[s.key]||s.key}</div>
+      <div class="b-legend-bar-wrap"><div class="b-legend-bar-fill" style="width:${s.pct}%;background:${pctColor}"></div></div>
+      <div class="b-legend-pct" style="color:${pctColor}">${s.pct.toFixed(0)}p</div>
+    </div>`;
+  }).join('');
+}
+
 function renderRows() {
   const tbody=document.getElementById('tbody');
   const cols=currentCols();
@@ -1843,7 +1999,7 @@ function renderRows() {
     const delay=Math.min(i*12,200);
     let ctx=`<td><div class="num">${fmt(p.min_per_game,'1f')}</div></td>`;
     for(const ck of cols){const cd=COL_DEF[ck];if(!cd)continue;ctx+=`<td><div class="num ${numCls(ck,p[ck])}">${fmt(p[ck],cd.fmt)}</div></td>`;}
-    return `<tr data-id="${p.player_id}" style="animation:rowIn .25s both;animation-delay:${delay}ms">
+    return `<tr data-id="${p.player_id}" data-pid="${p.player_id}" style="animation:rowIn .25s both;animation-delay:${delay}ms">
       <td class="c-rank"><div class="rank-n ${rankCls}">${rank}</div></td>
       <td class="c-player"><div class="pcell">
         <img class="pimg" src="https://cdn.nba.com/headshots/nba/latest/1040x760/${p.player_id}.png" onerror="this.style.opacity=0" alt="">
@@ -1858,7 +2014,15 @@ function renderRows() {
     </tr>`;
   }).join('');
   document.querySelectorAll('tr[data-id]').forEach(r=>{
-    r.addEventListener('click',()=>openDrawer(parseInt(r.dataset.id)));
+    r.addEventListener('click',()=>{
+      if(ST.cat==='metrics'&&ST.sort==='asap_score'){
+        // On Overall/ASAP view: update spotlight only, don't open drawer
+        const player=ST.data.find(p=>String(p.player_id)===r.dataset.pid);
+        if(player) renderAsapSpotlight(player);
+      } else {
+        openDrawer(parseInt(r.dataset.id));
+      }
+    });
   });
 }
 
@@ -1946,7 +2110,7 @@ async function openDrawer(playerId) {
       {key:'creator_score',label:'Scoring',val:m.creator_score},
       {key:'playmaker_score',label:'Playmaking',val:m.playmaker_score},
       {key:'defender_score',label:'Defense',val:m.defender_score},
-      {key:'intangibles_score',label:'Hustle',val:m.hustle_score},
+      {key:'intangibles_score',label:'Intangibles',val:m.intangibles_score},
     ];
     const best=scores.reduce((b,c)=>parseFloat(c.val||0)>parseFloat(b.val||0)?c:b,scores[0]);
     document.getElementById('d-scores').innerHTML=scores.map(c=>{
@@ -1983,7 +2147,7 @@ async function openDrawer(playerId) {
       ['AST Conv %',fmt(m.ast_conversion_rate,'pct')],['Pass Quality',fmt(m.pass_quality_index,'3f')],
       ['PM Gravity',fmt(m.playmaking_gravity,'2f')],['Pass→Score %',fmt(m.pass_to_score_pct,'pct')],
       ['Drive & Dish %',fmt(m.drive_and_dish_rate,'pct')],['Sec AST / 75',fmt(m.secondary_ast_per75,'2f')],
-      ['ISO PPP',fmt(s.iso_ppp,'2f')],['P&R BH PPP',fmt(s.pnr_bh_ppp,'2f')],['Transition PPP',fmt(s.transition_ppp,'2f')],
+      ['ISO PPP',fmt(s.iso_ppp,'2f')],['P&R BH PPP',fmt(s.pnr_bh_ppp,'2f')],
     ].map(dr).join('');
     document.getElementById('d-def').innerHTML=[
       ['Def Delta (overall)',fmt(m.def_delta_overall,'3f')],['Def Delta (2PT)',fmt(m.def_delta_2pt,'3f')],
@@ -2043,7 +2207,7 @@ const DONUT_PALETTE=[
 
 function buildMetricIndex(){
   const seen=new Set(); const metrics=[];
-  const catLabels={scoring:'Scoring',playmaking:'Playmaking',defense:'Defense',hustle:'Intangibles',metrics:'Metrics'};
+  const catLabels={scoring:'Scoring',playmaking:'Playmaking',defense:'Defense',hustle:'Intangibles',metrics:'Overall'};
   const SKIP=new Set(['creator_score','playmaker_score','defender_score','intangibles_score',
     'finishing_score','shooting_score','shot_creation_score','passing_score','creation_score',
     'decision_making_score','perimeter_def_score','interior_def_score','activity_score',
@@ -2118,7 +2282,15 @@ document.getElementById('b-global-sel-all').addEventListener('click',()=>{
   renderBuilderMetrics();renderBuilderChips();
   document.getElementById('builder-run').disabled=BUILDER.selected.length===0;
 });
-function closeBuilder(){BUILDER.open=false;document.getElementById('builder-overlay').classList.remove('on');}
+function closeBuilder(){
+  BUILDER.open=false;
+  document.getElementById('builder-overlay').classList.remove('on');
+  // Return to Overall tab
+  document.querySelectorAll('.cat-tab').forEach(t=>t.classList.remove('active'));
+  document.querySelector('.cat-tab[data-cat="metrics"]').classList.add('active');
+  ST.cat='metrics'; ST.sub=null; ST.sort='asap_score'; ST.sortFmt='1f'; ST.isOverall=true; ST.page=1;
+  renderSidebar(); updateViewLabel(); renderHeader(); fetchPlayers();
+}
 document.getElementById('builder-close').addEventListener('click',closeBuilder);
 document.getElementById('builder-tab').addEventListener('click',openBuilder);
 
@@ -2149,7 +2321,7 @@ const CAT_COLORS={
 
 function renderBuilderCats(){
   const cats=['ALL',...new Set(BUILDER_METRICS.map(m=>m.catLabel))];
-  const catKeys={Scoring:'scoring',Playmaking:'playmaking',Defense:'defense',Intangibles:'hustle',Metrics:'metrics'};
+  const catKeys={Scoring:'scoring',Playmaking:'playmaking',Defense:'defense',Intangibles:'hustle',Overall:'metrics'};
   const el=document.getElementById('builder-cats');
   el.innerHTML=cats.map(c=>{
     const ck=catKeys[c]; const col=ck?CAT_COLORS[ck]:null; const isOn=BUILDER.catFilter===c;
@@ -2324,9 +2496,9 @@ const BUILDER_GATES = {
 // for a sub-composite don't appear in those results.
 const STAT_GATE_MAP = {
   // Finishing — gate: paint_touches/g >= 3.0
-  paint_efg_vw:'finishing', paint_scoring_rate:'finishing',
-  drive_pts_per_drive:'finishing', drive_foul_rate:'finishing',
-  pnr_roll_ppp:'finishing', post_ppp:'finishing', transition_ppp:'finishing',
+  paint_efg_vw:'finishing',
+  drive_pts_per_drive:'finishing',
+  pnr_roll_ppp:'finishing',
   // Shooting — gate: fga/g >= 3.0
   cs_efg_pct:'spotup', spotup_efg_pct:'spotup',
   all3_efg_vw:'shooting', midrange_efg_vw:'shooting',
@@ -2334,7 +2506,7 @@ const STAT_GATE_MAP = {
   // Shot creation — gate: drives/g >= 2.0
   pct_uast_fgm:'shot_creation', iso_ppp:'shot_creation',
   pull_up_efg_pct:'pullup', drive_fg_pct:'shot_creation',
-  usg_pct:'shot_creation', leverage_shooting:'shot_creation',
+  usg_pct:'shot_creation', leverage_shooting:'shot_creation', fta:'shot_creation',
   // Passing — gate: ast/g >= 1.5 AND potential_ast/g >= 3.0
   pot_ast_per_tov:'passing', ast_pct:'passing', pass_quality_index:'passing',
   // Creation — gate: potential_ast/g >= 3.0 AND touches/g >= 40.0

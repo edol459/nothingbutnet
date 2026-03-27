@@ -6,7 +6,12 @@ python backend/ingest/daily_update.py
 Detects the current season from the DB, then runs:
   1. fetch_season.py        — re-fetch all season aggregate data
   2. fetch_new_pbp_stats.py — incremental PBP for new games only
-  3. compute_metrics.py     — recompute all derived metrics
+  3. fetch_matchups.py      — opponent-adjusted matchup defensive metric
+  4. fetch_nba_stats.py     — gravity, shot quality, leverage
+  5. fetch_darko.py         — DARKO DPM
+  6. fetch_lebron.py        — LEBRON
+  7. fetch_net_pts.py       — Net Points
+  8. compute_metrics.py     — recompute all derived metrics
 """
 
 import os
@@ -84,6 +89,12 @@ def main():
             os.path.join(base, 'fetch_new_pbp_stats.py'),
             'Incremental PBP stats',
             ['--season', season, '--season-type', season_type]
+        ),
+        (
+            os.path.join(base, 'fetch_matchups.py'),
+            'Matchup defense (opponent-adjusted)',
+            ['--season', season, '--season-type', season_type,
+             '--min-poss', '20', '--min-def-poss', '300']
         ),
         (
             os.path.join(base, 'fetch_nba_stats.py'),

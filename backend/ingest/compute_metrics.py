@@ -69,7 +69,7 @@ ZONE_MIN_FGA_PG = {
 from scoring_engine import (
     SUBCOMP_STATS, CATCOMP_STATS, LOWER_BETTER, INVERT_MAP,
     SUB_COMPOSITES, DEFENDER_EXTRAS, SERVER_KEY_MAP,
-    passes_gate, score_subcomposites, score_categories,
+    passes_gate, score_subcomposites, score_categories, compute_asap,
 )
 
 
@@ -584,34 +584,37 @@ def compute_composites(metrics_list, seasons_map, season, season_type,
         ('net_pts100',    's'), ('o_net_pts100',  's'), ('d_net_pts100',  's'),
         ('leverage_full', 's'),
         ('ts_pct', 's'), ('spotup_efg_pct', 's'),
-        ('all3_efg_vw', 'm'), ('midrange_efg_vw', 'm'),
-        ('sq_fg_pct_above_expected', 's'),
         ('pct_uast_fgm', 's'), ('iso_ppp', 's'), ('pull_up_efg_pct', 's'),
         ('drive_fg_pct', 's'), ('usg_pct', 's'), ('tov_pct', 'm'),
+        ('pot_ast_per_tov', 'm'), ('ast_pct', 's'),
         ('leverage_shooting', 's'),
-        ('pot_ast_per_tov', 'm'), ('ast_pct', 's'), ('pass_quality_index', 'm'),
+        ('fta', 's'),
         ('leverage_creation', 's'), ('ast_pts_created_pg', 'm'), ('ft_ast_per75', 'm'),
         ('lost_ball_tov_pg', 'm'), ('pnr_bh_ppp', 's'),
+        # Defense — league-wide (not position-normalized)
+        ('def_delta_3pt', 'm'), ('def_disruption_rate', 'm'),
+        ('contested_shots', 's'), ('stl', 's'),
         ('def_iso_ppp', 's'), ('def_pnr_bh_ppp', 's'),
         ('def_post_ppp', 's'), ('def_spotup_ppp', 's'), ('def_pnr_roll_ppp', 's'),
-        ('transition_ppp', 's'),
+        ('leverage_defense', 's'), ('def_ws', 's'),
+        ('matchup_def_fg_pct_adj', 'm'),
+        ('rim_protection_score', 'm'),
+        ('dreb_pct', 's'), ('blk', 's'), ('box_out_rate', 'm'),
+        ('oreb_pct', 's'), ('reb_pct', 's'),
         ('gravity_onball_perimeter', 's'), ('gravity_offball_perimeter', 's'),
         ('gravity_onball_interior', 's'), ('gravity_offball_interior', 's'),
     ]
     ALL_METRICS_POS = [
-        ('paint_efg_vw', 'm'), ('paint_scoring_rate', 'm'),
-        ('post_ppp', 's'), ('drive_foul_rate', 'm'),
+        ('paint_efg_vw', 'm'),
+        ('all3_efg_vw', 'm'), ('midrange_efg_vw', 'm'),
+        ('sq_fg_pct_above_expected', 's'),
+        ('ts_pct', 's'), ('paint_scoring_rate', 'm'),
+        ('pass_quality_index', 'm'),
+        ('pot_ast_per_tov', 'm'), ('ast_pct', 's'),
         ('drive_pts_per_drive', 'm'), ('pnr_roll_ppp', 's'),
-        ('def_delta_3pt', 'm'), ('def_delta_overall', 'm'),
-        ('def_disruption_rate', 'm'), ('contested_shots', 's'),
-        ('def_iso_ppp', 's'), ('def_pnr_bh_ppp', 's'),
-        ('stl', 's'), ('leverage_defense', 's'),
-        ('def_ws', 's'), ('matchup_def_fg_pct', 's'),
-        ('rim_protection_score', 'm'), ('def_delta_2pt', 'm'),
-        ('dreb_pct', 's'), ('blk', 's'), ('box_out_rate', 'm'),
+        ('pts_2nd_chance', 's'),
+        ('leverage_rebounds', 's'), ('leverage_turnovers', 'm'),
         ('motor_score', 'm'), ('hustle_composite', 'm'), ('screen_assist_rate', 'm'),
-        ('oreb_pct', 's'), ('reb_pct', 's'),
-        ('def_spotup_ppp', 's'), ('def_post_ppp', 's'), ('def_pnr_roll_ppp', 's'),
     ]
 
     LG_CS_EFG_AVG = 0.535
@@ -624,7 +627,7 @@ def compute_composites(metrics_list, seasons_map, season, season_type,
     def transition_qualified(pid):
         ps = seasons_map.get(pid, {})
         gp = max(s(ps.get('gp'), 1), 1)
-        return s(ps.get('transition_fga'), 0) / gp >= 0.5
+        return s(ps.get('transition_fga'), 0) / gp >= 0.05
 
     def def_playtype_qualified(pid, poss_col, min_poss=1.5):
         ps = seasons_map.get(pid, {})
@@ -644,16 +647,13 @@ def compute_composites(metrics_list, seasons_map, season, season_type,
         if not pnr_bh_qualified(pid):
             seasons_map[pid]['_pnr_bh_orig'] = ps.get('pnr_bh_ppp')
             seasons_map[pid]['pnr_bh_ppp'] = None
-        if not transition_qualified(pid):
-            seasons_map[pid]['_trans_orig'] = ps.get('transition_ppp')
-            seasons_map[pid]['transition_ppp'] = None
         if s(ps.get('paint_touches'), 0) / gp < 10.0:
             seasons_map[pid]['_psr_orig'] = ps.get('paint_scoring_rate')
             seasons_map[pid]['paint_scoring_rate'] = None
-        if s(ps.get('pnr_roll_poss'), 0) < 2.0:  # per-game value from Synergy
+        if s(ps.get('pnr_roll_poss'), 0) < 3.0:  # per-game value from Synergy
             seasons_map[pid]['_roll_orig'] = ps.get('pnr_roll_ppp')
             seasons_map[pid]['pnr_roll_ppp'] = None
-        if s(ps.get('post_poss'), 0) < 2.0:  # per-game value from Synergy
+        if s(ps.get('post_poss'), 0) < 3.0:  # per-game value from Synergy
             seasons_map[pid]['_post_orig'] = ps.get('post_ppp')
             seasons_map[pid]['post_ppp'] = None
         for ppp_col, poss_col in [
@@ -673,7 +673,6 @@ def compute_composites(metrics_list, seasons_map, season, season_type,
         for orig_key, restore_key in [
             ('_pullup_orig',   'pull_up_efg_pct'),
             ('_pnr_bh_orig',    'pnr_bh_ppp'),
-            ('_trans_orig',     'transition_ppp'),
             ('_psr_orig',       'paint_scoring_rate'),
             ('_roll_orig',      'pnr_roll_ppp'),
             ('_post_orig',      'post_ppp'),
@@ -711,8 +710,7 @@ def compute_composites(metrics_list, seasons_map, season, season_type,
     # Inverted percentile maps (lower raw = better = higher percentile)
     pct_lg['tov_pct_inv']          = {pid: round(100 - v, 1) for pid, v in pct_lg['tov_pct'].items()}
     pct_lg['lost_ball_tov_pg_inv'] = {pid: round(100 - v, 1) for pid, v in pct_lg['lost_ball_tov_pg'].items()}
-    if 'matchup_def_fg_pct' in pct_pos:
-        pct_pos['matchup_def_fg_pct_inv'] = {pid: round(100 - v, 1) for pid, v in pct_pos['matchup_def_fg_pct'].items()}
+    # matchup_def_fg_pct removed from composite — penalises players who guard best opponents
     for col in ['def_iso_ppp', 'def_pnr_bh_ppp', 'def_post_ppp', 'def_spotup_ppp', 'def_pnr_roll_ppp']:
         if col in pct_lg:
             pct_lg[f'{col}_inv'] = {pid: round(100 - v, 1) for pid, v in pct_lg[col].items()}
@@ -738,7 +736,7 @@ def compute_composites(metrics_list, seasons_map, season, season_type,
         m.update(subcomp_scores)
 
         # ── Category composites (via scoring_engine) ──────────
-        cat_scores = score_categories(subcomp_scores, pid, pct_maps_dict)
+        cat_scores = score_categories(subcomp_scores, pid, pct_maps_dict, subcomp_weights)
         m.update(cat_scores)
 
         # Three-and-D
@@ -753,6 +751,18 @@ def compute_composites(metrics_list, seasons_map, season, season_type,
         cat_avail  = [v for v in cat_scores if v is not None]
         m['impact_score'] = round(sum(cat_avail) / len(cat_avail), 1) if cat_avail else None
 
+    # ── ASAP Score ────────────────────────────────────────────
+    # Advanced Stat Average Percentile — every non-extra stat,
+    # win-weighted, with coverage penalty for breadth of qualification.
+    print("  Computing ASAP scores...")
+    # ASAP = flat avg of the 4 already-computed category scores.
+    # Use the scores already in m — don't recompute from scratch.
+    for m in metrics_list:
+        cat_vals = [safe(m.get(c)) for c in
+                    ['creator_score', 'playmaker_score', 'defender_score', 'intangibles_score']]
+        active = [v for v in cat_vals if v is not None]
+        m['asap_score'] = round(sum(active) / len(active), 1) if active else None
+
     # ── Percentile rank columns ───────────────────────────────
     pctile_cols = [
         ('ts_pct',      'ts_pct',              's', False),
@@ -766,6 +776,7 @@ def compute_composites(metrics_list, seasons_map, season, season_type,
         ('defender',    'defender_score',      'm', True),
         ('three_and_d', 'three_and_d_score',   'm', False),
         ('intangibles', 'intangibles_score',   'm', False),
+        ('asap',        'asap_score',          'm', False),
     ]
     for pctile_name, col, src, pos_norm in pctile_cols:
         if pos_norm:

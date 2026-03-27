@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Impact Board — Stat Reference</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0a0a;color:#e8e8e8;font-size:13px;padding:24px}
+h1{font-size:18px;font-weight:600;letter-spacing:.04em;margin-bottom:4px;color:#fff}
+.subtitle{font-size:12px;color:#555;margin-bottom:20px}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
+.pill{font-size:11px;padding:4px 12px;border-radius:20px;border:1px solid #2a2a2a;background:#111;color:#777;cursor:pointer;transition:all .15s}
+.pill:hover{border-color:#444;color:#ccc}
+.pill.active{background:#f97316;color:#fff;border-color:#f97316}
+input[type=text]{background:#111;border:1px solid #2a2a2a;color:#e8e8e8;font-size:12px;padding:5px 10px;border-radius:6px;outline:none;width:200px}
+input[type=text]:focus{border-color:#444}
+input[type=text]::placeholder{color:#444}
+.count{font-size:11px;color:#444;margin-left:auto;align-self:center}
+.tbl-wrap{overflow-x:auto;border-radius:8px;border:1px solid #1a1a1a}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:#0f0f0f;color:#555;font-weight:500;font-size:11px;text-align:left;padding:8px 12px;border-bottom:1px solid #1a1a1a;white-space:nowrap;position:sticky;top:0;z-index:2}
+td{padding:8px 12px;border-bottom:1px solid #141414;vertical-align:top;line-height:1.5}
+tr:hover td{background:#0f0f0f}
+tr.composite td{background:#0d0d0d}
+tr.composite:hover td{background:#121212}
+tr:last-child td{border-bottom:none}
+.cat-badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;white-space:nowrap;display:inline-block;letter-spacing:.03em}
+.cat-scoring{background:#1a0a30;color:#f97316}
+.cat-playmaking{background:#0a1a2e;color:#60a5fa}
+.cat-defense{background:#0a2018;color:#34d399}
+.cat-intangibles{background:#2a1a00;color:#fbbf24}
+.cat-overall{background:#1a0a2e;color:#a78bfa}
+.stat-name{font-weight:500;color:#e8e8e8;font-size:12.5px}
+.sub-text{font-size:11px;color:#555}
+.formula{font-family:'SF Mono',Monaco,monospace;font-size:11px;color:#777;line-height:1.7}
+.min-req{font-size:11px;color:#555;line-height:1.7}
+.tag{font-size:10px;padding:1px 6px;border-radius:4px;border:1px solid #222;color:#555;white-space:nowrap;display:inline-block;margin-top:3px}
+.tag-pos{background:#1a1030;color:#a78bfa;border-color:#3a2060}
+.tag-lg{background:#0a1828;color:#60a5fa;border-color:#1a3050}
+.tag-comp{background:#0a2010;color:#34d399;border-color:#1a4030}
+.tag-raw{color:#555;border-color:#1e1e1e}
+.tag-inv{background:#2a1010;color:#f87171;border-color:#4a2020}
+</style>
+</head>
+<body>
+<div style="display:flex;align-items:center;gap:16px;margin-bottom:6px">
+  <h1 style="margin:0">The Impact Board — Stat Reference</h1>
+  <a href="index.html" style="font-size:11px;color:#555;text-decoration:none;border:1px solid #2a2a2a;padding:3px 10px;border-radius:4px;transition:all .15s" onmouseover="this.style.color='#f97316';this.style.borderColor='#f97316'" onmouseout="this.style.color='#555';this.style.borderColor='#2a2a2a'">← Back to Board</a>
+</div>
+<p class="subtitle">All stats, composites, formulas, gates, and weighting methods. Reflects current <code>scoring_engine.py</code> methodology.</p>
+
+<div class="filters">
+  <input type="text" id="search" placeholder="Search stats, formulas…">
+  <button class="pill active" data-cat="all">All</button>
+  <button class="pill" data-cat="scoring">Scoring</button>
+  <button class="pill" data-cat="playmaking">Playmaking</button>
+  <button class="pill" data-cat="defense">Defense</button>
+  <button class="pill" data-cat="intangibles">Intangibles</button>
+  <button class="pill" data-cat="overall">Overall</button>
+  <button class="pill" data-norm="pos">Pos-normalized</button>
+  <button class="pill" data-norm="lg">League-wide</button>
+  <button class="pill" data-type="composite">Composites only</button>
+  <span class="count" id="count"></span>
+</div>
+
+<div class="tbl-wrap">
+<table>
+<thead><tr>
+  <th style="width:90px">Category</th>
+  <th style="width:155px">Sub-category</th>
+  <th style="width:175px">Stat</th>
+  <th>Formula / Description</th>
+  <th style="width:270px">Gate / Min requirements</th>
+  <th style="width:105px">Norm</th>
+</tr></thead>
+<tbody id="tbody"></tbody>
+</table>
+</div>
+
+<script>
+const ROWS=[
+
+  // ══════════════════════════════════════════════════════════════
+  // SCORING
+  // ══════════════════════════════════════════════════════════════
+
+  {cat:'scoring',sub:'Overall',name:'Creator Score',type:'composite',norm:'lg',inv:false,
+   formula:'Best 2 of available sub-scores: Finishing, Shooting, Shot Creation.\n'
+          +'Drops the lowest sub-score so a weak dimension never penalises a specialist.\n'
+          +'Requires shot_creation_score non-NULL. If only 1 other qualifies, uses that 1.',
+   min:'shot_creation_score REQUIRED — if NULL, creator_score = NULL.\n'
+      +'No hard minutes cutoff. Sub-composite gates govern eligibility.'},
+
+  {cat:'scoring',sub:'Finishing',name:'Finishing Score',type:'composite',norm:'pos',inv:false,
+   formula:'Win-corr weighted avg percentile of 6 stats (position-normalized).\n'
+          +'Min 2 of 6 non-NULL.\n'
+          +'Requires paint_efg_vw non-NULL — pure off-ball finishers excluded.\n'
+          +'Paint Scoring Rate removed — r≈0 with net_pts100.',
+   min:'Gate: paint_touches/gp ≥ 3.0 (season total ÷ gp). No minutes hard cutoff.'},
+
+  {cat:'scoring',sub:'Finishing',name:'Paint EFG+',type:'metric',norm:'pos',inv:false,
+   formula:'(Paint EFG% − Lg Avg Paint EFG%) × Paint FGA/g\nPaint EFG% = (paint_fgm + 0.5×paint_fg3m) / paint_fga',
+   min:'Zone gate: ≥ 2.0 paint FGA/g. 0.0 excluded from percentile pool (VW_METRICS).\n'
+      +'REQUIRED anchor — if NULL, finishing_score = NULL.'},
+
+  {cat:'scoring',sub:'Finishing',name:'Paint Scoring Rate',type:'metric',norm:'pos',inv:false,
+   formula:'pts_paint / paint_touches',
+   min:'Stat gate: paint_touches/gp < 10.0 → NULL before ranking (then restored).\n'
+      +'Required anchor alongside paint_efg_vw (either must be non-NULL).'},
+
+  {cat:'scoring',sub:'Finishing',name:'Pts Per Drive',type:'metric',norm:'pos',inv:false,
+   formula:'drive_pts / drives',
+   min:'NULL if drives = 0. Composite gate (drives/gp ≥ 2.0, inherited from finishing gate) applies.'},
+
+  {cat:'scoring',sub:'Finishing',name:'Drive Foul Rate',type:'metric',norm:'pos',inv:false,
+   formula:'drive_pf / drives',
+   min:'NULL if drives = 0. Composite gate (drives/gp ≥ 2.0) applies.'},
+
+  {cat:'scoring',sub:'Finishing',name:'Roll Man PPP',type:'metric',norm:'pos',inv:false,
+   formula:'pnr_roll_ppp (Synergy, offensive roll man)',
+   min:'Stat gate: pnr_roll_poss/gp < 2.0 → NULL before ranking (then restored).'},
+
+  {cat:'scoring',sub:'Finishing',name:'Post PPP',type:'metric',norm:'pos',inv:false,
+   formula:'post_ppp (Synergy, offensive post-up)',
+   min:'Stat gate: post_poss/gp < 2.0 → NULL before ranking (then restored).'},
+
+  {cat:'scoring',sub:'Finishing',name:'Transition PPP',type:'metric',norm:'lg',inv:false,
+   formula:'transition_ppp (Synergy, offensive transition)',
+   min:'Stat gate: transition_fga/gp < 0.5 → NULL before ranking (then restored).\n'
+      +'League-wide pool — only finishing stat not position-normalized.'},
+
+  {cat:'scoring',sub:'Shooting',name:'Shooting Score',type:'composite',norm:'lg',inv:false,
+   formula:'Win-corr weighted avg percentile of 3 stats (league-wide):\n'
+          +'All3 EFG+, Midrange EFG+, FG% Above Expected.\n'
+          +'Min 2 of 3 non-NULL.',
+   min:'Gate: fga/g ≥ 3.0 (per-game avg). No minutes hard cutoff.'},
+
+  {cat:'scoring',sub:'Shooting',name:'All3 EFG+',type:'metric',norm:'lg',inv:false,
+   formula:'(all3_fgm×1.5 / all3_fga − lg_avg_3pt_efg) × all3_fga_pg',
+   min:'Zone gate: ≥ 1.5 above-break 3PA/g. 0.0 excluded from percentile pool (VW_METRICS).'},
+
+  {cat:'scoring',sub:'Shooting',name:'Midrange EFG+',type:'metric',norm:'lg',inv:false,
+   formula:'(midrange_fgm / midrange_fga − lg_avg_mid_efg) × midrange_fga_pg',
+   min:'Zone gate: ≥ 1.0 mid FGA/g. 0.0 excluded from percentile pool (VW_METRICS).'},
+
+  {cat:'scoring',sub:'Shooting',name:'FG% Above Expected',type:'metric',norm:'lg',inv:false,
+   formula:'sq_fg_pct_above_expected (NBA Stats shotqualityleaders — FGPCTABOVEEXPECTED)',
+   min:'~130 players with data. NULL-skipped; min_metrics=2 of 3 handles this.'},
+
+  {cat:'scoring',sub:'Shooting (extras)',name:'C&S EFG% (Spot-Up)',type:'metric',norm:'lg',inv:false,
+   formula:'(cs_fgm + 0.5×cs_fg3m) / cs_fga (stored as spotup_efg_pct)',
+   min:'Display only — removed from composite (penalises shot creators). Gate for display: cs_fga/gp ≥ 4.0.'},
+
+  {cat:'scoring',sub:'Shooting (extras)',name:'True Shooting %',type:'metric',norm:'lg',inv:false,
+   formula:'pts / (2 × (fga + 0.44 × fta))',
+   min:'Display only.'},
+
+  {cat:'scoring',sub:'Shooting (extras)',name:'EFG%',type:'metric',norm:'lg',inv:false,
+   formula:'(fgm + 0.5 × fg3m) / fga',
+   min:'Display only.'},
+
+  {cat:'scoring',sub:'Shooting (extras)',name:'Avg Shot Quality',type:'metric',norm:'lg',inv:false,
+   formula:'sq_avg_shot_quality (NBA Stats shotqualityleaders — AVGSHOTQUALITY)',
+   min:'~130 players. Display only.'},
+
+  {cat:'scoring',sub:'Shooting (extras)',name:'Corner 3 EFG+',type:'metric',norm:'lg',inv:false,
+   formula:'(corner_fgm×1.5 / corner_fga − lg_avg_corner_efg) × corner_fga_pg',
+   min:'Zone gate: ≥ 0.5 corner 3PA/g. Display only.'},
+
+  {cat:'scoring',sub:'Shooting (extras)',name:'Above Break 3 EFG+',type:'metric',norm:'lg',inv:false,
+   formula:'(ab3_fgm×1.5 / ab3_fga − lg_avg_ab3_efg) × ab3_fga_pg',
+   min:'Zone gate: ≥ 1.5 AB3 FGA/g. Display only.'},
+
+  {cat:'scoring',sub:'Shooting (extras)',name:'Clutch Net Rating',type:'metric',norm:'lg',inv:false,
+   formula:'Off Rtg − Def Rtg in clutch situations (score within 5, last 5 min)',
+   min:'Display only.'},
+
+  {cat:'scoring',sub:'Shot Creation',name:'Shot Creation Score',type:'composite',norm:'lg',inv:false,
+   formula:'Win-corr weighted avg percentile of 6 stats (league-wide):\n'
+          +'Unassisted FGM%, ISO PPP, Pull-Up EFG%, Drive FG%, USG%, Leverage Shooting.\n'
+          +'Min 2 of 6 non-NULL.\n'
+          +'Note: TOV% removed — decision-making belongs in Ball Handling composite.',
+   min:'Gate: drives/gp ≥ 2.0 (season total ÷ gp). REQUIRED for creator_score.'},
+
+  {cat:'scoring',sub:'Shot Creation',name:'Unassisted FGM%',type:'metric',norm:'lg',inv:false,
+   formula:'pct_uast_fgm = unassisted FGM / total FGM',
+   min:'No individual gate beyond composite gate.'},
+
+  {cat:'scoring',sub:'Shot Creation',name:'ISO PPP',type:'metric',norm:'lg',inv:false,
+   formula:'iso_ppp (Synergy, offensive isolation)',
+   min:'NULL if no ISO possessions. NULL-skipped in composite.'},
+
+  {cat:'scoring',sub:'Shot Creation',name:'Pull-Up EFG%',type:'metric',norm:'lg',inv:false,
+   formula:'(pull_up_fgm + 0.5×pull_up_fg3m) / pull_up_fga',
+   min:'Stat gate: pull_up_fga/gp < 1.5 → NULL before ranking (then restored).'},
+
+  {cat:'scoring',sub:'Shot Creation',name:'Drive FG%',type:'metric',norm:'lg',inv:false,
+   formula:'drive_fgm / drive_fga',
+   min:'NULL if drive_fga = 0.'},
+
+  {cat:'scoring',sub:'Shot Creation',name:'USG%',type:'metric',norm:'lg',inv:false,
+   formula:'usg_pct from advanced game logs',
+   min:'No individual gate.'},
+
+  {cat:'scoring',sub:'Shot Creation',name:'Leverage Shooting',type:'metric',norm:'lg',inv:false,
+   formula:'leverage_shooting (NBA Stats leverageleaders — SHOOTING field)',
+   min:'~247 players. NULL-skipped if unavailable. Measures shooting impact in high-leverage moments — confirmed player quality metric not team-context dependent.'},
+
+  {cat:'scoring',sub:'Shot Creation (extras)',name:'Creation Delta',type:'metric',norm:'lg',inv:false,
+   formula:'pull_up_efg_pct − cs_efg_pct',
+   min:'Requires ≥ 50 pull-up AND ≥ 50 C&S FGA. Display only.'},
+
+  // ══════════════════════════════════════════════════════════════
+  // PLAYMAKING
+  // ══════════════════════════════════════════════════════════════
+
+  {cat:'playmaking',sub:'Overall',name:'Playmaker Score',type:'composite',norm:'lg',inv:false,
+   formula:'Best 2 of available sub-scores: Passing, Creation, Ball Handling.\n'
+          +'Drops the lowest — ball handling never penalises a player who doesn\'t run PnR-BH.\n'
+          +'If only 1 qualifies, uses that 1.',
+   min:'Requires passing_score non-NULL. No hard minutes cutoff.'},
+
+  {cat:'playmaking',sub:'Passing',name:'Passing Score',type:'composite',norm:'lg',inv:false,
+   formula:'Win-corr weighted avg of 3 stats (league-wide):\n'
+          +'Pot AST/BP TOV, AST%, Pass Quality Index.\n'
+          +'Min 2 of 3 non-NULL. Requires pot_ast_per_tov non-NULL.',
+   min:'Gate: AST/g ≥ 1.5 AND potential_ast/g ≥ 3.0. No GP floor.'},
+
+  {cat:'playmaking',sub:'Passing',name:'Pot AST / BP TOV',type:'metric',norm:'lg',inv:false,
+   formula:'(potential_ast/gp) / (bad_pass_tov/gp)\nFalls back to tov/g if bad_pass_tov = 0',
+   min:'Required: potential_ast/g ≥ 3.0.\n'
+      +'If NULL → passing_score = NULL → playmaker_score = NULL.'},
+
+  {cat:'playmaking',sub:'Passing',name:'AST%',type:'metric',norm:'lg',inv:false,
+   formula:'ast_pct from advanced game logs',
+   min:'No individual gate.'},
+
+  {cat:'playmaking',sub:'Passing',name:'Pass Quality Index',type:'metric',norm:'lg',inv:false,
+   formula:'ast_pts_created_pg / (passes_made/gp)',
+   min:'NULL if passes_made = 0.'},
+
+  {cat:'playmaking',sub:'Passing (extras)',name:'Potential AST / 75',type:'metric',norm:'lg',inv:false,
+   formula:'(potential_ast/gp) × (75/poss_pg)',
+   min:'Display only.'},
+
+  {cat:'playmaking',sub:'Passing (extras)',name:'Secondary AST / 75',type:'metric',norm:'lg',inv:false,
+   formula:'(secondary_ast/gp) × (75/poss_pg)',
+   min:'Display only — hockey assists.'},
+
+  {cat:'playmaking',sub:'Passing (extras)',name:'Drive AST / 75',type:'metric',norm:'lg',inv:false,
+   formula:'(drive_ast/gp) × (75/poss_pg)',
+   min:'Requires drives/g ≥ 2.0. Display only.'},
+
+  {cat:'playmaking',sub:'Creation',name:'Creation Score',type:'composite',norm:'lg',inv:false,
+   formula:'Win-corr weighted avg of 3 stats (league-wide):\n'
+          +'Leverage Creation, AST Pts Created/G, FT AST/75.\n'
+          +'Min 2 of 3 non-NULL.',
+   min:'Gate: potential_ast/g ≥ 3.0 AND touches/g ≥ 40.0. No GP floor.'},
+
+  {cat:'playmaking',sub:'Creation',name:'Leverage Creation',type:'metric',norm:'lg',inv:false,
+   formula:'leverage_creation (NBA Stats leverageleaders — CREATION field)',
+   min:'~247 players. NULL-skipped if unavailable.'},
+
+  {cat:'playmaking',sub:'Creation',name:'AST Pts Created/G',type:'metric',norm:'lg',inv:false,
+   formula:'ast_pts_created / gp (NBA Tracking — passing endpoint)',
+   min:'No individual gate.'},
+
+  {cat:'playmaking',sub:'Creation',name:'FT AST / 75',type:'metric',norm:'lg',inv:false,
+   formula:'(ft_ast/gp) × (75/poss_pg)',
+   min:'NULL if ft_ast = 0.'},
+
+  {cat:'playmaking',sub:'Creation (extras)',name:'On-Ball Perim Gravity',type:'metric',norm:'lg',inv:false,
+   formula:'gravity_onball_perimeter (NBA Stats gravityleaders)',
+   min:'~247 players. Gravity composites live in Intangibles tab. Display only here.'},
+
+  {cat:'playmaking',sub:'Creation (extras)',name:'Leverage Full',type:'metric',norm:'lg',inv:false,
+   formula:'leverage_full (NBA Stats leverageleaders — FULL field)',
+   min:'~247 players. Display only.'},
+
+  {cat:'playmaking',sub:'Ball Handling',name:'Ball Handling Score',type:'composite',norm:'lg',inv:false,
+   formula:'Win-corr weighted avg of 2 stats (league-wide):\n'
+          +'Lost Ball/100 Touches (inv), P&R BH PPP.\n'
+          +'Min 1 of 2 non-NULL (≤2 stat rule).',
+   min:'Gate: drives/g ≥ 4.0 AND touches/g ≥ 40.0. No GP floor.\n'
+      +'P&R BH PPP additionally requires pnr_bh_poss/g ≥ 5.0.\n'
+      +'Dropped from playmaker_score if it\'s the weakest of the 3 sub-scores (best 2 of 3).'},
+
+  {cat:'playmaking',sub:'Ball Handling',name:'Lost Ball / 100 Touches',type:'metric',norm:'lg',inv:true,
+   formula:'(lost_ball_tov/gp) / (touches/gp) × 100\nInverted: 100 − rank(lost_ball_tov_pg)\nLower rate → higher percentile',
+   min:'PBP-derived. Lower is better. Stored as lost_ball_tov_pg_inv in percentile map.'},
+
+  {cat:'playmaking',sub:'Ball Handling',name:'P&R BH PPP',type:'metric',norm:'lg',inv:false,
+   formula:'pnr_bh_ppp (Synergy, offensive ball handler in P&R)',
+   min:'Stat gate: pnr_bh_poss/g < 5.0 → NULL before ranking (then restored).'},
+
+  {cat:'playmaking',sub:'Ball Handling (extras)',name:'Bad Pass / 100 Touches',type:'metric',norm:'lg',inv:true,
+   formula:'(bad_pass_tov/gp) / (touches/gp) × 100',
+   min:'Display only. Lower is better.'},
+
+  {cat:'playmaking',sub:'Ball Handling (extras)',name:'Drive Passes / 75',type:'metric',norm:'lg',inv:false,
+   formula:'(drive_passes/gp) × (75/poss_pg)',
+   min:'Requires drives/g ≥ 2.0. Display only.'},
+
+  // ══════════════════════════════════════════════════════════════
+  // DEFENSE
+  // ══════════════════════════════════════════════════════════════
+
+  {cat:'defense',sub:'Overall',name:'Defender Score',type:'composite',norm:'pos',inv:false,
+   formula:'Flat avg of all available signals (position-normalized):\n'
+          +'  Perimeter Def Score + Interior Def Score\n'
+          +'  + Leverage Defense percentile\n'
+          +'  + Def Win Shares percentile\n'
+          +'  + Matchup FG% Allowed (inverted)\n'
+          +'All averaged together when non-NULL.',
+   min:'No hard minutes cutoff. No composite gate — each signal self-gates.'},
+
+  {cat:'defense',sub:'Overall',name:'Leverage Defense',type:'metric',norm:'pos',inv:false,
+   formula:'leverage_defense (NBA Stats leverageleaders — DEFENSE field)',
+   min:'~247 players. Feeds directly into defender_score.'},
+
+  {cat:'defense',sub:'Overall',name:'Def Win Shares',type:'metric',norm:'pos',inv:false,
+   formula:'def_ws (NBA Stats — DEF_WS)',
+   min:'Feeds into defender_score as position-normalized percentile.'},
+
+  {cat:'defense',sub:'Overall',name:'Matchup FG% Allowed',type:'metric',norm:'pos',inv:true,
+   formula:'matchup_def_fg_pct = weighted avg opponent FG% when guarded\nInverted: matchup_def_fg_pct_inv = 100 − rank',
+   min:'Min 50 total matchup FGA (season). Lower is better. Feeds into defender_score.'},
+
+  {cat:'defense',sub:'Perimeter Defense',name:'Perimeter Def Score',type:'composite',norm:'pos',inv:false,
+   formula:'Win-corr weighted avg of 6 stats (position-normalized):\n'
+          +'Def Delta 3PT, Def Delta Overall, Disruption/75, Contested Shots, STL, Def Spot-Up PPP (inv).\n'
+          +'Min 2 of 6 non-NULL.',
+   min:'No composite gate. Individual metrics self-gate.'},
+
+  {cat:'defense',sub:'Perimeter Defense',name:'Def Delta Overall',type:'metric',norm:'pos',inv:false,
+   formula:'normal_fg_pct − d_fg_pct_overall',
+   min:'Compute gate: d_fga_overall ≥ 150 AND normal_fg_pct > 0. NULL below threshold.'},
+
+  {cat:'defense',sub:'Perimeter Defense',name:'Def Delta 3PT',type:'metric',norm:'pos',inv:false,
+   formula:'ns_fg3_pct − d_fg_pct_3pt',
+   min:'Compute gate: d_fga_3pt ≥ 60. NULL below threshold.'},
+
+  {cat:'defense',sub:'Perimeter Defense',name:'Disruption / 75',type:'metric',norm:'pos',inv:false,
+   formula:'(stl + deflections×0.35 + charges_drawn×0.80) × (75/poss_pg)',
+   min:'NULL if stl + deflections + charges = 0.'},
+
+  {cat:'defense',sub:'Perimeter Defense',name:'Contested Shots',type:'metric',norm:'pos',inv:false,
+   formula:'contested_shots (season total, NBA hustle tracking)',
+   min:'No individual gate.'},
+
+  {cat:'defense',sub:'Perimeter Defense',name:'Steals',type:'metric',norm:'pos',inv:false,
+   formula:'stl (per-game average)',
+   min:'No individual gate.'},
+
+  {cat:'defense',sub:'Perimeter Defense',name:'Def Spot-Up PPP (inv)',type:'metric',norm:'pos',inv:true,
+   formula:'def_spotup_ppp (Synergy, defensive spot-up)\nInverted: def_spotup_ppp_inv = 100 − rank',
+   min:'Stat gate: def_spotup_poss/gp < 1.5 → NULL before ranking. Lower is better.'},
+
+  {cat:'defense',sub:'Defense (extras)',name:'Def ISO PPP',type:'metric',norm:'pos',inv:true,
+   formula:'def_iso_ppp (Synergy, defensive isolation). Inverted percentile.',
+   min:'Display only. Lower is better.'},
+
+  {cat:'defense',sub:'Defense (extras)',name:'Def P&R BH PPP',type:'metric',norm:'pos',inv:true,
+   formula:'def_pnr_bh_ppp (Synergy, defensive PnR ball handler). Inverted percentile.',
+   min:'Display only. Lower is better.'},
+
+  {cat:'defense',sub:'Defense (extras)',name:'On-Ball Def Leverage',type:'metric',norm:'pos',inv:false,
+   formula:'leverage_onball_def (NBA Stats leverageleaders — ONBALLDEF)',
+   min:'~247 players. Display only.'},
+
+  {cat:'defense',sub:'Interior Defense',name:'Interior Def Score',type:'composite',norm:'pos',inv:false,
+   formula:'Win-corr weighted avg of 6 stats (position-normalized):\n'
+          +'Rim Protection Score, Def Delta 2PT, DREB%, BLK, Def Post PPP (inv), Def Roll Man PPP (inv).\n'
+          +'Min 2 of 6 non-NULL.',
+   min:'Gate: def_rim_fga/gp ≥ 2.5 (season total ÷ gp).'},
+
+  {cat:'defense',sub:'Interior Defense',name:'Rim Protection Score',type:'metric',norm:'pos',inv:false,
+   formula:'(0.650 − def_rim_fg_pct) × def_rim_fga × 2\n(0.650 = RIM_XFG_BASELINE)',
+   min:'Compute gate: def_rim_fga ≥ 20. Also subject to composite gate (def_rim_fga/gp ≥ 2.5).'},
+
+  {cat:'defense',sub:'Interior Defense',name:'Def Delta 2PT',type:'metric',norm:'pos',inv:false,
+   formula:'ns_fg2_pct − d_fg_pct_2pt',
+   min:'Compute gate: d_fga_2pt ≥ 90. NULL below threshold.'},
+
+  {cat:'defense',sub:'Interior Defense',name:'DREB%',type:'metric',norm:'pos',inv:false,
+   formula:'dreb_pct from advanced game logs',
+   min:'No individual gate. Also used in rebounding_score (Intangibles).'},
+
+  {cat:'defense',sub:'Interior Defense',name:'Blocks',type:'metric',norm:'pos',inv:false,
+   formula:'blk (per-game average)',
+   min:'No individual gate.'},
+
+  {cat:'defense',sub:'Interior Defense',name:'Def Post PPP (inv)',type:'metric',norm:'pos',inv:true,
+   formula:'def_post_ppp (Synergy, defensive post-up)\nInverted: def_post_ppp_inv = 100 − rank',
+   min:'Stat gate: def_post_poss/gp < 1.5 → NULL before ranking. Lower is better.'},
+
+  {cat:'defense',sub:'Interior Defense',name:'Def Roll Man PPP (inv)',type:'metric',norm:'pos',inv:true,
+   formula:'def_pnr_roll_ppp (Synergy, defensive PnR roll man)\nInverted: def_pnr_roll_ppp_inv = 100 − rank',
+   min:'Stat gate: def_pnr_roll_poss/gp < 1.5 → NULL before ranking. Lower is better.'},
+
+  // ══════════════════════════════════════════════════════════════
+  // INTANGIBLES (replaces Hustle)
+  // ══════════════════════════════════════════════════════════════
+
+  {cat:'intangibles',sub:'Overall',name:'Intangibles Score',type:'composite',norm:'pos',inv:false,
+   formula:'Best 2 of available sub-scores: Activity, Rebounding, Gravity.\n'
+          +'Drops the weakest dimension — mirrors Creator/Playmaker logic.\n'
+          +'A player who doesn\'t produce hustle stats isn\'t penalised\n'
+          +'if they rebound and create gravity. If only 1 or 2 qualify, uses those.',
+   min:'No gate. Each sub-score self-gates. No hard minutes cutoff.'},
+
+  {cat:'intangibles',sub:'Hustle',name:'Activity Score',type:'composite',norm:'pos',inv:false,
+   formula:'Win-corr weighted avg of 2 stats (position-normalized):\n'
+          +'Hustle Composite, Screen Assist Rate.\n'
+          +'Min 1 of 2 non-NULL (≤2 stat rule).\n'
+          +'Motor Score removed — miles/min has negative win correlation.',
+   min:'No composite gate. Position-normalized percentiles.'},
+
+  {cat:'intangibles',sub:'Hustle',name:'Hustle Composite',type:'metric',norm:'pos',inv:false,
+   formula:'(deflections_pg×0.35 + charges_pg×0.80 + loose_balls_pg×0.65 + screen_ast_pts_pg×0.10) × (75/poss_pg)',
+   min:'NULL if composite result = 0.'},
+
+  {cat:'intangibles',sub:'Hustle',name:'Screen Assist Rate',type:'metric',norm:'pos',inv:false,
+   formula:'(screen_ast_pts/gp) × (75/poss_pg)',
+   min:'NULL if screen_ast_pts = 0.'},
+
+  {cat:'intangibles',sub:'Hustle (extras)',name:'Motor Score',type:'metric',norm:'pos',inv:false,
+   formula:'(dist_miles_off + dist_miles_def) / min_per_game × 36',
+   min:'Compute gate: min_total ≥ 1000 AND dist_miles > 0 AND min_pg > 0.\n'
+      +'Removed from composite (negative win correlation). Display only.'},
+
+  {cat:'intangibles',sub:'Hustle (extras)',name:'Deflections',type:'metric',norm:'pos',inv:false,
+   formula:'deflections (season total)',
+   min:'Display only. Factored into Hustle Composite and Disruption/75.'},
+
+  {cat:'intangibles',sub:'Hustle (extras)',name:'Charges Drawn',type:'metric',norm:'pos',inv:false,
+   formula:'charges_drawn (season total)',
+   min:'Display only. Factored into Hustle Composite.'},
+
+  {cat:'intangibles',sub:'Hustle (extras)',name:'Loose Ball Rate / 75',type:'metric',norm:'pos',inv:false,
+   formula:'(loose_balls/gp) × (75/poss_pg)',
+   min:'NULL if loose_balls = 0. Display only.'},
+
+  {cat:'intangibles',sub:'Hustle (extras)',name:'Screen Assists',type:'metric',norm:'pos',inv:false,
+   formula:'screen_assists (season total)',
+   min:'Display only.'},
+
+  {cat:'intangibles',sub:'Rebounding',name:'Rebounding Score',type:'composite',norm:'pos',inv:false,
+   formula:'Win-corr weighted avg of 3 stats (position-normalized):\n'
+          +'DREB%, OREB%, Box Out/75. Min 2 of 3 non-NULL.\n'
+          +'DREB% also appears in interior_def_score.',
+   min:'No composite gate. Position-normalized percentiles.'},
+
+  {cat:'intangibles',sub:'Rebounding',name:'DREB%',type:'metric',norm:'pos',inv:false,
+   formula:'dreb_pct from advanced game logs',
+   min:'No individual gate. Also used in interior_def_score.'},
+
+  {cat:'intangibles',sub:'Rebounding',name:'OREB%',type:'metric',norm:'pos',inv:false,
+   formula:'oreb_pct from advanced game logs',
+   min:'No individual gate.'},
+
+  {cat:'intangibles',sub:'Rebounding',name:'Box Out / 75',type:'metric',norm:'pos',inv:false,
+   formula:'(box_outs/gp) × (75/poss_pg)',
+   min:'NULL if box_outs = 0.'},
+
+  {cat:'intangibles',sub:'Rebounding (extras)',name:'Box Outs',type:'metric',norm:'pos',inv:false,
+   formula:'box_outs (season total)',
+   min:'Display only.'},
+
+  {cat:'intangibles',sub:'Gravity',name:'Perimeter Gravity Score',type:'composite',norm:'lg',inv:false,
+   formula:'Win-corr weighted avg of 2 stats (league-wide):\n'
+          +'On-Ball Perimeter Gravity, Off-Ball Perimeter Gravity.\n'
+          +'Min 1 of 2 non-NULL.\n'
+          +'Gate: position_group IN (G, GF, F) — perimeter players only.\n'
+          +'Interior gravity near-zero for these players by role, not ability.',
+   min:'Gate: position_group must be G, GF, or F. FC/C get NULL for this sub-composite.'},
+
+  {cat:'intangibles',sub:'Gravity',name:'Interior Gravity Score',type:'composite',norm:'lg',inv:false,
+   formula:'Win-corr weighted avg of 2 stats (league-wide):\n'
+          +'On-Ball Interior Gravity, Off-Ball Interior Gravity.\n'
+          +'Min 1 of 2 non-NULL.\n'
+          +'Gate: position_group IN (FC, C) — interior players only.\n'
+          +'Perimeter gravity near-zero for these players by role, not ability.',
+   min:'Gate: position_group must be FC or C. G/GF/F get NULL for this sub-composite.'},
+
+  {cat:'intangibles',sub:'Gravity',name:'On-Ball Perimeter Gravity',type:'metric',norm:'lg',inv:false,
+   formula:'gravity_onball_perimeter (NBA Stats gravityleaders — AVGONBALLPERIMETERGRAVITYSCORE)',
+   min:'~247 players.'},
+
+  {cat:'intangibles',sub:'Gravity',name:'Off-Ball Perimeter Gravity',type:'metric',norm:'lg',inv:false,
+   formula:'gravity_offball_perimeter (NBA Stats gravityleaders — AVGOFFBALLPERIMETERGRAVITYSCORE)',
+   min:'~247 players.'},
+
+  {cat:'intangibles',sub:'Gravity',name:'On-Ball Interior Gravity',type:'metric',norm:'lg',inv:false,
+   formula:'gravity_onball_interior (NBA Stats gravityleaders — AVGONBALLINTERIORGRAVITYSCORE)',
+   min:'~247 players. Naturally negative for perimeter-only players.'},
+
+  {cat:'intangibles',sub:'Gravity',name:'Off-Ball Interior Gravity',type:'metric',norm:'lg',inv:false,
+   formula:'gravity_offball_interior (NBA Stats gravityleaders — AVGOFFBALLINTERIORGRAVITYSCORE)',
+   min:'~247 players. Naturally negative for perimeter-only players.'},
+
+  // ══════════════════════════════════════════════════════════════
+  // OVERALL
+  // ══════════════════════════════════════════════════════════════
+
+  {cat:'overall',sub:'ASAP',name:'ASAP Score',type:'composite',norm:'lg',inv:false,
+   formula:'Advanced Stat Average Percentile — every non-extra composite stat, win-weighted.\n'
+          +'Uses exact same methodology as the Builder in WIN-WEIGHTED mode.\n'
+          +'No coverage penalty — uses same category-level rules as the rest of the site\n'
+          +'Category best-2-of-3 rules handle specialization gracefully.',
+   min:'Same gates as scoring engine. Coverage exponent 0.5 (tunable in scoring_engine.py).'},
+
+  {cat:'overall',sub:'External',name:'BPM (computed)',type:'metric',norm:'lg',inv:false,
+   formula:'−2.611 + 0.318×ast_pct×100 + 0.449×reb_pct×100×0.3 + 1.064×(ts_pct−0.5)×usg_pct×100/25\n'
+          +'+ 0.295×stl_pct×100 + 0.396×blk_pct×100 − 0.257×(tov_pg/poss_pg)×100 + pos_adj\n'
+          +'pos_adj: G=0 / GF=−0.5 / F=−1.0 / FC=−1.5 / C=−2.0',
+   min:'Requires min_total ≥ 1000 AND usg_pct > 0 AND ts_pct > 0.'},
+
+  {cat:'overall',sub:'External',name:'Net Points / 100',type:'metric',norm:'lg',inv:false,
+   formula:'net_pts100 (ESPN Analytics — luck-adjusted on/off net rating per 100 poss).\n'
+          +'Off/Def split: o_net_pts100, d_net_pts100.',
+   min:'Used as win-correlation anchor for ALL composite weighting.'},
+
+  {cat:'overall',sub:'External',name:'DARKO DPM',type:'metric',norm:'lg',inv:false,
+   formula:'darko_dpm / darko_odpm / darko_ddpm / darko_box (darko.app)',
+   min:'2025-26+ season only.'},
+
+  {cat:'overall',sub:'External',name:'LEBRON / WAR',type:'metric',norm:'lg',inv:false,
+   formula:'lebron / o_lebron / d_lebron (BBall Index)\nwar = lebron / league wins-per-point constant (~2.7)',
+   min:'2025-26+ season only.'},
+
+  {cat:'overall',sub:'Methodology',name:'Win-Correlation Weighting',type:'composite',norm:'lg',inv:false,
+   formula:'weight = raw |Pearson r(stat, net_pts100)|\n'
+          +'No normalization — the raw r IS the weight.\n'
+          +'A stat with r=0.45 gets 9× the weight of r=0.05.\n'
+          +'Lower-is-better stats: r sign flipped before |r|.\n'
+          +'Stats with no data → fallback weight = 1.0.',
+   min:'Pearson r computed across ≥ 500 min players with net_pts100 data.\n'
+      +'Applied at sub-composite level. Category scores are flat averages.'},
+
+  {cat:'overall',sub:'Methodology',name:'Position Normalization',type:'composite',norm:'pos',inv:false,
+   formula:'Which stats are position-normalized (ranked within G/GF/F/FC/C separately):\n'
+          +'  Finishing stats (all 7, except Transition PPP which is league-wide)\n'
+          +'  All Defense stats\n'
+          +'  Activity (Hustle Composite, Screen Assist Rate)\n'
+          +'  Rebounding (DREB%, OREB%, Box Out/75)\n'
+          +'League-wide pools:\n'
+          +'  Shooting, Shot Creation, Playmaking stats\n'
+          +'  Gravity (already position-contextualized by NBA formula)',
+   min:'Position groups: G, GF, F, FC, C from players.position_group in DB.'},
+
+  {cat:'overall',sub:'Methodology',name:'min_metrics Rule',type:'composite',norm:'lg',inv:false,
+   formula:'Composites with ≤2 total stats → need ≥ 1 non-NULL.\n'
+          +'Composites with 3+ stats → need ≥ 2 non-NULL.\n'
+          +'Prevents one volume-gated stat from nulling an entire composite.',
+   min:'Applied per sub-composite. Defined in scoring_engine.py.'},
+
+  {cat:'overall',sub:'Methodology',name:'Category Score Rules',type:'composite',norm:'lg',inv:false,
+   formula:'Creator (Scoring): best 2 of 3 sub-composites — requires shot_creation_score.\n'
+          +'Playmaker (Playmaking): best 2 of 3 sub-composites — requires passing_score.\n'
+          +'Defender (Defense): flat avg of 2 sub-composites + 3 extra signals.\n'
+          +'Intangibles: flat avg of 3 sub-composites (Activity + Rebounding + Gravity).',
+   min:'Best-2-of-3 drops the weakest dimension — specialists not penalised.\n'
+      +'Defender and Intangibles use flat averages — all dimensions equally valued.'},
+
+  {cat:'overall',sub:'Methodology',name:'VW Metrics',type:'metric',norm:'lg',inv:false,
+   formula:'all3_efg_vw, midrange_efg_vw, corner3_efg_vw, above_break3_efg_vw, paint_efg_vw\n'
+          +'Excluded from percentile pool when value = 0.0 (not just NULL).\n'
+          +'Zero = shots attempted but exactly league-average — a meaningful data point.',
+   min:'VW_METRICS set in scoring_engine.py.'},
+];
+
+const catColors={scoring:'cat-scoring',playmaking:'cat-playmaking',defense:'cat-defense',intangibles:'cat-intangibles',overall:'cat-overall'};
+const catLabels={scoring:'Scoring',playmaking:'Playmaking',defense:'Defense',intangibles:'Intangibles',overall:'Overall'};
+let activeCat='all',activeNorm=null,activeType=null,searchVal='';
+
+function normTag(n){return n==='pos'?'<span class="tag tag-pos">Position</span>':'<span class="tag tag-lg">League</span>';}
+function typeTag(t){return t==='composite'?'<span class="tag tag-comp">Composite</span>':'<span class="tag tag-raw">Raw</span>';}
+function invTag(inv){return inv?'<span class="tag tag-inv">Inverted</span>':'';}
+
+function render(){
+  const q=searchVal.toLowerCase();
+  const rows=ROWS.filter(r=>{
+    if(activeCat!=='all'&&r.cat!==activeCat)return false;
+    if(activeNorm&&r.norm!==activeNorm)return false;
+    if(activeType&&r.type!==activeType)return false;
+    if(q&&![r.name,r.sub,r.formula,r.min].some(s=>s.toLowerCase().includes(q)))return false;
+    return true;
+  });
+  document.getElementById('count').textContent=rows.length+' stats';
+  document.getElementById('tbody').innerHTML=rows.map(r=>`
+    <tr class="${r.type==='composite'?'composite':''}">
+      <td><span class="cat-badge ${catColors[r.cat]}">${catLabels[r.cat]}</span></td>
+      <td><span class="sub-text">${r.sub}</span></td>
+      <td><span class="stat-name">${r.name}</span><br>${typeTag(r.type)}${invTag(r.inv)}</td>
+      <td><span class="formula">${r.formula.replace(/\n/g,'<br>')}</span></td>
+      <td><span class="min-req">${r.min.replace(/\n/g,'<br>')}</span></td>
+      <td>${normTag(r.norm)}</td>
+    </tr>`).join('');
+}
+
+document.querySelectorAll('.pill[data-cat]').forEach(b=>b.addEventListener('click',()=>{
+  activeCat=b.dataset.cat;activeNorm=null;activeType=null;
+  document.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));
+  b.classList.add('active');render();
+}));
+document.querySelectorAll('.pill[data-norm]').forEach(b=>b.addEventListener('click',()=>{
+  const v=b.dataset.norm;
+  if(activeNorm===v){activeNorm=null;b.classList.remove('active');}
+  else{activeNorm=v;document.querySelectorAll('.pill[data-norm]').forEach(p=>p.classList.remove('active'));b.classList.add('active');}
+  render();
+}));
+document.querySelectorAll('.pill[data-type]').forEach(b=>b.addEventListener('click',()=>{
+  const v=b.dataset.type;
+  if(activeType===v){activeType=null;b.classList.remove('active');}
+  else{activeType=v;document.querySelectorAll('.pill[data-type]').forEach(p=>p.classList.remove('active'));b.classList.add('active');}
+  render();
+}));
+document.getElementById('search').addEventListener('input',e=>{searchVal=e.target.value;render();});
+render();
+</script>
+</body>
+</html>

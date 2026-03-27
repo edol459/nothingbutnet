@@ -105,10 +105,18 @@ migrations = [
     ("player_seasons",  "pnr_bh_poss",                "REAL"),
     # ── Intangibles category (replaces hustle_score) ─────────────────────────
     ("player_metrics",  "gravity_score",              "REAL"),
+    ("player_metrics",  "gravity_perimeter_score",   "REAL"),
+    ("player_metrics",  "defender_extras_score",     "REAL"),
+    ("player_seasons",  "matchup_def_fg_pct_adj",    "REAL"),
+    ("player_seasons",  "matchup_poss",              "REAL"),
+    ("player_metrics",  "gravity_interior_score",    "REAL"),
     ("player_metrics",  "intangibles_score",          "REAL"),
     ("player_metrics",  "intangibles_pctile",         "REAL"),
     ("player_metrics",  "activity_score",             "REAL"),
     ("player_metrics",  "rebounding_score",           "REAL"),
+    # ── ASAP Score ───────────────────────────────────────────────────────────
+    ("player_metrics",  "asap_score",                 "REAL"),
+    ("player_metrics",  "asap_pctile",                "REAL"),
 ]
 
 print(f"\nRunning migrations...")

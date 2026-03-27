@@ -16,15 +16,14 @@ import math
 
 SUBCOMP_STATS = {
     'finishing_score': [
-        'paint_efg_vw', 'paint_scoring_rate', 'drive_pts_per_drive',
-        'drive_foul_rate', 'pnr_roll_ppp', 'post_ppp', 'transition_ppp',
+        'paint_efg_vw', 'drive_pts_per_drive', 'pnr_roll_ppp', 'pts_2nd_chance',
     ],
     'shooting_score': [
         'all3_efg_vw', 'midrange_efg_vw', 'sq_fg_pct_above_expected',
     ],
     'shot_creation_score': [
         'pct_uast_fgm', 'iso_ppp', 'pull_up_efg_pct', 'drive_fg_pct',
-        'usg_pct', 'leverage_shooting',
+        'usg_pct', 'leverage_shooting', 'fta',
     ],
     'passing_score': [
         'pot_ast_per_tov', 'ast_pct', 'pass_quality_index',
@@ -36,22 +35,32 @@ SUBCOMP_STATS = {
         'lost_ball_tov_pg', 'pnr_bh_ppp',
     ],
     'perimeter_def_score': [
-        'def_delta_3pt', 'def_delta_overall', 'def_disruption_rate',
+        'def_delta_3pt', 'def_disruption_rate',
         'contested_shots', 'stl', 'def_spotup_ppp',
     ],
     'interior_def_score': [
-        'rim_protection_score', 'def_delta_2pt', 'dreb_pct', 'blk',
+        'rim_protection_score', 'dreb_pct', 'blk',
         'def_post_ppp', 'def_pnr_roll_ppp',
     ],
     'activity_score': [
         'hustle_composite', 'screen_assist_rate',
+        'leverage_rebounds', 'leverage_turnovers',
     ],
     'rebounding_score': [
         'dreb_pct', 'oreb_pct', 'box_out_rate',
     ],
+    'gravity_perimeter_score': [
+        'gravity_onball_perimeter', 'gravity_offball_perimeter',
+    ],
+    'gravity_interior_score': [
+        'gravity_onball_interior', 'gravity_offball_interior',
+    ],
     'gravity_score': [
         'gravity_onball_perimeter', 'gravity_offball_perimeter',
         'gravity_onball_interior', 'gravity_offball_interior',
+    ],
+    'defender_extras_score': [
+        'leverage_defense', 'def_ws', 'matchup_def_fg_pct_adj',
     ],
 }
 
@@ -59,14 +68,15 @@ CATCOMP_STATS = {
     'creator_score':   ['finishing_score', 'shooting_score', 'shot_creation_score'],
     'playmaker_score': ['passing_score', 'creation_score', 'decision_making_score'],
     'defender_score':  ['perimeter_def_score', 'interior_def_score'],
-    'intangibles_score': ['activity_score', 'rebounding_score', 'gravity_score'],
+    'intangibles_score': ['activity_score', 'rebounding_score', 'gravity_perimeter_score', 'gravity_interior_score'],
 }
 
 # Stats where lower raw = better; stored in pct maps as _inv (already flipped)
 LOWER_BETTER = {
     'tov_pct', 'lost_ball_tov_pg', 'bad_pass_tov_pg',
     'def_iso_ppp', 'def_pnr_bh_ppp', 'def_post_ppp',
-    'def_spotup_ppp', 'def_pnr_roll_ppp', 'matchup_def_fg_pct',
+    'def_spotup_ppp', 'def_pnr_roll_ppp',
+    'leverage_turnovers', 'matchup_def_fg_pct_adj',
 }
 
 # Maps _inv key → base stat key (for weight lookup)
@@ -88,7 +98,6 @@ SERVER_KEY_MAP = {
     'def_pnr_roll_ppp':   'def_pnr_roll_ppp_inv',
     'def_iso_ppp':        'def_iso_ppp_inv',
     'def_pnr_bh_ppp':     'def_pnr_bh_ppp_inv',
-    'matchup_def_fg_pct': 'matchup_def_fg_pct_inv',
 }
 
 # ── Sub-composite definitions ─────────────────────────────────────────────────
@@ -102,24 +111,24 @@ SERVER_KEY_MAP = {
 
 SUB_COMPOSITES = [
     ('finishing_score', None,
-     [('paint_efg_vw', 'm'), ('paint_scoring_rate', 'm'),
-      ('drive_pts_per_drive', 'm'), ('drive_foul_rate', 'm'),
-      ('pnr_roll_ppp', 's'), ('post_ppp', 's'), ('transition_ppp', 's')],
+     [('paint_efg_vw', 'm'), ('drive_pts_per_drive', 'm'),
+      ('pnr_roll_ppp', 's'), ('pts_2nd_chance', 's')],
      'pos'),
 
     ('shooting_score', 'shooting',
      [('all3_efg_vw', 'm'), ('midrange_efg_vw', 'm'),
       ('sq_fg_pct_above_expected', 's')],
-     'lg'),
+     'pos'),
 
-    ('shot_creation_score', 'shot_creation',
+    ('shot_creation_score', None,
      [('pct_uast_fgm', 's'), ('iso_ppp', 's'), ('pull_up_efg_pct', 's'),
-      ('drive_fg_pct', 's'), ('usg_pct', 's'), ('leverage_shooting', 's')],
+      ('drive_fg_pct', 's'), ('usg_pct', 's'), ('leverage_shooting', 's'),
+      ('fta', 's')],
      'lg'),
 
     ('passing_score', 'passing',
      [('pot_ast_per_tov', 'm'), ('ast_pct', 's'), ('pass_quality_index', 'm')],
-     'lg'),
+     'pos'),
 
     ('creation_score', 'pm_creation',
      [('leverage_creation', 's'), ('ast_pts_created_pg', 'm'), ('ft_ast_per75', 'm')],
@@ -130,28 +139,53 @@ SUB_COMPOSITES = [
      'lg'),
 
     ('perimeter_def_score', None,
-     [('def_delta_3pt', 'm'), ('def_delta_overall', 'm'),
+     [('def_delta_3pt', 'm'),
       ('def_disruption_rate', 'm'), ('contested_shots', 's'),
       ('stl', 's'), ('def_spotup_ppp_inv', 's')],
-     'pos'),
+     'lg'),
 
     ('interior_def_score', 'interior_def',
-     [('rim_protection_score', 'm'), ('def_delta_2pt', 'm'),
+     [('rim_protection_score', 'm'),
       ('dreb_pct', 's'), ('blk', 's'),
       ('def_post_ppp_inv', 's'), ('def_pnr_roll_ppp_inv', 's')],
-     'pos'),
+     'lg'),
 
     ('activity_score', None,
-     [('hustle_composite', 'm'), ('screen_assist_rate', 'm')],
+     [('hustle_composite', 'm'), ('screen_assist_rate', 'm'),
+      ('leverage_rebounds', 's'), ('leverage_turnovers', 'm')],
      'pos'),
 
     ('rebounding_score', None,
      [('dreb_pct', 's'), ('oreb_pct', 's'), ('box_out_rate', 'm')],
      'pos'),
 
+    # Defender extras — outcome-based signals (pos-normalized, no gate)
+    # These get proper win-correlation weights via the subcomp system.
+    ('defender_extras_score', None,
+     [('leverage_defense',        's'),
+      ('def_ws',                  's'),
+      ('matchup_def_fg_pct_adj',  'm')],
+     'lg'),
+
+    # Gravity overall — all 4 stats, league-wide, no position gate
+    # Win-weighted avg percentile of all 4 gravity dimensions.
+    # Replaces the raw NBA gravity_score with our computed composite.
     ('gravity_score', None,
-     [('gravity_onball_perimeter', 's'), ('gravity_offball_perimeter', 's'),
-      ('gravity_onball_interior', 's'), ('gravity_offball_interior', 's')],
+     [('gravity_onball_perimeter',  's'),
+      ('gravity_offball_perimeter', 's'),
+      ('gravity_onball_interior',   's'),
+      ('gravity_offball_interior',  's')],
+     'lg'),
+
+    # Gravity split by position role:
+    # Perimeter gravity — G/GF/F only (gate_key='perimeter_player')
+    # Interior gravity — FC/C only (gate_key='interior_player')
+    ('gravity_perimeter_score', 'perimeter_player',
+     [('gravity_onball_perimeter', 's'), ('gravity_offball_perimeter', 's')],
+     'lg'),
+
+    ('gravity_interior_score', 'interior_player',
+     [('gravity_onball_interior', 's'), ('gravity_offball_interior', 's')],
      'lg'),
 ]
 
@@ -159,7 +193,6 @@ SUB_COMPOSITES = [
 DEFENDER_EXTRAS = [
     ('leverage_defense', 'pos'),
     ('def_ws',           'pos'),
-    ('matchup_def_fg_pct_inv', 'pos'),
 ]
 
 # ── Gate functions ────────────────────────────────────────────────────────────
@@ -193,8 +226,8 @@ def passes_gate(ps, gate_key):
     if gate_key == 'shot_creation':
         return s(ps.get('drives'), 0) / gp >= 2.0
     if gate_key == 'passing':
-        return (s(ps.get('ast'), 0) >= 1.5 and
-                s(ps.get('potential_ast'), 0) / gp >= 3.0)
+        return (s(ps.get('ast'), 0) >= 0.5 and
+                s(ps.get('potential_ast'), 0) / gp >= 1.0)
     if gate_key == 'pm_creation':
         return (s(ps.get('potential_ast'), 0) / gp >= 3.0 and
                 s(ps.get('touches'), 0) / gp >= 40.0)
@@ -202,7 +235,13 @@ def passes_gate(ps, gate_key):
         return (s(ps.get('drives'), 0) / gp >= 4.0 and
                 s(ps.get('touches'), 0) / gp >= 40.0)
     if gate_key == 'interior_def':
-        return s(ps.get('def_rim_fga'), 0) / gp >= 2.5
+        return s(ps.get('def_rim_fga'), 0) / gp >= 3.5
+    # Gravity position gates — based on position_group
+    pos = ps.get('position_group', '')
+    if gate_key == 'perimeter_player':
+        return pos in ('G', 'GF', 'F')
+    if gate_key == 'interior_player':
+        return pos in ('FC', 'C')
     return True
 
 # ── Core scoring primitives ───────────────────────────────────────────────────
@@ -293,12 +332,8 @@ def score_subcomposites(pid, ps, pct_maps, subcomp_weights):
             if not has_paint:
                 score = None
 
-        # passing_score: require pot_ast_per_tov
-        if comp_name == 'passing_score' and score is not None:
-            lg_pool = pct_maps.get('lg', {})
-            if (lg_pool.get('pot_ast_per_tov', {}).get(pid) is None and
-                    lg_pool.get('pot_ast_per_tov', {}).get(str(pid)) is None):
-                score = None
+        # passing_score: pot_ast_per_tov is preferred but not required
+        # min_metrics=2 of 3 handles missing stats gracefully
 
         scores[comp_name] = score
 
@@ -326,13 +361,13 @@ def _weighted_avg_from_pool(pid, cols_srcs, pct_pool, comp_name, subcomp_weights
 
 # ── Category scoring ──────────────────────────────────────────────────────────
 
-def score_categories(subcomp_scores, pid, pct_maps):
+def score_categories(subcomp_scores, pid, pct_maps, subcomp_weights=None):
     """
     Compute category scores from sub-composite scores.
 
-    subcomp_scores — {comp_name: score_or_None}  from score_subcomposites()
-    pid            — player id
-    pct_maps       — {'lg': ..., 'pos': ...}  needed for defender extras
+    subcomp_scores  — {comp_name: score_or_None}  from score_subcomposites()
+    pid             — player id
+    pct_maps        — {'lg': ..., 'pos': ...}  needed for defender extras
 
     Returns dict of {cat_name: score_or_None}
     """
@@ -341,27 +376,33 @@ def score_categories(subcomp_scores, pid, pct_maps):
     def g(name):
         return safe(subcomp_scores.get(name))
 
-    # ── Creator: best 2 of (shot_creation, finishing, shooting)
-    # Requires shot_creation_score. Drops lowest to not penalise specialists.
+    # ── Creator: best 2 of (finishing, shooting, shot_creation)
+    # No required anchor — any sub-score qualifies.
+    # A big who finishes at the rim and shoots efficiently gets a creator score
+    # even without drives. Best-2-of-3 drops the weakest dimension.
     _cr = [(v, n) for n, v in [
-        ('shot_creation_score', g('shot_creation_score')),
         ('finishing_score',     g('finishing_score')),
         ('shooting_score',      g('shooting_score')),
+        ('shot_creation_score', g('shot_creation_score')),
     ] if v is not None]
-    if len(_cr) < 2 or not any(n == 'shot_creation_score' for _, n in _cr):
+    if not _cr:
         cat['creator_score'] = None
+    elif len(_cr) == 1:
+        cat['creator_score'] = round(_cr[0][0], 1)
     else:
         top2 = sorted(_cr, key=lambda x: x[0], reverse=True)[:2]
         cat['creator_score'] = round(sum(v for v, _ in top2) / 2, 1)
 
     # ── Playmaker: best 2 of (passing, creation, decision_making)
-    # Requires passing_score.
+    # No required anchor — any sub-score qualifies.
+    # A big with screen assists and ft assists gets a creation score
+    # even without passing volume. Best-2-of-3 drops the weakest dimension.
     _pm = [(v, n) for n, v in [
-        ('passing_score',          g('passing_score')),
-        ('creation_score',         g('creation_score')),
-        ('decision_making_score',  g('decision_making_score')),
+        ('passing_score',         g('passing_score')),
+        ('creation_score',        g('creation_score')),
+        ('decision_making_score', g('decision_making_score')),
     ] if v is not None]
-    if not _pm or not any(n == 'passing_score' for _, n in _pm):
+    if not _pm:
         cat['playmaker_score'] = None
     elif len(_pm) == 1:
         cat['playmaker_score'] = round(_pm[0][0], 1)
@@ -369,21 +410,31 @@ def score_categories(subcomp_scores, pid, pct_maps):
         top2 = sorted(_pm, key=lambda x: x[0], reverse=True)[:2]
         cat['playmaker_score'] = round(sum(v for v, _ in top2) / 2, 1)
 
-    # ── Defender: flat avg of sub-composites + extra signals
+    # ── Defender: flat avg of sub-composites + extras sub-composite + matchup signal
+    # defender_extras_score = leverage_defense + def_ws (properly win-weighted)
     def_vals = []
-    for sub in ['perimeter_def_score', 'interior_def_score']:
+    for sub in ['perimeter_def_score', 'interior_def_score', 'defender_extras_score']:
         v = g(sub)
-        if v is not None: def_vals.append(v)
-    pos_pool = pct_maps.get('pos', {})
-    for extra_col, _pool in DEFENDER_EXTRAS:
-        pmap = pos_pool.get(extra_col, {})
-        v = pmap.get(pid) if pmap.get(pid) is not None else pmap.get(str(pid))
         if v is not None: def_vals.append(v)
     cat['defender_score'] = round(sum(def_vals) / len(def_vals), 1) if def_vals else None
 
-    # ── Intangibles: flat avg of activity, rebounding, gravity
-    _int = [v for v in [g('activity_score'), g('rebounding_score'), g('gravity_score')] if v is not None]
-    cat['intangibles_score'] = round(sum(_int) / len(_int), 1) if _int else None
+    # ── Intangibles: best 2 of available sub-scores (activity, rebounding, gravity)
+    # A player only ever has one gravity score (perimeter OR interior based on position).
+    # Dropping the weakest dimension mirrors Creator/Playmaker logic — a player who
+    # doesn't produce hustle stats isn't penalised if they rebound and create gravity.
+    _int_gravity = g('gravity_perimeter_score') or g('gravity_interior_score')
+    _int = [(v, n) for n, v in [
+        ('activity',    g('activity_score')),
+        ('rebounding',  g('rebounding_score')),
+        ('gravity',     _int_gravity),
+    ] if v is not None]
+    if not _int:
+        cat['intangibles_score'] = None
+    elif len(_int) <= 2:
+        cat['intangibles_score'] = round(sum(v for v, _ in _int) / len(_int), 1)
+    else:
+        top2 = sorted(_int, key=lambda x: x[0], reverse=True)[:2]
+        cat['intangibles_score'] = round(sum(v for v, _ in top2) / 2, 1)
 
     return cat
 
@@ -468,22 +519,16 @@ def run_builder(selected_keys, players, pct_maps, subcomp_weights, mode='impact'
             if total_w == 0: continue
             sc_score = round(sum(v * w for _, v, w in vals_weights) / total_w, 1)
 
-            # finishing_score extra check: require a paint stat
+            # finishing_score extra check: require paint_efg_vw (primary paint anchor)
             if comp_name == 'finishing_score':
                 pos_pool = pct_maps.get('pos', {})
                 has_paint = (pos_pool.get('paint_efg_vw', {}).get(pid) is not None or
-                             pos_pool.get('paint_efg_vw', {}).get(pid_s) is not None or
-                             pos_pool.get('paint_scoring_rate', {}).get(pid) is not None or
-                             pos_pool.get('paint_scoring_rate', {}).get(pid_s) is not None)
+                             pos_pool.get('paint_efg_vw', {}).get(pid_s) is not None)
                 if not has_paint:
                     continue
 
-            # passing_score extra check: require pot_ast_per_tov
-            if comp_name == 'passing_score':
-                lg_pool = pct_maps.get('lg', {})
-                if (lg_pool.get('pot_ast_per_tov', {}).get(pid) is None and
-                        lg_pool.get('pot_ast_per_tov', {}).get(pid_s) is None):
-                    continue
+            # passing_score: pot_ast_per_tov is preferred but not required
+            # min_metrics=2 of 3 handles missing stats gracefully
 
             subcomp_scores[comp_name] = sc_score
             for pct_key, v, w in vals_weights:
@@ -503,7 +548,7 @@ def run_builder(selected_keys, players, pct_maps, subcomp_weights, mode='impact'
         # Apply category rules when the selected sub-composites match a known
         # category exactly — this makes "select all scoring" == creator_score.
         # Otherwise fall back to flat average of sub-composite scores.
-        cat_scores = score_categories(subcomp_scores, pid, pct_maps)
+        cat_scores = score_categories(subcomp_scores, pid, pct_maps, subcomp_weights)
 
         # Determine which categories are fully represented by selected subcomps
         active_subcomps = set(subcomp_scores.keys())
@@ -511,7 +556,7 @@ def run_builder(selected_keys, players, pct_maps, subcomp_weights, mode='impact'
             'creator_score':     {'finishing_score', 'shooting_score', 'shot_creation_score'},
             'playmaker_score':   {'passing_score', 'creation_score', 'decision_making_score'},
             'defender_score':    {'perimeter_def_score', 'interior_def_score'},
-            'intangibles_score': {'activity_score', 'rebounding_score', 'gravity_score'},
+            'intangibles_score': {'activity_score', 'rebounding_score', 'gravity_perimeter_score', 'gravity_interior_score'},
         }
         # A category is "triggered" if ANY of its sub-composites are selected.
         # Use the category score (with best-2-of-3 etc.) when the selected
@@ -569,3 +614,36 @@ def run_builder(selected_keys, players, pct_maps, subcomp_weights, mode='impact'
 
     results.sort(key=lambda x: x['score'], reverse=True)
     return results
+
+
+# ── ASAP — Advanced Stat Average Percentile ──────────────────────────────────
+# Every non-extra composite stat, win-weighted, with coverage penalty.
+# The more stats a player qualifies for, the higher their potential score.
+
+# All user-facing stat keys that feed into composites (no extras)
+ASAP_STATS = [s for stats in SUBCOMP_STATS.values() for s in stats]
+
+def compute_asap(players, pct_maps, subcomp_weights):
+    """
+    Compute ASAP score for each player.
+
+    ASAP = impact_score = flat avg of available category scores
+    (Creator + Playmaker + Defender + Intangibles).
+
+    The category-level best-2-of-3 rules already handle specialization
+    gracefully — no coverage penalty needed. A player who doesn't qualify
+    for ball handling isn't penalised because playmaker_score uses the
+    best 2 of 3 available sub-composites.
+
+    Returns {player_id: asap_score}
+    """
+    asap_map = {}
+    for p in players:
+        pid = p['player_id']
+        ps  = p
+        subcomp_scores = score_subcomposites(pid, ps, pct_maps, subcomp_weights)
+        cat_scores     = score_categories(subcomp_scores, pid, pct_maps, subcomp_weights)
+        active = [v for v in cat_scores.values() if v is not None]
+        if active:
+            asap_map[pid] = round(sum(active) / len(active), 1)
+    return asap_map

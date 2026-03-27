@@ -145,6 +145,8 @@ BASE_COLS = """
     pm.defender_pctile,
     pm.three_and_d_pctile,
     pm.intangibles_pctile,
+    pm.asap_score,
+    pm.asap_pctile,
     pm.ts_pct_pctile,
     pm.net_rating_pctile,
     pm.shooting_score,
@@ -155,10 +157,11 @@ BASE_COLS = """
     pm.gravity_creation,
     pm.perimeter_def_score,
     pm.interior_def_score,
+    pm.defender_extras_score,
     pm.overall_def_score,
     pm.activity_score,
     pm.rebounding_score,
-    ps.gravity_score,
+    pm.gravity_score,
     ps.gravity_onball_perimeter,
     ps.gravity_offball_perimeter,
     ps.leverage_creation,
@@ -166,10 +169,15 @@ BASE_COLS = """
     ps.leverage_shooting,
     ps.leverage_defense,
     ps.leverage_onball_def,
+    ps.leverage_rebounds,
+    ps.leverage_turnovers,
+    ps.pts_2nd_chance,
     ps.def_ws,
     ps.off_ws,
     ps.ws_48,
     ps.matchup_def_fg_pct,
+    ps.matchup_def_fg_pct_adj,
+    ps.matchup_poss,
     ps.sq_avg_shot_quality,
     ps.sq_fg_pct_above_expected,
     pm.paint_efg,
@@ -210,11 +218,11 @@ def get_sort_col(sort_key):
         'screen_assist_rate', 'loose_ball_rate', 'hustle_composite', 'motor_score',
         'creation_load', 'dribble_pressure_idx', 'cs_fga_rate', 'bpm_computed',
         'playmaker_score', 'creator_score', 'defender_score', 'three_and_d_score',
-        'intangibles_score',
+        'intangibles_score', 'asap_score',
         'finishing_score', 'shooting_score', 'shot_creation_score',
         'passing_score', 'creation_score', 'decision_making_score',
         'gravity_creation',
-        'perimeter_def_score', 'interior_def_score',
+        'perimeter_def_score', 'interior_def_score', 'defender_extras_score',
         'activity_score', 'rebounding_score',
         'paint_efg', 'paint_efg_delta', 'paint_fga_pg', 'paint_efg_vw',
         'midrange_efg', 'midrange_efg_delta', 'midrange_fga_pg', 'midrange_efg_vw',
@@ -223,7 +231,7 @@ def get_sort_col(sort_key):
         'all3_efg', 'all3_efg_delta', 'all3_fga_pg', 'all3_efg_vw',
     }
     ps_cols = {
-        'gravity_score', 'gravity_onball_perimeter', 'gravity_offball_perimeter',
+        'gravity_perimeter_score', 'gravity_interior_score', 'gravity_onball_perimeter', 'gravity_offball_perimeter',
         'leverage_creation', 'leverage_full', 'leverage_shooting',
         'leverage_defense', 'leverage_onball_def',
         'def_ws', 'off_ws', 'ws_48', 'matchup_def_fg_pct',
@@ -312,7 +320,7 @@ def diag_gravity():
         cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
             SELECT p.player_name, p.position_group,
-                   ps.gravity_score,
+                   pm.gravity_score,
                    ps.gravity_onball_perimeter,
                    ps.gravity_offball_perimeter,
                    ps.gravity_onball_interior,
@@ -324,9 +332,9 @@ def diag_gravity():
             LEFT JOIN player_metrics pm ON ps.player_id = pm.player_id
                 AND ps.season = pm.season AND ps.season_type = pm.season_type
             WHERE ps.season = %s AND ps.season_type = %s
-              AND ps.gravity_score IS NOT NULL
+              AND pm.gravity_score IS NOT NULL
               AND ps.min >= 1000
-            ORDER BY ps.gravity_score DESC
+            ORDER BY pm.gravity_score DESC
             LIMIT 20
         """, (DEFAULT_SEASON, DEFAULT_SEASON_TYPE))
         rows = [dict(r) for r in cur.fetchall()]
@@ -334,7 +342,7 @@ def diag_gravity():
         # Also get Jokic specifically
         cur.execute("""
             SELECT p.player_name, p.position_group,
-                   ps.gravity_score,
+                   pm.gravity_score,
                    ps.gravity_onball_perimeter,
                    ps.gravity_offball_perimeter,
                    ps.gravity_onball_interior,
@@ -704,7 +712,8 @@ def get_leaders():
     composites = [
         ('playmaker_score', 'pm'), ('creator_score', 'pm'),
         ('defender_score',  'pm'), ('three_and_d_score', 'pm'),
-        ('intangibles_score',    'pm'),
+        ('intangibles_score',   'pm'),
+        ('asap_score',          'pm'),
     ]
     result = {}
     try:
