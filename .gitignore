@@ -1,6 +1,60 @@
-.venv/
-.env
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
-*.pyc
-*.csv
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+ENV/
+env/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── JSON — ignore most but keep precomputed data files ────────────────────────
 *.json
+!backend/ingest/data/player_percentiles_*.json
+!backend/ingest/data/win_correlations_*.json
+!backend/ingest/data/gravity_*.json
+!backend/ingest/data/leverage_*.json
+!backend/ingest/data/shot_quality_*.json
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Editor ────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Node (if any frontend tooling) ───────────────────────────────────────────
+node_modules/
+npm-debug.log*
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.pyc
+*.sqlite3
+*.db
