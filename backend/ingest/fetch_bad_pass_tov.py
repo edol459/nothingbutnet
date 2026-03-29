@@ -33,9 +33,9 @@ args = parser.parse_args()
 SEASON      = args.season
 SEASON_TYPE = args.season_type
 
-# Progress file is per-season so 2024-25 and 2025-26 don't collide
+# Progress file lives next to this script regardless of invocation directory
 season_slug   = SEASON.replace('-', '_')
-PROGRESS_FILE = f'bad_pass_progress_{season_slug}.json'
+PROGRESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), f'bad_pass_progress_{season_slug}.json')
 DELAY         = 1.8
 
 if not DATABASE_URL:

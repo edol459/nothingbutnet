@@ -1,17 +1,22 @@
 """
-The Impact Board — Daily Update Pipeline
+NothingButNet — Daily Update Pipeline
 ==========================================
 python backend/ingest/daily_update.py
 
-Detects the current season from the DB, then runs:
-  1. fetch_season.py        — re-fetch all season aggregate data
-  2. fetch_new_pbp_stats.py — incremental PBP for new games only
-  3. fetch_matchups.py      — opponent-adjusted matchup defensive metric
-  4. fetch_nba_stats.py     — gravity, shot quality, leverage
-  5. fetch_darko.py         — DARKO DPM
-  6. fetch_lebron.py        — LEBRON
-  7. fetch_net_pts.py       — Net Points
-  8. compute_metrics.py     — recompute all derived metrics
+Runs the full update pipeline in order:
+  1.  fetch_players.py         — sync players table (names, positions, active status)
+  2.  fetch_season.py          — re-fetch all season aggregate stats
+  3.  fetch_new_pbp_stats.py   — incremental PBP for new games only
+  4.  fetch_bad_pass_tov.py    — bad pass turnovers (separate endpoint)
+  5.  fetch_lost_ball_tov.py   — lost ball turnovers (separate endpoint)
+  6.  fetch_closest_defender.py — closest defender shot data
+  7.  fetch_matchups.py        — opponent-adjusted matchup defensive metric
+  8.  fetch_nba_stats.py       — gravity, shot quality, leverage
+  9.  fetch_darko.py           — DARKO DPM (darko.app)
+  10. fetch_lebron.py          — LEBRON + O/D-LEBRON + WAR (fanspo.com)
+  11. fetch_net_pts.py         — Net Points per 100 (ESPN via S3)
+  12. compute_metrics.py       — recompute all derived metrics
+  13. compute_pctiles.py       — recompute percentiles for Builder
 """
 
 import os
@@ -27,7 +32,7 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 
 
 def get_current_season():
-    """Detect active season from DB — same logic as server.py."""
+    """Detect active season from DB."""
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur  = conn.cursor()
@@ -42,7 +47,7 @@ def get_current_season():
             return row[0], row[1]
     except Exception as e:
         print(f"⚠️  Could not detect season from DB: {e}")
-    return os.getenv('NBA_SEASON', '2024-25'), os.getenv('NBA_SEASON_TYPE', 'Regular Season')
+    return os.getenv('NBA_SEASON', '2025-26'), os.getenv('NBA_SEASON_TYPE', 'Regular Season')
 
 
 def run(script, label, extra_args=None):
@@ -69,7 +74,7 @@ def main():
     season, season_type = get_current_season()
 
     print(f"\n{'='*60}")
-    print(f"THE IMPACT BOARD — Daily Update")
+    print(f"NOTHINGBUTNET — Daily Update")
     print(f"Season: {season} | {season_type}")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}")
@@ -79,60 +84,102 @@ def main():
         'ingest'
     )
 
+    season_args = ['--season', season, '--season-type', season_type]
+
     steps = [
+        # ── Players ───────────────────────────────────────────
         (
-            os.path.join(base, 'fetch_season.py'),
-            'Season data fetch',
-            ['--season', season, '--season-type', season_type]
+            'fetch_players.py',
+            'Players sync',
+            ['--season', season],
+        ),
+        # ── NBA API stats ─────────────────────────────────────
+        (
+            'fetch_season.py',
+            'Season aggregate stats',
+            season_args,
         ),
         (
-            os.path.join(base, 'fetch_new_pbp_stats.py'),
+            'fetch_new_pbp_stats.py',
             'Incremental PBP stats',
-            ['--season', season, '--season-type', season_type]
+            season_args,
         ),
         (
-            os.path.join(base, 'fetch_matchups.py'),
-            'Matchup defense (opponent-adjusted)',
-            ['--season', season, '--season-type', season_type,
-             '--min-poss', '20', '--min-def-poss', '300']
+            'fetch_bad_pass_tov.py',
+            'Bad pass turnovers',
+            season_args,
         ),
         (
-            os.path.join(base, 'fetch_nba_stats.py'),
+            'fetch_lost_ball_tov.py',
+            'Lost ball turnovers',
+            season_args,
+        ),
+        (
+            'fetch_closest_defender.py',
+            'Closest defender shots',
+            season_args,
+        ),
+        (
+            'fetch_matchups.py',
+            'Matchup defense',
+            season_args + ['--min-poss', '20', '--min-def-poss', '300'],
+        ),
+        (
+            'fetch_nba_stats.py',
             'NBA Stats (gravity, shot quality, leverage)',
-            ['--season', season, '--season-type', season_type]
+            season_args,
+        ),
+        # ── External metrics ──────────────────────────────────
+        (
+            'fetch_darko.py',
+            'DARKO DPM',
+            season_args,
         ),
         (
-            os.path.join(base, 'fetch_darko.py'),
-            'DARKO DPM fetch',
-            ['--season', season, '--season-type', season_type]
+            'fetch_lebron.py',
+            'LEBRON',
+            season_args,
         ),
         (
-            os.path.join(base, 'fetch_lebron.py'),
-            'LEBRON fetch',
-            ['--season', season, '--season-type', season_type]
+            'fetch_net_pts.py',
+            'Net Points per 100',
+            season_args,
+        ),
+        # ── Compute ───────────────────────────────────────────
+        (
+            'compute_metrics.py',
+            'Derived metrics',
+            season_args,
         ),
         (
-            os.path.join(base, 'fetch_net_pts.py'),
-            'Net Points fetch',
-            ['--season', season, '--season-type', season_type]
-        ),
-        (
-            os.path.join(base, 'compute_metrics.py'),
-            'Metrics computation',
-            ['--season', season, '--season-type', season_type]
+            'compute_pctiles.py',
+            'Percentiles (Builder)',
+            season_args,
         ),
     ]
 
-    for script, label, args in steps:
-        if not os.path.exists(script):
-            print(f"⚠️  Skipping {label} — script not found")
+    failed_steps = []
+    for script_name, label, args in steps:
+        path = os.path.join(base, script_name)
+        if not os.path.exists(path):
+            print(f"\n⚠️  Skipping '{label}' — {script_name} not found")
             continue
-        if not run(script, label, args):
-            print(f"\n❌ Pipeline stopped at: {label}")
-            sys.exit(1)
+        if not run(path, label, args):
+            failed_steps.append(label)
+            # Compute steps are hard dependencies — stop if they fail
+            if script_name in ('compute_metrics.py', 'compute_pctiles.py'):
+                print(f"\n❌ Pipeline stopped at: {label}")
+                sys.exit(1)
+            # Data fetch failures are non-fatal — log and continue
+            print(f"   ⚠️  Continuing despite failure…")
 
     print(f"\n{'='*60}")
-    print(f"✅ Daily update complete")
+    if failed_steps:
+        print(f"⚠️  Daily update finished with {len(failed_steps)} failure(s):")
+        for s in failed_steps:
+            print(f"   - {s}")
+    else:
+        print(f"✅ Daily update complete — all steps passed")
     print(f"Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}\n")
 
