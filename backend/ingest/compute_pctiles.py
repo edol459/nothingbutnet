@@ -53,11 +53,24 @@ SKIP_COLS = {
 
 # Stats where LOWER is better — percentile is inverted so 100 = best
 INVERT_COLS = {
+    # Turnovers / fouls
     "tov", "pf",
-    "d_fg_pct_overall", "d_fg_pct_2pt", "d_fg_pct_3pt",
+    "bad_pass_tov", "lost_ball_tov", "drive_tov",
+
+    # Defensive rating: lower points allowed per 100 possessions = better
+    "def_rating",
+
+    # Rim defense: lower opponent FG% allowed = better
     "def_rim_fg_pct",
+
     # Defensive playtype PPP: lower points allowed per possession = better
     "def_iso_ppp", "def_pnr_bh_ppp", "def_post_ppp", "def_spotup_ppp", "def_pnr_roll_ppp",
+
+    # Isolation offense: lower turnover rate = better
+    "iso_tov_pct",
+
+    # Closest defender: fewer makes allowed = better (per tightness bucket)
+    "cd_fgm_vt", "cd_fgm_tg", "cd_fgm_op", "cd_fgm_wo",
 }
 
 
@@ -121,13 +134,40 @@ def run():
     skipped  = 0
     wcur = conn.cursor()
 
+    # Stats stored as season totals — normalize by GP before ranking
+    # so percentiles reflect per-game rate, not volume
+    TOTAL_KEYS = {
+        'drives', 'drive_fga', 'drive_fgm', 'drive_pts', 'drive_passes', 'drive_pf', 'drive_tov',
+        'passes_made', 'passes_received',
+        'ast_pts_created', 'potential_ast',
+        'touches', 'paint_touches', 'elbow_touches',
+        'pull_up_fga', 'pull_up_fgm', 'pull_up_fg3a',
+        'cs_fga', 'cs_fgm', 'cs_fg3a',
+        'contested_shots', 'contested_2pt', 'contested_3pt',
+        'deflections',
+        'def_rim_fga', 'def_rim_fgm',
+        'screen_ast_pts',
+        'cd_fga_vt', 'cd_fga_tg', 'cd_fga_op', 'cd_fga_wo',
+        'cd_fgm_vt', 'cd_fgm_tg', 'cd_fgm_op', 'cd_fgm_wo',
+        'iso_fga', 'pnr_bh_fga', 'transition_fga',
+        'pts_paint',
+    }
+
     for stat in numeric_cols:
         # Collect (player_id, value) pairs where value is non-null
-        pairs = [
-            (int(r["player_id"]), float(r[stat]))
-            for r in rows
-            if r[stat] is not None
-        ]
+        if stat in TOTAL_KEYS:
+            # Divide by GP to get per-game rate for fair comparison
+            pairs = [
+                (int(r["player_id"]), float(r[stat]) / float(r["gp"]))
+                for r in rows
+                if r[stat] is not None and r.get("gp") and float(r["gp"]) > 0
+            ]
+        else:
+            pairs = [
+                (int(r["player_id"]), float(r[stat]))
+                for r in rows
+                if r[stat] is not None
+            ]
 
         if len(pairs) < 5:
             skipped += 1

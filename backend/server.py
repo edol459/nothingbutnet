@@ -285,8 +285,8 @@ def run_builder():
 
     if not selected:
         return jsonify({"error": "No stats selected"}), 400
-    if len(selected) > 20:
-        return jsonify({"error": "Max 20 stats at a time"}), 400
+    if len(selected) > 150:
+        return jsonify({"error": "Max 150 stats at a time"}), 400
 
     try:
         conn = get_conn()
@@ -341,6 +341,10 @@ def run_builder():
                     covered   += 1
 
             if covered == 0:
+                continue
+            # Require at least 80% stat coverage to avoid severely skewed scores
+            # (e.g. playtypes missing for low-usage players, PBP stats for some)
+            if covered < len(selected) * 0.8:
                 continue
 
             score = round(total_pct / covered, 2)

@@ -78,6 +78,37 @@ def fetch(label, fn, retries=3):
                 print(f"❌ {e}")
     return pd.DataFrame()
 
+
+def fetch_tracking_endpoint(label, fn, retries=3):
+    """Like fetch() but falls back to get_normalized_dict on resultSet KeyErrors."""
+    print(f"  Fetching {label}...", end=" ", flush=True)
+    for attempt in range(retries):
+        try:
+            time.sleep(DELAY * (attempt + 1))
+            ep = fn()
+            try:
+                dfs = ep.get_data_frames()
+                if dfs and len(dfs[0]) > 0:
+                    print(f"✅ {len(dfs[0])} rows")
+                    return dfs[0]
+            except KeyError:
+                nd = ep.get_normalized_dict()
+                for v in nd.values():
+                    if isinstance(v, list) and v:
+                        df = pd.DataFrame(v)
+                        if len(df) > 0:
+                            print(f"✅ {len(df)} rows (via normalized dict)")
+                            return df
+            print("⚠️  empty")
+            return pd.DataFrame()
+        except Exception as e:
+            if attempt < retries - 1:
+                print(f"⚠️  timeout, retrying ({attempt+2}/{retries})...", end=" ", flush=True)
+            else:
+                print(f"❌ {e}")
+    return pd.DataFrame()
+
+
 def safe(val, default=None):
     """Convert pandas value to Python native, handling NaN."""
     if val is None:
@@ -180,7 +211,6 @@ def fetch_all(season, season_type):
     for key, measure in [
         ('drives',    'Drives'),
         ('passing',   'Passing'),
-        ('touches',   'Possessions'),
         ('pullup',    'PullUpShot'),
         ('catchshoot','CatchShoot'),
         ('post',      'PostTouch'),
@@ -192,6 +222,13 @@ def fetch_all(season, season_type):
                 season_type_all_star=season_type,
                 per_mode_simple="Totals",
                 pt_measure_type=m, player_or_team="Player"))
+
+    # Touches uses a different response structure on some API versions
+    data['touches'] = fetch_tracking_endpoint("Tracking — Touches",
+        lambda: LeagueDashPtStats(season=season,
+            season_type_all_star=season_type,
+            per_mode_simple="Totals",
+            pt_measure_type="Touches", player_or_team="Player"))
 
     # Defense
     data['def_overall'] = fetch("Defender Shooting — Overall",
@@ -213,14 +250,6 @@ def fetch_all(season, season_type):
     data['hustle'] = fetch("Hustle Stats",
         lambda: LeagueHustleStatsPlayer(season=season,
             season_type_all_star=season_type, per_mode_time="Totals"))
-
-    # Turnover types — bad pass and lost ball (live dribbling turnovers)
-    # Source: LeagueDashPlayerStats Misc — exposes BAD_PASS and LOST_BALL columns
-    data['tov_types'] = fetch("Turnover Types",
-        lambda: LeagueDashPlayerStats(season=season,
-            season_type_all_star=season_type,
-            per_mode_detailed="Totals",
-            measure_type_detailed_defense="Misc"))
 
     # Source: LeagueDashPlayerStats Defense — exposes DEF_WS
     data['adv_dash'] = fetch("Defense Dash Stats",
@@ -376,7 +405,7 @@ def build_player_rows(data, season, season_type):
         adv_agg  = adv.groupby('PLAYER_ID')[adv_cols].mean().reset_index()
 
     # Misc logs
-    misc_cols = ['PTS_OFF_TOV', 'PTS_2ND_CHANCE', 'PTS_FB', 'PTS_PAINT',
+    misc_cols = ['PTS_OFF_TOV', 'PTS_2ND_CHANCE', 'PTS_FB',
                  'OPP_PTS_OFF_TOV', 'OPP_PTS_PAINT']
     misc_agg  = pd.DataFrame()
     if not misc.empty:
@@ -385,7 +414,8 @@ def build_player_rows(data, season, season_type):
 
     # Scoring logs
     scoring_cols = ['PCT_UAST_2PM', 'PCT_UAST_3PM', 'PCT_UAST_FGM', 'PCT_AST_FGM',
-                    'PCT_PTS_PAINT', 'PCT_PTS_3PT', 'PCT_PTS_FT', 'PCT_PTS_2PT_MR']
+                    'PCT_PTS_PAINT', 'PCT_PTS_3PT', 'PCT_PTS_FT', 'PCT_PTS_2PT_MR',
+                    'PTS_PAINT']
     scoring_agg  = pd.DataFrame()
     if not scoring.empty:
         scoring_cols = [c for c in scoring_cols if c in scoring.columns]
@@ -430,7 +460,7 @@ def build_player_rows(data, season, season_type):
                                       'POST_TOUCH_AST', 'POST_TOUCH_TOV']),
         ('speed',      'PLAYER_ID', ['DIST_MILES', 'DIST_MILES_OFF', 'DIST_MILES_DEF',
                                       'AVG_SPEED', 'AVG_SPEED_OFF', 'AVG_SPEED_DEF']),
-        ('def_track',  'PLAYER_ID', ['DEF_RIM_FGA', 'DEF_RIM_FG_PCT']),
+        ('def_track',  'PLAYER_ID', ['DEF_RIM_FGA', 'DEF_RIM_FGM', 'DEF_RIM_FG_PCT']),
     ]
 
     for key, join_col, cols in tracking_merges:
@@ -464,8 +494,8 @@ def build_player_rows(data, season, season_type):
     # Hustle
     hustle = data.get('hustle', pd.DataFrame())
     if not hustle.empty:
-        hust_cols = ['PLAYER_ID', 'CONTESTED_SHOTS', 'CONTESTED_SHOTS_2PT',
-                     'CONTESTED_SHOTS_3PT', 'DEFLECTIONS', 'CHARGES_DRAWN',
+        hust_cols = ['PLAYER_ID', 'CONTESTED_SHOTS', 'CONTESTED_2PT_SHOTS',
+                     'CONTESTED_3PT_SHOTS', 'DEFLECTIONS', 'CHARGES_DRAWN',
                      'SCREEN_ASSISTS', 'SCREEN_AST_PTS', 'LOOSE_BALLS_RECOVERED',
                      'BOX_OUTS', 'OFF_BOXOUTS', 'DEF_BOXOUTS']
         hust_cols = [c for c in hust_cols if c in hustle.columns]
@@ -500,15 +530,6 @@ def build_player_rows(data, season, season_type):
             merged = merged.merge(adv_dash[adv_dash_cols], on='PLAYER_ID', how='left')
     else:
         print("  adv_dash is empty")
-
-    # Turnover types
-    tov_types = data.get('tov_types', pd.DataFrame())
-    if not tov_types.empty:
-        tov_cols = {'BAD_PASS': 'BAD_PASS_TOV', 'LOST_BALL': 'LOST_BALL_TOV'}
-        cols_present = [c for c in tov_cols if c in tov_types.columns]
-        if cols_present:
-            tov_sub = tov_types[['PLAYER_ID'] + cols_present].rename(columns=tov_cols)
-            merged = merged.merge(tov_sub, on='PLAYER_ID', how='left')
 
     # Clutch
     clutch = data.get('clutch', pd.DataFrame())
@@ -653,19 +674,17 @@ def build_player_rows(data, season, season_type):
             'is_active':      True,
         })
 
-        # Season row
+        # Season row — keys must exactly match player_seasons columns
         season_rows.append({
             'player_id':   pid,
             'season':      season,
             'season_type': season_type,
-            'league':      'NBA',
             'team_id':     safe_int(row.get('TEAM_ID')),
             'team_abbr':   safe(row.get('TEAM_ABBREVIATION')),
 
             'gp':          gp,
             'min':         round(min_total, 1) if min_total else None,
             'min_per_game': round(min_pg, 2) if min_pg else None,
-            'poss':        safe_float(poss),
 
             # Base
             'pts':         safe_float(row.get('PTS')),
@@ -689,53 +708,29 @@ def build_player_rows(data, season, season_type):
             'ft_pct':      safe_float(row.get('FT_PCT')),
             'plus_minus':  safe_float(row.get('PLUS_MINUS')),
 
-            # Advanced win shares
-            'def_ws':      safe_float(row.get('DEF_WS')),
-            'off_ws':      safe_float(row.get('OFF_WS')),
-            'ws':          safe_float(row.get('WS')),
-            'ws_48':       safe_float(row.get('WS_48')),
-            'matchup_def_fg_pct': safe_float(row.get('MATCHUP_DEF_FG_PCT')),
-
             # Advanced
             'off_rating':  safe_float(row.get('OFF_RATING')),
             'def_rating':  safe_float(row.get('DEF_RATING')),
             'net_rating':  safe_float(row.get('NET_RATING')),
             'ast_pct':     safe_float(row.get('AST_PCT')),
             'ast_to':      safe_float(row.get('AST_TO')),
-            'ast_ratio':   safe_float(row.get('AST_RATIO')),
             'oreb_pct':    safe_float(row.get('OREB_PCT')),
             'dreb_pct':    safe_float(row.get('DREB_PCT')),
             'reb_pct':     safe_float(row.get('REB_PCT')),
-            'tm_tov_pct':  safe_float(row.get('TM_TOV_PCT')),
             'efg_pct':     safe_float(row.get('EFG_PCT')),
             'ts_pct':      safe_float(row.get('TS_PCT')),
             'usg_pct':     safe_float(row.get('USG_PCT')),
-            'pace':        safe_float(row.get('PACE')),
             'pie':         safe_float(row.get('PIE')),
 
-            # Misc
-            'pts_off_tov':     safe_float(row.get('PTS_OFF_TOV')),
-            'pts_2nd_chance':  safe_float(row.get('PTS_2ND_CHANCE')),
-            'pts_fb':          safe_float(row.get('PTS_FB')),
+            # Win shares (only def_ws exists in DB)
+            'def_ws':      safe_float(row.get('DEF_WS')),
+
+            # Scoring breakdown
             'pts_paint':       safe_float(row.get('PTS_PAINT')),
-            'opp_pts_off_tov': safe_float(row.get('OPP_PTS_OFF_TOV')),
-            'opp_pts_paint':   safe_float(row.get('OPP_PTS_PAINT')),
-
-            # Scoring
-            'pct_uast_2pm':  safe_float(row.get('PCT_UAST_2PM')),
-            'pct_uast_3pm':  safe_float(row.get('PCT_UAST_3PM')),
-            'pct_uast_fgm':  safe_float(row.get('PCT_UAST_FGM')),
-            'pct_ast_fgm':   safe_float(row.get('PCT_AST_FGM')),
-            'pct_pts_paint': safe_float(row.get('PCT_PTS_PAINT')),
-            'pct_pts_3pt':   safe_float(row.get('PCT_PTS_3PT')),
-            'pct_pts_ft':    safe_float(row.get('PCT_PTS_FT')),
-            'pct_pts_mid2':  safe_float(row.get('PCT_PTS_2PT_MR')),
-
-            # Usage
-            'pct_fga':  safe_float(row.get('PCT_FGA')),
-            'pct_fta':  safe_float(row.get('PCT_FTA')),
-            'pct_ast':  safe_float(row.get('PCT_AST')),
-            'pct_tov':  safe_float(row.get('PCT_TOV')),
+            'pct_uast_fgm':    safe_float(row.get('PCT_UAST_FGM')),
+            'pct_pts_paint':   safe_float(row.get('PCT_PTS_PAINT')),
+            'pct_pts_3pt':     safe_float(row.get('PCT_PTS_3PT')),
+            'pct_pts_ft':      safe_float(row.get('PCT_PTS_FT')),
 
             # Tracking: drives
             'drives':        safe_float(row.get('DRIVES')),
@@ -747,7 +742,6 @@ def build_player_rows(data, season, season_type):
             'drive_tov':     safe_float(row.get('DRIVE_TOV')),
             'drive_pf':      safe_float(row.get('DRIVE_PF')),
             'drive_passes':  safe_float(row.get('DRIVE_PASSES')),
-            'drive_ft_pct':  safe_float(row.get('DRIVE_FT_PCT')),
 
             # Tracking: passing
             'passes_made':     safe_float(row.get('PASSES_MADE')),
@@ -756,17 +750,15 @@ def build_player_rows(data, season, season_type):
             'secondary_ast':   safe_float(row.get('SECONDARY_AST')),
             'potential_ast':   safe_float(row.get('POTENTIAL_AST')),
             'ft_ast':          safe_float(row.get('FT_AST')),
-            'ast_to_pass_pct': safe_float(row.get('AST_TO_PASS_PCT')),
 
             # Tracking: touches
-            'touches':           safe_float(row.get('TOUCHES')),
-            'front_ct_touches':  safe_float(row.get('FRONT_CT_TOUCHES')),
-            'time_of_poss':      safe_float(row.get('TIME_OF_POSS')),
-            'avg_sec_per_touch': safe_float(row.get('AVG_SEC_PER_TOUCH')),
-            'avg_drib_per_touch':safe_float(row.get('AVG_DRIB_PER_TOUCH')),
-            'elbow_touches':     safe_float(row.get('ELBOW_TOUCHES')),
-            'post_touches':      safe_float(row.get('POST_TOUCHES')),
-            'paint_touches':     safe_float(row.get('PAINT_TOUCHES')),
+            'touches':            safe_float(row.get('TOUCHES')),
+            'time_of_poss':       safe_float(row.get('TIME_OF_POSS')),
+            'avg_sec_per_touch':  safe_float(row.get('AVG_SEC_PER_TOUCH')),
+            'avg_drib_per_touch': safe_float(row.get('AVG_DRIB_PER_TOUCH')),
+            'elbow_touches':      safe_float(row.get('ELBOW_TOUCHES')),
+            'post_touches':       safe_float(row.get('POST_TOUCHES')),
+            'paint_touches':      safe_float(row.get('PAINT_TOUCHES')),
 
             # Tracking: pull-up
             'pull_up_fga':     safe_float(row.get('PULL_UP_FGA')),
@@ -799,26 +791,15 @@ def build_player_rows(data, season, season_type):
             'avg_speed_off':  safe_float(row.get('AVG_SPEED_OFF')),
             'avg_speed_def':  safe_float(row.get('AVG_SPEED_DEF')),
 
-            # Tracking: defense
+            # Tracking: rim defense
             'def_rim_fga':    safe_float(row.get('DEF_RIM_FGA')),
             'def_rim_fgm':    safe_float(row.get('DEF_RIM_FGM')),
             'def_rim_fg_pct': safe_float(row.get('DEF_RIM_FG_PCT')),
 
-            # Defender shooting
-            'd_fga_overall':    safe_float(row.get('D_FGA_OVERALL')),
-            'd_fg_pct_overall': safe_float(row.get('D_FG_PCT_OVERALL')),
-            'normal_fg_pct':    safe_float(row.get('NORMAL_FG_PCT')),
-            'd_fga_2pt':        safe_float(row.get('D_FGA_2PT')),
-            'd_fg_pct_2pt':     safe_float(row.get('D_FG_PCT_2PT')),
-            'ns_fg2_pct':       safe_float(row.get('NS_FG2_PCT')),
-            'd_fga_3pt':        safe_float(row.get('D_FGA_3PT')),
-            'd_fg_pct_3pt':     safe_float(row.get('D_FG_PCT_3PT')),
-            'ns_fg3_pct':       safe_float(row.get('NS_FG3_PCT')),
-
             # Hustle
             'contested_shots': safe_float(row.get('CONTESTED_SHOTS')),
-            'contested_2pt':   safe_float(row.get('CONTESTED_SHOTS_2PT')),
-            'contested_3pt':   safe_float(row.get('CONTESTED_SHOTS_3PT')),
+            'contested_2pt':   safe_float(row.get('CONTESTED_2PT_SHOTS')),
+            'contested_3pt':   safe_float(row.get('CONTESTED_3PT_SHOTS')),
             'deflections':     safe_float(row.get('DEFLECTIONS')),
             'charges_drawn':   safe_float(row.get('CHARGES_DRAWN')),
             'screen_assists':  safe_float(row.get('SCREEN_ASSISTS')),
@@ -828,34 +809,44 @@ def build_player_rows(data, season, season_type):
             'off_box_outs':    safe_float(row.get('OFF_BOXOUTS')),
             'def_box_outs':    safe_float(row.get('DEF_BOXOUTS')),
 
-            # Turnover types
-            'bad_pass_tov':  safe_float(row.get('BAD_PASS_TOV')),
-            'lost_ball_tov': safe_float(row.get('LOST_BALL_TOV')),
+            # Closest defender shooting
+            'cd_fga_vt':  safe_float(row.get('FGA_VT')),
+            'cd_fgm_vt':  safe_float(row.get('FGM_VT')),
+            'cd_fg3a_vt': safe_float(row.get('FG3A_VT')),
+            'cd_fg3m_vt': safe_float(row.get('FG3M_VT')),
+            'cd_fga_tg':  safe_float(row.get('FGA_TG')),
+            'cd_fgm_tg':  safe_float(row.get('FGM_TG')),
+            'cd_fg3a_tg': safe_float(row.get('FG3A_TG')),
+            'cd_fg3m_tg': safe_float(row.get('FG3M_TG')),
+            'cd_fga_op':  safe_float(row.get('FGA_OP')),
+            'cd_fgm_op':  safe_float(row.get('FGM_OP')),
+            'cd_fg3a_op': safe_float(row.get('FG3A_OP')),
+            'cd_fg3m_op': safe_float(row.get('FG3M_OP')),
+            'cd_fga_wo':  safe_float(row.get('FGA_WO')),
+            'cd_fgm_wo':  safe_float(row.get('FGM_WO')),
+            'cd_fg3a_wo': safe_float(row.get('FG3A_WO')),
+            'cd_fg3m_wo': safe_float(row.get('FG3M_WO')),
 
             # Synergy
-            'iso_ppp':        safe_float(row.get('ISO_PPP')),
-            'iso_fga':        safe_float(row.get('ISO_FGA')),
-            'iso_efg_pct':    safe_float(row.get('ISO_EFG_PCT')),
-            'iso_tov_pct':    safe_float(row.get('ISO_TOV_PCT')),
-            'pnr_bh_ppp':     safe_float(row.get('PNR_BH_PPP')),
-            'pnr_bh_fga':     safe_float(row.get('PNR_BH_FGA')),
-            'pnr_bh_poss':    safe_float(row.get('PNR_BH_POSS')),
-            'pnr_roll_ppp':   safe_float(row.get('PNR_ROLL_PPP')),
-            'pnr_roll_poss':  safe_float(row.get('PNR_ROLL_POSS')),
-            'post_ppp':       safe_float(row.get('POST_PPP')),
-            'post_poss':      safe_float(row.get('POST_POSS')),
-            'spotup_ppp':     safe_float(row.get('SPOTUP_PPP')),
-            'spotup_efg_pct': safe_float(row.get('SPOTUP_EFG_PCT')),
-            'transition_ppp': safe_float(row.get('TRANSITION_PPP')),
-            'transition_fga': safe_float(row.get('TRANSITION_FGA')),
+            'iso_ppp':          safe_float(row.get('ISO_PPP')),
+            'iso_fga':          safe_float(row.get('ISO_FGA')),
+            'iso_efg_pct':      safe_float(row.get('ISO_EFG_PCT')),
+            'iso_tov_pct':      safe_float(row.get('ISO_TOV_PCT')),
+            'pnr_bh_ppp':       safe_float(row.get('PNR_BH_PPP')),
+            'pnr_bh_fga':       safe_float(row.get('PNR_BH_FGA')),
+            'pnr_roll_ppp':     safe_float(row.get('PNR_ROLL_PPP')),
+            'pnr_roll_poss':    safe_float(row.get('PNR_ROLL_POSS')),
+            'post_ppp':         safe_float(row.get('POST_PPP')),
+            'post_poss':        safe_float(row.get('POST_POSS')),
+            'spotup_ppp':       safe_float(row.get('SPOTUP_PPP')),
+            'spotup_efg_pct':   safe_float(row.get('SPOTUP_EFG_PCT')),
+            'transition_ppp':   safe_float(row.get('TRANSITION_PPP')),
+            'transition_fga':   safe_float(row.get('TRANSITION_FGA')),
             'def_iso_ppp':      safe_float(row.get('DEF_ISO_PPP')),
             'def_pnr_bh_ppp':   safe_float(row.get('DEF_PNR_BH_PPP')),
             'def_post_ppp':     safe_float(row.get('DEF_POST_PPP')),
-            'def_post_poss':    safe_float(row.get('DEF_POST_POSS')),
             'def_spotup_ppp':   safe_float(row.get('DEF_SPOTUP_PPP')),
-            'def_spotup_poss':  safe_float(row.get('DEF_SPOTUP_POSS')),
             'def_pnr_roll_ppp': safe_float(row.get('DEF_PNR_ROLL_PPP')),
-            'def_pnr_roll_poss':safe_float(row.get('DEF_PNR_ROLL_POSS')),
 
             # Clutch
             'clutch_net_rating': safe_float(row.get('CLUTCH_NET_RATING')),
@@ -935,11 +926,11 @@ def upsert_seasons(conn, rows):
     col_str     = ', '.join(cols)
     placeholder = ', '.join(['%s'] * len(cols))
     update_str  = ', '.join([f"{c} = EXCLUDED.{c}" for c in cols
-                              if c not in ('player_id', 'season', 'season_type', 'league')])
+                              if c not in ('player_id', 'season', 'season_type')])
     sql = f"""
         INSERT INTO player_seasons ({col_str}, updated_at)
         VALUES ({placeholder}, NOW())
-        ON CONFLICT (player_id, season, season_type, league) DO UPDATE SET
+        ON CONFLICT (player_id, season, season_type) DO UPDATE SET
             {update_str},
             updated_at = NOW()
     """

@@ -245,6 +245,34 @@ nav {
   color: var(--orange);
   background: var(--orange-lt);
 }
+.stat-mode-toggle {
+  display: flex;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.stat-mode-btn {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 7px 12px;
+  border: none;
+  background: var(--paper2);
+  color: var(--ink2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.stat-mode-btn + .stat-mode-btn {
+  border-left: 1px solid var(--rule);
+}
+.stat-mode-btn.active {
+  background: var(--ink);
+  color: #fff;
+}
+.stat-mode-btn:hover:not(.active) { background: #fff; color: var(--ink2); }
 
 .stat-filters-panel {
   display: none;
@@ -595,6 +623,10 @@ td.bot10  { color: var(--red)    !important; }
   overflow-y: auto;
   padding: 6px 0;
 }
+.builder-stat-group-wrap {
+  display: flex;
+  align-items: center;
+}
 .builder-stat-group-label {
   font-family: var(--ff-mono);
   font-size: 9px;
@@ -602,7 +634,35 @@ td.bot10  { color: var(--red)    !important; }
   text-transform: uppercase;
   color: var(--ink4);
   padding: 10px 20px 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  user-select: none;
+  transition: color 0.1s;
 }
+.builder-stat-group-label:hover { color: var(--ink2); }
+.builder-stat-group-label .group-chevron {
+  font-size: 8px;
+  transition: transform 0.18s;
+  opacity: 0.5;
+}
+.builder-stat-group-label.open .group-chevron { transform: rotate(90deg); }
+.builder-stat-group-label .group-sel-count {
+  font-size: 8px;
+  background: var(--orange);
+  color: #fff;
+  border-radius: 8px;
+  padding: 1px 5px;
+  margin-right: auto;
+  margin-left: 6px;
+  display: none;
+}
+.builder-stat-group-label .group-sel-count.visible { display: inline-block; }
+.builder-stat-group-items {
+  display: none;
+}
+.builder-stat-group-items.open { display: block; }
 .builder-stat-item {
   display: flex;
   align-items: center;
@@ -648,30 +708,15 @@ td.bot10  { color: var(--red)    !important; }
 
 .builder-run-wrap {
   padding: 12px 16px;
-  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
 }
-.builder-chips {
+.builder-run-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 10px;
-  min-height: 22px;
+  gap: 6px;
+  margin-top: 8px;
 }
-.builder-chip {
-  font-family: var(--ff-mono);
-  font-size: 10px;
-  background: var(--ink);
-  color: var(--paper);
-  padding: 3px 8px 3px 10px;
-  border-radius: 12px;
-  display: flex; align-items: center; gap: 4px;
-  cursor: pointer;
-}
-.builder-chip:hover { background: var(--orange); }
-.builder-chip-x { opacity: 0.6; font-size: 11px; }
-
 .btn-run {
-  width: 100%;
+  flex: 1;
   font-family: var(--ff-mono);
   font-size: 11px;
   letter-spacing: 0.08em;
@@ -686,6 +731,65 @@ td.bot10  { color: var(--red)    !important; }
 }
 .btn-run:hover { background: var(--orange); }
 .btn-run:disabled { background: var(--rule); color: var(--ink4); cursor: not-allowed; }
+.btn-select-all {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 10px 10px;
+  color: var(--ink3);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.btn-select-all:hover { border-color: var(--ink3); color: var(--ink); background: var(--paper2); }
+.btn-select-all.all-selected { border-color: var(--orange); color: var(--orange); background: var(--orange-lt); }
+/* Group-level "all" button inside header */
+.group-all-btn {
+  font-family: var(--ff-mono);
+  font-size: 8px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 2px 7px;
+  color: var(--ink4);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s, border-color 0.15s;
+  margin-right: 12px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.builder-stat-group-wrap:hover .group-all-btn { opacity: 1; }
+.group-all-btn:hover,
+.group-all-btn.group-all-selected { color: var(--orange); background: var(--orange-lt); border-color: var(--orange); opacity: 1; }
+.builder-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+  min-height: 22px;
+  max-height: 80px;
+  overflow-y: auto;
+}
+.builder-chip {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 3px 8px 3px 10px;
+  border-radius: 12px;
+  display: flex; align-items: center; gap: 4px;
+  cursor: pointer;
+}
+.builder-chip:hover { background: var(--orange); }
+.builder-chip-x { opacity: 0.6; font-size: 11px; }
 
 /* Right panel */
 .builder-results {
@@ -694,8 +798,13 @@ td.bot10  { color: var(--red)    !important; }
   overflow: hidden;
 }
 .builder-results-head {
-  padding: 20px 32px 16px;
+  padding: 16px 32px;
   border-bottom: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.builder-results-head-top {
   display: flex;
   align-items: baseline;
   gap: 16px;
@@ -710,7 +819,28 @@ td.bot10  { color: var(--red)    !important; }
   font-size: 10px;
   color: var(--ink3);
   letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.builder-results-meta.expanded {
+  white-space: normal;
+  overflow: visible;
+}
+.builder-meta-toggle {
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  color: var(--ink4);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  text-decoration: underline;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.builder-meta-toggle:hover { color: var(--ink2); }
 .builder-min-wrap {
   margin-left: auto;
   display: flex;
@@ -730,6 +860,138 @@ td.bot10  { color: var(--red)    !important; }
 .builder-empty-icon { font-size: 48px; opacity: 0.3; }
 .builder-empty-text { font-family: var(--ff-mono); font-size: 12px; }
 .builder-empty-sub  { font-family: var(--ff-sans); font-size: 13px; color: var(--ink3); }
+
+/* ── Player spotlight card ───────────────────────────────── */
+.builder-spotlight {
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+}
+.spotlight-inner {
+  padding: 20px 28px;
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+  position: relative;
+  max-height: 320px;
+}
+.spotlight-close {
+  position: absolute;
+  top: 12px; right: 16px;
+  font-size: 18px;
+  color: var(--ink4);
+  background: none;
+  border: none;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.1s, background 0.1s;
+}
+.spotlight-close:hover { color: var(--ink); background: var(--paper2); }
+.spotlight-identity {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-shrink: 0;
+  width: 220px;
+}
+.spotlight-headshot-wrap {
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--paper2);
+  border: 2px solid var(--rule);
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px;
+}
+.spotlight-headshot {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+.spotlight-headshot.hidden { display: none; }
+.spotlight-headshot-fallback { display: none; }
+.spotlight-headshot-fallback.visible { display: block; }
+.spotlight-name {
+  font-family: var(--ff-serif);
+  font-size: 17px;
+  color: var(--ink);
+  line-height: 1.2;
+}
+.spotlight-sub {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  color: var(--ink3);
+  margin-top: 3px;
+  letter-spacing: 0.04em;
+}
+.spotlight-score-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 8px;
+}
+.spotlight-score-label {
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink4);
+}
+.spotlight-score {
+  font-family: var(--ff-mono);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--orange);
+}
+.spotlight-chart {
+  flex: 1;
+  min-width: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.sp-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.sp-bar-label {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  color: var(--ink3);
+  width: 140px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.sp-bar-track {
+  flex: 1;
+  height: 8px;
+  background: var(--paper3);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.sp-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.45s cubic-bezier(.4,0,.2,1);
+}
+.sp-bar-fill.hi  { background: var(--green); }
+.sp-bar-fill.mid { background: var(--orange); }
+.sp-bar-fill.lo  { background: var(--red); }
+.sp-bar-pct {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  color: var(--ink3);
+  width: 32px;
+  text-align: right;
+  flex-shrink: 0;
+}
 
 .builder-table-wrap { flex: 1; overflow: auto; }
 
@@ -803,6 +1065,12 @@ table.builder-table td {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  max-height: 52px;
+  overflow: hidden;
+  position: relative;
+}
+.b-breakdown.expanded {
+  max-height: none;
 }
 .b-breakdown-pill {
   font-family: var(--ff-mono);
@@ -814,6 +1082,22 @@ table.builder-table td {
 }
 .b-breakdown-pill.hi { background: #e8f5ee; color: var(--green); }
 .b-breakdown-pill.lo { background: #fdf0ef; color: var(--red); }
+.b-breakdown-more {
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: var(--paper3);
+  color: var(--ink3);
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.b-breakdown-more:hover { background: var(--rule); color: var(--ink); }
+
+table.builder-table tbody tr:hover { background: var(--paper2); }
+table.builder-table tbody tr.spotlight-active { background: var(--orange-lt); }
 
 /* ════════════════════════════════════════════════════════════
    Loading / Error states
@@ -867,7 +1151,7 @@ tbody tr {
 
 <!-- ── Navigation ───────────────────────────────────────────── -->
 <nav>
-  <a class="nav-wordmark" href="#">Nothing<em>But</em>Net</a>
+  <a class="nav-wordmark" href="#">nothingbutnet</a>
 
   <div class="nav-tabs">
     <button class="nav-tab active" data-view="stats">Stats</button>
@@ -905,6 +1189,11 @@ tbody tr {
       </div>
 
       <button type="button" class="filters-toggle" id="filters-toggle" aria-expanded="false">Stat filters</button>
+
+      <div class="stat-mode-toggle" id="stat-mode-toggle">
+        <button class="stat-mode-btn active" data-mode="per_game">Per Game</button>
+        <button class="stat-mode-btn" data-mode="totals">Totals</button>
+      </div>
 
       <div class="pos-filters" id="pos-filters">
         <button class="pos-btn active" data-pos="ALL">All</button>
@@ -983,6 +1272,14 @@ tbody tr {
           <div class="builder-panel-sub">Each contributes its league percentile</div>
         </div>
 
+        <div class="builder-run-wrap">
+          <div class="builder-chips" id="builder-chips"></div>
+          <div class="builder-run-row">
+            <button class="btn-run" id="builder-run" disabled>Run Composite →</button>
+            <button class="btn-select-all" id="builder-select-all" title="Select / deselect all stats">All</button>
+          </div>
+        </div>
+
         <div class="builder-stat-search">
           <input type="text" id="builder-search" placeholder="Filter stats…">
         </div>
@@ -992,22 +1289,22 @@ tbody tr {
             Loading available stats…
           </div>
         </div>
-
-        <div class="builder-run-wrap">
-          <div class="builder-chips" id="builder-chips"></div>
-          <button class="btn-run" id="builder-run" disabled>Run Composite →</button>
-        </div>
       </div>
 
       <!-- Right: results -->
       <div class="builder-results" id="builder-results-panel">
         <div class="builder-results-head">
-          <div class="builder-results-title">Rankings</div>
-          <div class="builder-results-meta" id="builder-meta">Select stats and run</div>
-          <div class="builder-min-wrap">
-            <span class="min-label">Min. Min</span>
-            <input class="min-slider" id="builder-min-slider" type="range" min="0" max="2000" step="100" value="500">
-            <span class="min-value" id="builder-min-value">500</span>
+          <div class="builder-results-head-top">
+            <div class="builder-results-title">Rankings</div>
+            <div class="builder-min-wrap">
+              <span class="min-label">Min. Min</span>
+              <input class="min-slider" id="builder-min-slider" type="range" min="0" max="2000" step="100" value="500">
+              <span class="min-value" id="builder-min-value">500</span>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+            <div class="builder-results-meta" id="builder-meta">Select stats and run</div>
+            <button class="builder-meta-toggle" id="builder-meta-toggle" style="display:none">show</button>
           </div>
         </div>
 
@@ -1015,6 +1312,28 @@ tbody tr {
           <div class="builder-empty-icon">⚗️</div>
           <div class="builder-empty-text">No results yet</div>
           <div class="builder-empty-sub">Pick stats on the left, then run</div>
+        </div>
+
+        <!-- Selected player spotlight -->
+        <div class="builder-spotlight" id="builder-spotlight" style="display:none">
+          <div class="spotlight-inner">
+            <button class="spotlight-close" id="spotlight-close" title="Dismiss">×</button>
+            <div class="spotlight-identity">
+              <div class="spotlight-headshot-wrap">
+                <img class="spotlight-headshot" id="spotlight-img" src="" alt="">
+                <span class="spotlight-headshot-fallback" id="spotlight-fallback">🏀</span>
+              </div>
+              <div class="spotlight-info">
+                <div class="spotlight-name" id="spotlight-name"></div>
+                <div class="spotlight-sub" id="spotlight-sub"></div>
+                <div class="spotlight-score-wrap">
+                  <span class="spotlight-score-label">Composite</span>
+                  <span class="spotlight-score" id="spotlight-score"></span>
+                </div>
+              </div>
+            </div>
+            <div class="spotlight-chart" id="spotlight-chart"></div>
+          </div>
         </div>
 
         <div class="builder-table-wrap" id="builder-table-wrap" style="display:none">
@@ -1067,6 +1386,7 @@ const ST = {
   minMin:      500,
   statFilterVals: {},
   filtersOpen: false,
+  statMode:    'per_game',   // 'per_game' | 'totals'
   players:     [],
 
   // Builder
@@ -1798,60 +2118,153 @@ function computeRow(player) {
 
 // ── Builder stat catalog ─────────────────────────────────────
 const BUILDER_CATALOG = [
-  { group: 'Scoring',    key: 'pts',              label: 'Points' },
-  { group: 'Scoring',    key: 'fg_pct',           label: 'FG%' },
-  { group: 'Scoring',    key: 'ts_pct',           label: 'True Shooting %' },
-  { group: 'Scoring',    key: 'efg_pct',          label: 'eFG%' },
-  { group: 'Scoring',    key: 'fg3_pct',          label: '3-Point %' },
-  { group: 'Scoring',    key: 'ft_pct',           label: 'Free Throw %' },
-  { group: 'Scoring',    key: 'pull_up_efg_pct',  label: 'Pull-Up eFG%' },
-  { group: 'Scoring',    key: 'cs_efg_pct',       label: 'Catch & Shoot eFG%' },
-  { group: 'Scoring',    key: 'usg_pct',          label: 'Usage %' },
-  { group: 'Scoring',    key: 'pts_paint',        label: 'Points in Paint' },
 
-  { group: 'Playmaking', key: 'ast',              label: 'Assists' },
-  { group: 'Playmaking', key: 'ast_pct',          label: 'Assist %' },
-  { group: 'Playmaking', key: 'ast_to',           label: 'AST/TOV Ratio' },
-  { group: 'Playmaking', key: 'potential_ast',    label: 'Potential Assists' },
-  { group: 'Playmaking', key: 'ast_pts_created',  label: 'AST Points Created' },
-  { group: 'Playmaking', key: 'secondary_ast',    label: 'Secondary Assists' },
-  { group: 'Playmaking', key: 'passes_made',      label: 'Passes Made' },
-  { group: 'Playmaking', key: 'drives',           label: 'Drives' },
-  { group: 'Playmaking', key: 'drive_ast',        label: 'Drive Assists' },
+  // ── Scoring ───────────────────────────────────────────────
+  // Traditional + efficiency + pull-up + catch & shoot + drive finishing
+  { group: 'Scoring', key: 'pts',              label: 'PPG' },
+  { group: 'Scoring', key: 'fgm',              label: 'FGM/G' },
+  { group: 'Scoring', key: 'fga',              label: 'FGA/G' },
+  { group: 'Scoring', key: 'fg_pct',           label: 'FG%' },
+  { group: 'Scoring', key: 'fg3m',             label: '3PM/G' },
+  { group: 'Scoring', key: 'fg3a',             label: '3PA/G' },
+  { group: 'Scoring', key: 'fg3_pct',          label: '3P%' },
+  { group: 'Scoring', key: 'ftm',              label: 'FTM/G' },
+  { group: 'Scoring', key: 'fta',              label: 'FTA/G' },
+  { group: 'Scoring', key: 'ft_pct',           label: 'FT%' },
+  { group: 'Scoring', key: 'ts_pct',           label: 'TS%' },
+  { group: 'Scoring', key: 'efg_pct',          label: 'eFG%' },
+  { group: 'Scoring', key: 'usg_pct',          label: 'USG%' },
+  { group: 'Scoring', key: 'pfd',              label: 'Fouls Drawn/G' },
+  { group: 'Scoring', key: 'pf',               label: 'Fouls/G' },
+  { group: 'Scoring', key: 'pct_pts_paint',    label: '% Pts from Paint' },
+  { group: 'Scoring', key: 'pct_pts_3pt',      label: '% Pts from 3' },
+  { group: 'Scoring', key: 'pct_pts_ft',       label: '% Pts from FT' },
+  { group: 'Scoring', key: 'pct_uast_fgm',     label: '% Unassisted FGM' },
+  // Drive finishing
+  { group: 'Scoring', key: 'drives',           label: 'Drives/G' },
+  { group: 'Scoring', key: 'drive_fga',        label: 'Drive FGA/G' },
+  { group: 'Scoring', key: 'drive_fgm',        label: 'Drive FGM/G' },
+  { group: 'Scoring', key: 'drive_fg_pct',     label: 'Drive FG%' },
+  { group: 'Scoring', key: 'drive_pts',        label: 'Drive PTS/G' },
+  { group: 'Scoring', key: 'drive_pf',         label: 'Drive Fouls Drawn/G' },
+  // Pull-up shooting
+  { group: 'Scoring', key: 'pull_up_fga',      label: 'Pull-Up FGA/G' },
+  { group: 'Scoring', key: 'pull_up_fgm',      label: 'Pull-Up FGM/G' },
+  { group: 'Scoring', key: 'pull_up_fg_pct',   label: 'Pull-Up FG%' },
+  { group: 'Scoring', key: 'pull_up_fg3a',     label: 'Pull-Up 3PA/G' },
+  { group: 'Scoring', key: 'pull_up_fg3_pct',  label: 'Pull-Up 3P%' },
+  { group: 'Scoring', key: 'pull_up_efg_pct',  label: 'Pull-Up eFG%' },
+  // Catch & shoot
+  { group: 'Scoring', key: 'cs_fga',           label: 'C&S FGA/G' },
+  { group: 'Scoring', key: 'cs_fgm',           label: 'C&S FGM/G' },
+  { group: 'Scoring', key: 'cs_fg_pct',        label: 'C&S FG%' },
+  { group: 'Scoring', key: 'cs_fg3a',          label: 'C&S 3PA/G' },
+  { group: 'Scoring', key: 'cs_fg3_pct',       label: 'C&S 3P%' },
+  { group: 'Scoring', key: 'cs_efg_pct',       label: 'C&S eFG%' },
 
-  { group: 'Rebounding', key: 'reb',              label: 'Rebounds' },
-  { group: 'Rebounding', key: 'oreb',             label: 'Off. Rebounds' },
-  { group: 'Rebounding', key: 'dreb',             label: 'Def. Rebounds' },
-  { group: 'Rebounding', key: 'oreb_pct',         label: 'Off. Reb %' },
-  { group: 'Rebounding', key: 'dreb_pct',         label: 'Def. Reb %' },
-  { group: 'Rebounding', key: 'box_outs',         label: 'Box Outs' },
+  // ── Playmaking ────────────────────────────────────────────
+  // Assists + passing + turnovers + drive creation + playtypes
+  { group: 'Playmaking', key: 'ast',              label: 'APG' },
+  { group: 'Playmaking', key: 'tov',              label: 'TOV/G' },
+  { group: 'Playmaking', key: 'ast_pct',          label: 'AST%' },
+  { group: 'Playmaking', key: 'ast_to',           label: 'AST/TOV' },
+  { group: 'Playmaking', key: 'potential_ast',    label: 'Pot. AST/G' },
+  { group: 'Playmaking', key: 'ast_pts_created',  label: 'AST Pts Created/G' },
+  { group: 'Playmaking', key: 'secondary_ast',    label: 'Secondary AST/G' },
+  { group: 'Playmaking', key: 'ft_ast',           label: 'FT AST/G' },
+  { group: 'Playmaking', key: 'passes_made',      label: 'Passes Made/G' },
+  { group: 'Playmaking', key: 'passes_received',  label: 'Passes Received/G' },
+  { group: 'Playmaking', key: 'bad_pass_tov',     label: 'Bad Pass TOV/G' },
+  { group: 'Playmaking', key: 'lost_ball_tov',    label: 'Lost Ball TOV/G' },
+  { group: 'Playmaking', key: 'screen_ast_pts',   label: 'Screen AST Pts/G' },
+  // Drive creation / passing
+  { group: 'Playmaking', key: 'drive_ast',        label: 'Drive AST/G' },
+  { group: 'Playmaking', key: 'drive_passes',     label: 'Drive Passes/G' },
+  { group: 'Playmaking', key: 'drive_tov',        label: 'Drive TOV/G' },
+  // Playtypes — offense
+  { group: 'Playmaking', key: 'iso_ppp',          label: 'ISO Off. PPP' },
+  { group: 'Playmaking', key: 'iso_fga',          label: 'ISO FGA/G' },
+  { group: 'Playmaking', key: 'iso_efg_pct',      label: 'ISO eFG%' },
+  { group: 'Playmaking', key: 'iso_tov_pct',      label: 'ISO TOV%' },
+  { group: 'Playmaking', key: 'pnr_bh_ppp',       label: 'PnR BH Off. PPP' },
+  { group: 'Playmaking', key: 'pnr_bh_fga',       label: 'PnR BH FGA/G' },
+  { group: 'Playmaking', key: 'pnr_roll_ppp',     label: 'PnR Roll Off. PPP' },
+  { group: 'Playmaking', key: 'post_ppp',          label: 'Post-Up Off. PPP' },
+  { group: 'Playmaking', key: 'spotup_ppp',        label: 'Spot-Up Off. PPP' },
+  { group: 'Playmaking', key: 'spotup_efg_pct',    label: 'Spot-Up eFG%' },
+  { group: 'Playmaking', key: 'transition_ppp',    label: 'Transition Off. PPP' },
+  { group: 'Playmaking', key: 'transition_fga',    label: 'Transition FGA/G' },
 
-  { group: 'Defense',    key: 'stl',              label: 'Steals' },
-  { group: 'Defense',    key: 'blk',              label: 'Blocks' },
-  { group: 'Defense',    key: 'def_rating',       label: 'Def. Rating' },
-  { group: 'Defense',    key: 'contested_shots',  label: 'Contested Shots' },
-  { group: 'Defense',    key: 'deflections',      label: 'Deflections' },
-  { group: 'Defense',    key: 'charges_drawn',    label: 'Charges Drawn' },
+  // ── Defense ───────────────────────────────────────────────
+  // Traditional + hustle + rim + closest defender + defensive playtypes
+  { group: 'Defense', key: 'stl',               label: 'SPG' },
+  { group: 'Defense', key: 'blk',               label: 'BPG' },
+  { group: 'Defense', key: 'def_rating',        label: 'DRtg' },
+  { group: 'Defense', key: 'def_ws',            label: 'Def. Win Shares' },
+  { group: 'Defense', key: 'contested_shots',   label: 'Contested Shots/G' },
+  { group: 'Defense', key: 'deflections',       label: 'Deflections/G' },
+  { group: 'Defense', key: 'charges_drawn',     label: 'Charges Drawn/G' },
+  { group: 'Defense', key: 'def_rim_fga',       label: 'Rim Def. FGA/G' },
+  { group: 'Defense', key: 'def_rim_fgm',       label: 'Rim Def. FGM/G' },
+  { group: 'Defense', key: 'def_rim_fg_pct',    label: 'Rim Def. FG%' },
+  // Closest defender buckets
+  { group: 'Defense', key: 'cd_fga_vt',         label: 'CD FGA/G (Very Tight)' },
+  { group: 'Defense', key: 'cd_fgm_vt',         label: 'CD FGM/G (Very Tight)' },
+  { group: 'Defense', key: 'cd_fga_tg',         label: 'CD FGA/G (Tight)' },
+  { group: 'Defense', key: 'cd_fgm_tg',         label: 'CD FGM/G (Tight)' },
+  { group: 'Defense', key: 'cd_fga_op',         label: 'CD FGA/G (Open)' },
+  { group: 'Defense', key: 'cd_fgm_op',         label: 'CD FGM/G (Open)' },
+  { group: 'Defense', key: 'cd_fga_wo',         label: 'CD FGA/G (Wide Open)' },
+  { group: 'Defense', key: 'cd_fgm_wo',         label: 'CD FGM/G (Wide Open)' },
+  // Defensive playtypes
+  { group: 'Defense', key: 'def_iso_ppp',       label: 'ISO Def. PPP' },
+  { group: 'Defense', key: 'def_pnr_bh_ppp',    label: 'PnR BH Def. PPP' },
+  { group: 'Defense', key: 'def_pnr_roll_ppp',  label: 'PnR Roll Def. PPP' },
+  { group: 'Defense', key: 'def_post_ppp',       label: 'Post-Up Def. PPP' },
+  { group: 'Defense', key: 'def_spotup_ppp',     label: 'Spot-Up Def. PPP' },
 
-  { group: 'Overall',    key: 'off_rating',       label: 'Off. Rating' },
-  { group: 'Overall',    key: 'net_rating',       label: 'Net Rating' },
-  { group: 'Overall',    key: 'plus_minus',       label: '+/-' },
-  { group: 'Overall',    key: 'pie',              label: 'PIE' },
+  // ── Rebounding ────────────────────────────────────────────
+  { group: 'Rebounding', key: 'reb',           label: 'RPG' },
+  { group: 'Rebounding', key: 'oreb',          label: 'OREB/G' },
+  { group: 'Rebounding', key: 'dreb',          label: 'DREB/G' },
+  { group: 'Rebounding', key: 'oreb_pct',      label: 'OREB%' },
+  { group: 'Rebounding', key: 'dreb_pct',      label: 'DREB%' },
+  { group: 'Rebounding', key: 'reb_pct',       label: 'REB%' },
+  { group: 'Rebounding', key: 'box_outs',      label: 'Box Outs/G' },
+  { group: 'Rebounding', key: 'off_box_outs',  label: 'Off. Box Outs/G' },
+  { group: 'Rebounding', key: 'def_box_outs',  label: 'Def. Box Outs/G' },
 
-  { group: 'Hustle',     key: 'screen_assists',   label: 'Screen Assists' },
-  { group: 'Hustle',     key: 'loose_balls',      label: 'Loose Balls' },
-
-  { group: 'Playtypes',  key: 'iso_ppp',          label: 'ISO Off. PPP' },
-  { group: 'Playtypes',  key: 'def_iso_ppp',      label: 'ISO Def. PPP' },
-  { group: 'Playtypes',  key: 'pnr_bh_ppp',       label: 'PnR BH Off. PPP' },
-  { group: 'Playtypes',  key: 'def_pnr_bh_ppp',   label: 'PnR BH Def. PPP' },
-  { group: 'Playtypes',  key: 'pnr_roll_ppp',     label: 'PnR Roll Off. PPP' },
-  { group: 'Playtypes',  key: 'def_pnr_roll_ppp', label: 'PnR Roll Def. PPP' },
-  { group: 'Playtypes',  key: 'post_ppp',         label: 'Post-Up Off. PPP' },
-  { group: 'Playtypes',  key: 'def_post_ppp',     label: 'Post-Up Def. PPP' },
-  { group: 'Playtypes',  key: 'spotup_ppp',       label: 'Spot-Up Off. PPP' },
-  { group: 'Playtypes',  key: 'def_spotup_ppp',   label: 'Spot-Up Def. PPP' },
-  { group: 'Playtypes',  key: 'transition_ppp',   label: 'Transition Off. PPP' },
+  // ── Overall ───────────────────────────────────────────────
+  // On/off ratings + advanced models + hustle + movement + clutch
+  { group: 'Overall', key: 'off_rating',        label: 'ORtg' },
+  { group: 'Overall', key: 'net_rating',        label: 'NRtg' },
+  { group: 'Overall', key: 'plus_minus',        label: '+/-' },
+  { group: 'Overall', key: 'pie',               label: 'PIE' },
+  { group: 'Overall', key: 'net_pts100',        label: 'Net Pts/100' },
+  { group: 'Overall', key: 'o_net_pts100',      label: 'Off. Net Pts/100' },
+  { group: 'Overall', key: 'd_net_pts100',      label: 'Def. Net Pts/100' },
+  // Advanced models
+  { group: 'Overall', key: 'darko_dpm',         label: 'DARKO DPM' },
+  { group: 'Overall', key: 'darko_odpm',        label: 'DARKO O-DPM' },
+  { group: 'Overall', key: 'darko_ddpm',        label: 'DARKO D-DPM' },
+  { group: 'Overall', key: 'darko_box',         label: 'DARKO Box DPM' },
+  { group: 'Overall', key: 'lebron',            label: 'LEBRON' },
+  { group: 'Overall', key: 'o_lebron',          label: 'O-LEBRON' },
+  { group: 'Overall', key: 'd_lebron',          label: 'D-LEBRON' },
+  { group: 'Overall', key: 'war',               label: 'WAR' },
+  // Clutch
+  { group: 'Overall', key: 'clutch_net_rating', label: 'Clutch NRtg' },
+  { group: 'Overall', key: 'clutch_ts_pct',     label: 'Clutch TS%' },
+  { group: 'Overall', key: 'clutch_usg_pct',    label: 'Clutch USG%' },
+  // Hustle & movement
+  { group: 'Overall', key: 'screen_assists',    label: 'Screen AST/G' },
+  { group: 'Overall', key: 'loose_balls',       label: 'Loose Balls/G' },
+  { group: 'Overall', key: 'dist_miles',        label: 'Distance/G (mi)' },
+  { group: 'Overall', key: 'dist_miles_off',    label: 'Off. Distance/G (mi)' },
+  { group: 'Overall', key: 'dist_miles_def',    label: 'Def. Distance/G (mi)' },
+  { group: 'Overall', key: 'avg_speed',         label: 'Avg Speed' },
+  { group: 'Overall', key: 'avg_speed_off',     label: 'Off. Avg Speed' },
+  { group: 'Overall', key: 'avg_speed_def',     label: 'Def. Avg Speed' },
 ];
 
 // ── Format helpers ────────────────────────────────────────────
@@ -2006,6 +2419,31 @@ function showDemoData() {
 }
 
 // ── Render stats table ────────────────────────────────────────
+// Fmt types that represent counting stats and scale with games played
+const COUNTING_FMTS = new Set(['1f', 'int']);
+
+// Returns the value to display for a cell, applying per-game vs totals mode
+function getStatVal(p, col) {
+  const raw = p[col.key];
+  if (raw == null) return null;
+  // Only scale counting stats; percentages, ratings, +/-, etc. stay as-is
+  if (ST.statMode === 'totals' && COUNTING_FMTS.has(col.fmt) && p.gp != null) {
+    return raw * p.gp;
+  }
+  return raw;
+}
+
+// Wire up stat-mode toggle buttons
+document.getElementById('stat-mode-toggle').addEventListener('click', (e) => {
+  const btn = e.target.closest('.stat-mode-btn');
+  if (!btn) return;
+  ST.statMode = btn.dataset.mode;
+  document.querySelectorAll('.stat-mode-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === ST.statMode)
+  );
+  renderStatsTable();
+});
+
 function renderStatsTable() {
   const sub     = STAT_CATS[ST.statCat]?.subs[ST.statGroup];
   const cols    = sub?.cols || [];
@@ -2036,7 +2474,7 @@ function renderStatsTable() {
   const ranges = {};
   for (const col of cols) {
     if (col.fmt === 'rank' || col.fmt === 'name' || col.fmt === 'team') continue;
-    const vals = players.map(p => p[col.key]).filter(v => v != null).sort((a, b) => a - b);
+    const vals = players.map(p => getStatVal(p, col)).filter(v => v != null).sort((a, b) => a - b);
     if (!vals.length) continue;
     const n = vals.length;
     ranges[col.key] = { p10: vals[Math.floor(n * 0.10)], p90: vals[Math.floor(n * 0.90)] };
@@ -2046,7 +2484,10 @@ function renderStatsTable() {
   headerRow.innerHTML = cols.map(col => {
     if (col.nosort) return `<th>${col.label}</th>`;
     const isSorted = ST.sortCol === col.key;
-    return `<th class="${isSorted ? 'sorted' : ''}" data-col="${col.key}" data-dir="${ST.sortDir === 'desc' ? '↓' : '↑'}">${col.label}</th>`;
+    // In totals mode, append a small indicator to counting stat headers
+    const modeTag = (ST.statMode === 'totals' && COUNTING_FMTS.has(col.fmt))
+      ? ' <span style="font-size:9px;opacity:0.55;font-weight:400">TOT</span>' : '';
+    return `<th class="${isSorted ? 'sorted' : ''}" data-col="${col.key}" data-dir="${ST.sortDir === 'desc' ? '↓' : '↑'}">${col.label}${modeTag}</th>`;
   }).join('');
 
   headerRow.querySelectorAll('th[data-col]').forEach(th => {
@@ -2087,7 +2528,7 @@ function renderStatsTable() {
       }
       if (col.fmt === 'team') return `<td class="team-cell">${p.team_abbr || '—'}</td>`;
 
-      const val = p[col.key];
+      const val = getStatVal(p, col);
       let cls = '';
       if (val != null && ranges[col.key]) {
         const { p10, p90 } = ranges[col.key];
@@ -2111,6 +2552,16 @@ function renderStatsTable() {
 
 let builderInited = false;
 
+function updateSelectAllBtn() {
+  const btn = document.getElementById('builder-select-all');
+  if (!btn) return;
+  const allKeys = BUILDER_CATALOG.map(i => i.key);
+  const allSelected = allKeys.every(k => ST.builderSelected.includes(k));
+  const noneSelected = ST.builderSelected.length === 0;
+  btn.textContent = noneSelected ? 'All' : allSelected ? 'Clear' : 'Clear';
+  btn.classList.toggle('all-selected', !noneSelected);
+}
+
 function initBuilder() {
   if (builderInited) return;
   builderInited = true;
@@ -2120,7 +2571,35 @@ function initBuilder() {
     document.getElementById('builder-min-value').textContent = `${this.value}`;
   });
   document.getElementById('builder-run').addEventListener('click', runBuilder);
+
+  // Meta stat-list expand/collapse toggle
+  document.getElementById('builder-meta-toggle').addEventListener('click', () => {
+    const meta = document.getElementById('builder-meta');
+    const btn  = document.getElementById('builder-meta-toggle');
+    const expanded = meta.classList.toggle('expanded');
+    btn.textContent = expanded ? 'hide' : 'show all';
+  });
+
+  // Global select-all / clear-all
+  document.getElementById('builder-select-all').addEventListener('click', () => {
+    const allKeys = BUILDER_CATALOG.map(i => i.key);
+    const noneSelected = ST.builderSelected.length === 0;
+    if (noneSelected) {
+      // Select every stat and expand every group
+      ST.builderSelected = [...allKeys];
+      for (const item of BUILDER_CATALOG) BUILDER_OPEN_GROUPS.add(item.group);
+    } else {
+      ST.builderSelected = [];
+    }
+    renderBuilderStatList(document.getElementById('builder-search').value.trim().toLowerCase());
+    renderBuilderChips();
+    updateSelectAllBtn();
+    document.getElementById('builder-run').disabled = ST.builderSelected.length === 0;
+  });
 }
+
+// Track which groups are open: open if has selected stats, or user explicitly opened
+const BUILDER_OPEN_GROUPS = new Set();
 
 function renderBuilderStatList(filter = '') {
   const list = document.getElementById('builder-stat-list');
@@ -2131,9 +2610,30 @@ function renderBuilderStatList(filter = '') {
     groups[item.group].push(item);
   }
 
+  // When searching, show all groups open; otherwise respect BUILDER_OPEN_GROUPS
+  const isFiltering = filter.length > 0;
+
   let html = '';
   for (const [group, items] of Object.entries(groups)) {
-    html += `<div class="builder-stat-group-label">${group}</div>`;
+    const selCount = items.filter(i => ST.builderSelected.includes(i.key)).length;
+    // Auto-open groups that have selected stats
+    if (selCount > 0) BUILDER_OPEN_GROUPS.add(group);
+    const isOpen = isFiltering || BUILDER_OPEN_GROUPS.has(group);
+    const countBadge = selCount > 0
+      ? `<span class="group-sel-count visible">${selCount}</span>` : `<span class="group-sel-count"></span>`;
+
+    const allGroupKeys = items.map(i => i.key);
+    const allGroupSelected = allGroupKeys.every(k => ST.builderSelected.includes(k));
+    const groupAllCls = allGroupSelected ? 'group-all-btn group-all-selected' : 'group-all-btn';
+    const groupAllLabel = allGroupSelected ? 'Clear' : 'All';
+
+    html += `<div class="builder-stat-group-wrap">
+      <div class="builder-stat-group-label ${isOpen ? 'open' : ''}" data-group="${group}">
+        <span>${group}</span>${countBadge}<span class="group-chevron">▶</span>
+      </div>
+      <button class="${groupAllCls}" data-group-all="${group}" title="Select all in ${group}">${groupAllLabel}</button>
+    </div>`;
+    html += `<div class="builder-stat-group-items ${isOpen ? 'open' : ''}" data-group-items="${group}">`;
     for (const item of items) {
       const sel = ST.builderSelected.includes(item.key);
       html += `
@@ -2145,14 +2645,56 @@ function renderBuilderStatList(filter = '') {
           <span class="builder-stat-key">${item.key}</span>
         </button>`;
     }
+    html += `</div>`;
   }
 
   if (!html) html = `<div style="padding:20px;font-family:var(--ff-mono);font-size:11px;color:var(--ink4)">No matching stats</div>`;
   list.innerHTML = html;
 
+  // Wire group header toggles
+  list.querySelectorAll('.builder-stat-group-label').forEach(header => {
+    header.addEventListener('click', () => {
+      const group = header.dataset.group;
+      const itemsEl = list.querySelector(`[data-group-items="${group}"]`);
+      const isNowOpen = !header.classList.contains('open');
+      header.classList.toggle('open', isNowOpen);
+      itemsEl.classList.toggle('open', isNowOpen);
+      if (isNowOpen) BUILDER_OPEN_GROUPS.add(group);
+      else BUILDER_OPEN_GROUPS.delete(group);
+    });
+  });
+
+  // Wire per-group select-all buttons
+  list.querySelectorAll('.group-all-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const group = btn.dataset.groupAll;
+      const groupItems = BUILDER_CATALOG.filter(i => i.group === group);
+      const groupKeys = groupItems.map(i => i.key);
+      const allSelected = groupKeys.every(k => ST.builderSelected.includes(k));
+      if (allSelected) {
+        // Deselect all in group
+        ST.builderSelected = ST.builderSelected.filter(k => !groupKeys.includes(k));
+      } else {
+        // Select all in group — no cap on bulk select
+        for (const key of groupKeys) {
+          if (!ST.builderSelected.includes(key)) {
+            ST.builderSelected.push(key);
+          }
+        }
+      }
+      renderBuilderStatList(document.getElementById('builder-search').value.trim().toLowerCase());
+      renderBuilderChips();
+      updateSelectAllBtn();
+      document.getElementById('builder-run').disabled = ST.builderSelected.length === 0;
+    });
+  });
+
   list.querySelectorAll('.builder-stat-item').forEach(btn => {
     btn.addEventListener('click', () => toggleBuilderStat(btn.dataset.key));
   });
+
+  updateSelectAllBtn();
 }
 
 function setupBuilderSearch() {
@@ -2165,11 +2707,11 @@ function toggleBuilderStat(key) {
   if (ST.builderSelected.includes(key)) {
     ST.builderSelected = ST.builderSelected.filter(k => k !== key);
   } else {
-    if (ST.builderSelected.length >= 15) return;
     ST.builderSelected.push(key);
   }
   renderBuilderStatList(document.getElementById('builder-search').value.trim().toLowerCase());
   renderBuilderChips();
+  updateSelectAllBtn();
   document.getElementById('builder-run').disabled = ST.builderSelected.length === 0;
 }
 
@@ -2191,6 +2733,7 @@ async function runBuilder() {
   const runBtn = document.getElementById('builder-run');
   runBtn.disabled = true;
   runBtn.textContent = 'Running…';
+  document.getElementById('builder-spotlight').style.display = 'none';
   document.getElementById('builder-empty').style.display = 'flex';
   document.getElementById('builder-table-wrap').style.display = 'none';
   document.getElementById('builder-meta').textContent = 'Computing…';
@@ -2218,7 +2761,16 @@ async function runBuilder() {
       return item ? item.label : k;
     });
     document.getElementById('builder-meta').textContent =
-      `${data.n} players · avg pctile across: ${statNames.join(', ')}`;
+      `Top ${Math.min(data.n, 50)} of ${data.n} players · ${statNames.join(', ')}`;
+    document.getElementById('builder-meta').classList.remove('expanded');
+    // Show expand toggle only when there are enough stats to overflow one line
+    const toggleBtn = document.getElementById('builder-meta-toggle');
+    if (statNames.length > 5) {
+      toggleBtn.style.display = '';
+      toggleBtn.textContent = 'show all';
+    } else {
+      toggleBtn.style.display = 'none';
+    }
 
   } catch (e) {
     document.getElementById('builder-meta').textContent = `⚠ ${e.message}`;
@@ -2241,6 +2793,55 @@ function showDemoBuilderResults() {
   renderBuilderResults();
 }
 
+function showSpotlight(r) {
+  const card = document.getElementById('builder-spotlight');
+  const img  = document.getElementById('spotlight-img');
+  const fallback = document.getElementById('spotlight-fallback');
+
+  // Headshot
+  const headshotUrl = `https://cdn.nba.com/headshots/nba/latest/260x190/${r.player_id}.png`;
+  img.src = headshotUrl;
+  img.className = 'spotlight-headshot';
+  fallback.className = 'spotlight-headshot-fallback';
+  img.onerror = () => {
+    img.className = 'spotlight-headshot hidden';
+    fallback.className = 'spotlight-headshot-fallback visible';
+  };
+
+  // Identity
+  document.getElementById('spotlight-name').textContent = r.player_name;
+  document.getElementById('spotlight-sub').textContent =
+    `${r.position_group || ''}  ·  ${r.team_abbr || '—'}  ·  Rank #${r.rank}`;
+  document.getElementById('spotlight-score').textContent = r.score.toFixed(1);
+
+  // Bar chart — one row per stat in breakdown, sorted by pctile desc
+  const sorted = [...r.breakdown].sort((a, b) => b.pctile - a.pctile);
+  document.getElementById('spotlight-chart').innerHTML = sorted.map(b => {
+    const item = BUILDER_CATALOG.find(x => x.key === b.stat);
+    const label = item ? item.label : b.stat;
+    const cls = b.pctile >= 70 ? 'hi' : b.pctile <= 35 ? 'lo' : 'mid';
+    return `<div class="sp-bar-row">
+      <div class="sp-bar-label" title="${label}">${label}</div>
+      <div class="sp-bar-track">
+        <div class="sp-bar-fill ${cls}" style="width:${b.pctile.toFixed(1)}%"></div>
+      </div>
+      <div class="sp-bar-pct">${b.pctile.toFixed(0)}</div>
+    </div>`;
+  }).join('');
+
+  card.style.display = '';
+
+  // Highlight selected row
+  document.querySelectorAll('#builder-tbody tr').forEach(tr =>
+    tr.classList.toggle('spotlight-active', tr.dataset.playerId === String(r.player_id))
+  );
+}
+
+document.getElementById('spotlight-close').addEventListener('click', () => {
+  document.getElementById('builder-spotlight').style.display = 'none';
+  document.querySelectorAll('#builder-tbody tr').forEach(tr => tr.classList.remove('spotlight-active'));
+});
+
 function renderBuilderResults() {
   const results = ST.builderResults;
   const empty = document.getElementById('builder-empty');
@@ -2257,8 +2858,9 @@ function renderBuilderResults() {
 
   const maxScore = results[0]?.score || 100;
   const tbody = document.getElementById('builder-tbody');
+  const display = results.slice(0, 50);
 
-  tbody.innerHTML = results.map((r, i) => {
+  tbody.innerHTML = display.map((r, i) => {
     const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
     const barPct = (r.score / maxScore * 100).toFixed(1);
 
@@ -2269,7 +2871,12 @@ function renderBuilderResults() {
       return `<span class="b-breakdown-pill ${cls}">${label} ${b.pctile.toFixed(0)}p</span>`;
     }).join('');
 
-    return `<tr>
+    // Show-more button only rendered when there are enough pills to overflow ~2 rows
+    const moreBtn = r.breakdown.length > 8
+      ? `<button class="b-breakdown-more" data-more>+${r.breakdown.length - 8} more</button>`
+      : '';
+
+    return `<tr data-player-id="${r.player_id}" style="cursor:pointer;animation-delay:${Math.min(i * 10, 300)}ms">
       <td><span class="b-rank-num ${rankClass}">${r.rank}</span></td>
       <td>
         <span style="font-weight:500;color:var(--ink)">${r.player_name}</span>
@@ -2281,10 +2888,38 @@ function renderBuilderResults() {
           <div class="b-bar-bg"><div class="b-bar-fill" style="width:${barPct}%"></div></div>
         </div>
       </td>
-      <td><div class="b-breakdown">${pills}</div></td>
+      <td><div class="b-breakdown" data-total="${r.breakdown.length}">${pills}${moreBtn}</div></td>
       <td><span class="b-score">${r.score.toFixed(1)}</span></td>
     </tr>`;
   }).join('');
+
+  // Wire row clicks → spotlight
+  const resultMap = Object.fromEntries(display.map(r => [String(r.player_id), r]));
+  tbody.querySelectorAll('tr').forEach(tr => {
+    tr.addEventListener('click', (e) => {
+      // Don't open spotlight if clicking the show-more button
+      if (e.target.closest('[data-more]')) return;
+      const r = resultMap[tr.dataset.playerId];
+      if (r) showSpotlight(r);
+    });
+  });
+
+  // Wire show-more toggles
+  tbody.querySelectorAll('[data-more]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const breakdown = btn.closest('.b-breakdown');
+      const total = parseInt(breakdown.dataset.total);
+      const expanded = breakdown.classList.toggle('expanded');
+      btn.textContent = expanded ? 'show less' : `+${total - 8} more`;
+    });
+  });
+
+  // Scroll top of results into view so rank #1 is visible
+  document.getElementById('builder-results-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Auto-spotlight the #1 player
+  if (results.length > 0) showSpotlight(results[0]);
 }
 
 // ── Status bar ────────────────────────────────────────────────
