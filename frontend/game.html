@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Game — NothingButNet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & tokens ─────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#0c0c0d;--ink2:#2a2a2e;--ink3:#6b6b78;--ink4:#a8a8b3;
+  --paper:#f7f5f0;--paper2:#eeecea;--paper3:#e5e2dc;--rule:#d8d5cf;
+  --orange:#e8530a;--orange-lt:#fff0ea;--green:#1a7a4a;--red:#c0392b;
+  --ff-serif:'DM Serif Display',Georgia,serif;
+  --ff-sans:'Instrument Sans',system-ui,sans-serif;
+  --ff-mono:'DM Mono','Courier New',monospace;
+  --nav-h:56px;
+  font-size:15px;
+}
+html{scroll-behavior:smooth}
+body{font-family:var(--ff-sans);background:var(--paper);color:var(--ink);min-height:100vh;-webkit-font-smoothing:antialiased;}
+body::before{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");opacity:.022;pointer-events:none;z-index:9999;}
+
+/* ── Nav ─────────────────────────────────────────────────────── */
+nav{position:fixed;top:0;left:0;right:0;height:var(--nav-h);background:var(--paper);border-bottom:1px solid var(--rule);display:flex;align-items:center;padding:0 24px;gap:32px;z-index:100;}
+.nav-wordmark{font-family:var(--ff-serif);font-size:20px;color:var(--ink);letter-spacing:-.01em;text-decoration:none;flex-shrink:0;}
+.nav-wordmark em{font-style:italic;color:var(--orange);}
+.nav-tabs{display:flex;gap:2px;}
+.nav-tab{font-family:var(--ff-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);text-decoration:none;padding:6px 14px;border-radius:4px;transition:color .15s,background .15s;display:inline-block;}
+.nav-tab:hover{color:var(--ink);background:var(--paper2);}
+.nav-tab.active{color:var(--ink);background:var(--paper3);}
+
+/* ── Layout ──────────────────────────────────────────────────── */
+.page{padding-top:var(--nav-h);max-width:960px;margin:0 auto;padding-bottom:80px;}
+
+/* ── Scoreboard header ───────────────────────────────────────── */
+.game-sb{display:flex;align-items:center;justify-content:center;padding:36px 24px 28px;gap:0;}
+.sb-team{display:flex;align-items:center;gap:12px;flex:1;}
+.sb-team.home{flex-direction:row-reverse;}
+.sb-logo{width:60px;height:60px;object-fit:contain;}
+.sb-logo-fallback{width:60px;height:60px;font-size:28px;display:flex;align-items:center;justify-content:center;}
+.sb-team-info{display:flex;flex-direction:column;gap:2px;}
+.sb-abbr{font-family:var(--ff-mono);font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;}
+.sb-record{font-family:var(--ff-mono);font-size:10px;color:var(--ink4);}
+.sb-score{font-size:52px;font-weight:700;letter-spacing:-2px;font-family:var(--ff-serif);min-width:64px;text-align:center;line-height:1;}
+.sb-score.win{color:var(--ink);}
+.sb-score.loss{color:var(--rule);}
+.sb-abbr.loser,.sb-team.loser .sb-record{opacity:.5;}
+.sb-center{display:flex;flex-direction:column;align-items:center;gap:4px;padding:0 28px;flex-shrink:0;}
+.sb-status{font-family:var(--ff-mono);font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink4);}
+.sb-status.live{color:#e74c3c;}
+.sb-clock{font-family:var(--ff-mono);font-size:11px;color:var(--ink3);font-weight:500;}
+
+/* ── Tabs ────────────────────────────────────────────────────── */
+.game-tabs{display:flex;border-bottom:1px solid var(--rule);padding:0 24px;}
+.game-tab{font-family:var(--ff-sans);font-size:13px;font-weight:500;padding:10px 16px;border:none;border-bottom:2px solid transparent;background:none;color:var(--ink3);cursor:pointer;margin-bottom:-1px;transition:color .15s;}
+.game-tab:hover{color:var(--ink2);}
+.game-tab.active{color:var(--ink);border-bottom-color:var(--ink);}
+.tab-panel{display:none;padding:0 24px;}
+.tab-panel.active{display:block;}
+
+/* ── Box Score ───────────────────────────────────────────────── */
+.box-team-toggle{display:flex;gap:6px;padding:16px 0 12px;}
+.box-team-btn{font-family:var(--ff-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:5px 12px;border:1px solid var(--rule);border-radius:4px;background:transparent;color:var(--ink3);cursor:pointer;transition:all .12s;}
+.box-team-btn.active{background:var(--ink);color:var(--paper);border-color:var(--ink);}
+.box-wrap{overflow-x:auto;}
+table.box-table{width:100%;border-collapse:collapse;font-size:12px;}
+table.box-table thead th{font-family:var(--ff-mono);font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3);text-align:right;padding:8px 10px;background:var(--paper2);border-bottom:1px solid var(--rule);white-space:nowrap;cursor:pointer;user-select:none;}
+table.box-table thead th:first-child{text-align:left;}
+table.box-table thead th:hover{color:var(--ink);}
+table.box-table thead th.sorted{color:var(--orange);}
+table.box-table tbody td{padding:7px 10px;border-bottom:1px solid var(--paper3);text-align:right;color:var(--ink2);white-space:nowrap;font-variant-numeric:tabular-nums;}
+table.box-table tbody td:first-child{text-align:left;font-weight:500;color:var(--ink);}
+table.box-table tbody tr:hover{background:var(--paper2);}
+table.box-table tfoot td{font-family:var(--ff-mono);font-size:10px;font-weight:500;text-align:right;padding:8px 10px;border-top:1px solid var(--rule);color:var(--ink2);background:var(--paper2);}
+table.box-table tfoot td:first-child{text-align:left;}
+.player-cell{display:flex;align-items:center;gap:8px;}
+.player-headshot-sm{width:28px;height:20px;object-fit:cover;object-position:top;border-radius:3px;background:var(--paper3);}
+.dnp-row td{color:var(--ink4);font-style:italic;}
+
+/* ── PBP ─────────────────────────────────────────────────────── */
+.pbp-tabs{display:flex;gap:4px;padding:14px 0 10px;overflow-x:auto;}
+.pbp-q-btn{font-family:var(--ff-mono);font-size:10px;letter-spacing:.05em;padding:5px 12px;border:1px solid var(--rule);border-radius:4px;background:transparent;color:var(--ink3);cursor:pointer;flex-shrink:0;transition:all .12s;}
+.pbp-q-btn.active{background:var(--ink);color:var(--paper);border-color:var(--ink);}
+.pbp-quarter-panel{display:none;}
+.pbp-quarter-panel.active{display:block;}
+.pbp-row{display:flex;align-items:baseline;gap:10px;padding:6px 0;border-bottom:1px solid var(--paper3);font-size:12px;}
+.pbp-clock{font-family:var(--ff-mono);font-size:10px;color:var(--ink4);width:42px;flex-shrink:0;text-align:right;}
+.pbp-score-snap{font-family:var(--ff-mono);font-size:10px;width:56px;flex-shrink:0;text-align:center;color:var(--ink3);}
+.pbp-desc{flex:1;color:var(--ink2);line-height:1.4;}
+.pbp-desc .made{color:var(--green);font-weight:600;}
+.pbp-desc .miss{color:var(--ink4);}
+.pbp-desc .tov{color:var(--red);}
+.pbp-desc .period-marker{font-family:var(--ff-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink4);}
+.pbp-team-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:5px;}
+
+/* ── Loading / Error ─────────────────────────────────────────── */
+.loading-state,.error-state{display:flex;align-items:center;justify-content:center;padding:60px 24px;color:var(--ink4);font-family:var(--ff-mono);font-size:12px;gap:8px;}
+.loading-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--rule);border-top-color:var(--orange);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.live-dot{width:7px;height:7px;border-radius:50%;background:#e74c3c;animation:pulse 1.4s ease-in-out infinite;flex-shrink:0;}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.85)}}
+</style>
+</head>
+<body>
+<nav>
+  <a class="nav-wordmark" href="/">nothingbutnet</a>
+  <div class="nav-tabs">
+    <a class="nav-tab" href="/stats.html">Stats</a>
+    <a class="nav-tab" href="/builder.html">Builder</a>
+    <a class="nav-tab" href="/onoff">On/Off</a>
+  </div>
+</nav>
+
+<div class="page">
+  <div id="game-scoreboard"><div class="loading-state"><span class="loading-spinner"></span>Loading game…</div></div>
+  <div class="game-tabs" id="game-tabs" style="display:none;"></div>
+  <div id="game-panels"></div>
+</div>
+
+<script>
+const API = window.location.protocol === 'file:' ? 'http://localhost:5000' : '';
+const params = new URLSearchParams(window.location.search);
+const GAME_ID = params.get('gameId');
+let POLL_TIMER = null;
+let ACTIVE_TAB = 'pbp';
+let BOX_TEAM = 'away';
+let BOX_SORT = {key:'pts',dir:-1};
+let GAME_DATA = null;
+
+// ── Boot ─────────────────────────────────────────────────────────
+if (!GAME_ID) { document.getElementById('game-scoreboard').innerHTML = '<div class="error-state">No game ID.</div>'; }
+else { loadGame(); }
+
+async function loadGame() {
+  try {
+    const [boxRes, pbpRes] = await Promise.all([
+      fetch(`${API}/api/live/boxscore/${GAME_ID}`),
+      fetch(`${API}/api/live/pbp/${GAME_ID}`),
+    ]);
+    const box = boxRes.ok ? await boxRes.json() : null;
+    const pbp = pbpRes.ok ? await pbpRes.json() : null;
+    GAME_DATA = {box, pbp};
+    render(box, pbp);
+    if (box && box.gameStatus === 2) {
+      POLL_TIMER = setInterval(loadGame, 15000);
+    } else if (POLL_TIMER) {
+      clearInterval(POLL_TIMER); POLL_TIMER = null;
+    }
+  } catch(e) {
+    document.getElementById('game-scoreboard').innerHTML = `<div class="error-state">Failed to load game.</div>`;
+  }
+}
+
+// ── Main render ───────────────────────────────────────────────────
+function render(box, pbp) {
+  if (!box && !pbp) { document.getElementById('game-scoreboard').innerHTML = '<div class="error-state">Game data unavailable.</div>'; return; }
+  renderScoreboard(box);
+  renderTabs(box);
+  renderPanels(box, pbp);
+}
+
+function renderScoreboard(box) {
+  const el = document.getElementById('game-scoreboard');
+  if (!box) { el.innerHTML = ''; return; }
+  const away = box.awayTeam || {};
+  const home = box.homeTeam || {};
+  const awayAbbr = away.teamTricode || away.teamAbbreviation || '???';
+  const homeAbbr = home.teamTricode || home.teamAbbreviation || '???';
+  const awayScore = parseInt(away.score ?? 0);
+  const homeScore = parseInt(home.score ?? 0);
+  const isLive = box.gameStatus === 2;
+  const isUpcoming = box.gameStatus === 1;
+  const awayWon = !isLive && !isUpcoming && awayScore > homeScore;
+  const homeWon = !isLive && !isUpcoming && homeScore > awayScore;
+
+  let statusHtml;
+  if (isLive) {
+    const period = box.period || 1;
+    const pLabel = period > 4 ? `OT${period-4}` : `Q${period}`;
+    const clock = fmtClock(box.gameClock || '');
+    statusHtml = `<div class="sb-status live" style="display:flex;align-items:center;gap:5px;"><div class="live-dot"></div>LIVE</div>
+      <div class="sb-clock">${pLabel}${clock ? ' · '+clock : ''}</div>`;
+  } else if (isUpcoming) {
+    statusHtml = `<div class="sb-status">UPCOMING</div><div class="sb-clock">—</div>`;
+  } else {
+    statusHtml = `<div class="sb-status">FINAL</div><div class="sb-clock">—</div>`;
+  }
+
+  // Update page title
+  if (!isUpcoming) document.title = `${awayAbbr} ${awayScore} – ${homeScore} ${homeAbbr} — NothingButNet`;
+
+  el.innerHTML = `
+    <div class="game-sb">
+      <div class="sb-team away ${!isUpcoming && !isLive && !awayWon ? 'loser' : ''}">
+        ${teamLogo(awayAbbr)}
+        <div class="sb-team-info">
+          <span class="sb-abbr ${!isUpcoming && !isLive && !awayWon ? 'loser' : ''}">${awayAbbr}</span>
+          ${away.wins != null ? `<span class="sb-record">${away.wins}–${away.losses}</span>` : ''}
+        </div>
+        <span class="sb-score ${isUpcoming ? '' : awayWon ? 'win' : homeWon ? 'loss' : ''}">${isUpcoming ? '' : awayScore}</span>
+      </div>
+      <div class="sb-center">${statusHtml}</div>
+      <div class="sb-team home ${!isUpcoming && !isLive && !homeWon ? 'loser' : ''}">
+        <span class="sb-score ${isUpcoming ? '' : homeWon ? 'win' : awayWon ? 'loss' : ''}">${isUpcoming ? '' : homeScore}</span>
+        <div class="sb-team-info" style="text-align:right;">
+          <span class="sb-abbr ${!isUpcoming && !isLive && !homeWon ? 'loser' : ''}">${homeAbbr}</span>
+          ${home.wins != null ? `<span class="sb-record">${home.wins}–${home.losses}</span>` : ''}
+        </div>
+        ${teamLogo(homeAbbr)}
+      </div>
+    </div>`;
+}
+
+function teamLogo(abbr) {
+  return `<img class="sb-logo" src="https://cdn.nba.com/logos/nba/${nbaTeamId(abbr)}/global/L/logo.svg"
+    alt="${abbr}" onerror="this.outerHTML='<div class=\\'sb-logo-fallback\\'>🏀</div>'">`;
+}
+
+function renderTabs(box) {
+  const container = document.getElementById('game-tabs');
+  const tabs = [
+    {id:'pbp', label:'Play-by-Play'},
+    {id:'box', label:'Box Score'},
+  ];
+
+  ACTIVE_TAB = 'pbp';
+  container.style.display = '';
+  container.innerHTML = tabs.map(t =>
+    `<button class="game-tab ${t.id===ACTIVE_TAB ? 'active' : ''}" data-tab="${t.id}">${t.label}</button>`
+  ).join('');
+  container.querySelectorAll('.game-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      ACTIVE_TAB = btn.dataset.tab;
+      container.querySelectorAll('.game-tab').forEach(b => b.classList.toggle('active', b===btn));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id===`panel-${ACTIVE_TAB}`));
+    });
+  });
+}
+
+function renderPanels(box, pbp) {
+  const el = document.getElementById('game-panels');
+  el.innerHTML = `
+    <div class="tab-panel ${ACTIVE_TAB==='pbp'?'active':''}" id="panel-pbp">${buildPbp(pbp, box)}</div>
+    <div class="tab-panel ${ACTIVE_TAB==='box'?'active':''}" id="panel-box">${buildBox(box)}</div>`;
+
+  // Box score team toggle
+  el.querySelectorAll('.box-team-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      BOX_TEAM = btn.dataset.team;
+      el.querySelectorAll('.box-team-btn').forEach(b => b.classList.toggle('active', b===btn));
+      el.querySelectorAll('.box-team-rows').forEach(r => r.style.display = r.dataset.team===BOX_TEAM ? '' : 'none');
+    });
+  });
+
+  // PBP quarter tabs
+  el.querySelectorAll('.pbp-q-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      el.querySelectorAll('.pbp-q-btn').forEach(b => b.classList.toggle('active', b===btn));
+      el.querySelectorAll('.pbp-quarter-panel').forEach(p => p.classList.toggle('active', p.dataset.q===btn.dataset.q));
+    });
+  });
+}
+
+// ── Box Score ─────────────────────────────────────────────────────
+function buildBox(box) {
+  if (!box || (!box.homeTeam && !box.awayTeam)) return '<div class="loading-state">Box score unavailable.</div>';
+  const away = box.awayTeam || {};
+  const home = box.homeTeam || {};
+  const awayAbbr = away.teamTricode || 'AWY';
+  const homeAbbr = home.teamTricode || 'HME';
+  const awayPlayers = sortPlayers(away.players || []);
+  const homePlayers = sortPlayers(home.players || []);
+
+  const cols = [
+    {key:'name',label:'Player',align:'left'},
+    {key:'min',label:'MIN'},{key:'pts',label:'PTS'},{key:'reb',label:'REB'},
+    {key:'ast',label:'AST'},{key:'stl',label:'STL'},{key:'blk',label:'BLK'},
+    {key:'tov',label:'TOV'},{key:'pf',label:'PF'},
+    {key:'fg',label:'FG'},{key:'3p',label:'3P'},{key:'ft',label:'FT'},
+    {key:'pm',label:'+/-'},
+  ];
+
+  const header = `<thead><tr>${cols.map(c => `<th${c.align?` style="text-align:left"`:''} data-key="${c.key}">${c.label}</th>`).join('')}</tr></thead>`;
+
+  function playerRows(players, team) {
+    const rows = players.map(p => {
+      const s = p.statistics || {};
+      const min = fmtMin(s.minutes || '');
+      const dnp = min === '0:00' || !min;
+      if (dnp) return `<tr class="dnp-row"><td><div class="player-cell">${p.name || ''}</div></td><td colspan="${cols.length-1}" style="color:var(--ink4);font-size:11px;">DNP</td></tr>`;
+      const pm = s.plusMinusPoints ?? 0;
+      const pmColor = pm > 0 ? 'var(--green)' : pm < 0 ? 'var(--red)' : 'var(--ink3)';
+      return `<tr>
+        <td><div class="player-cell">
+          ${p.personId ? `<img class="player-headshot-sm" src="https://cdn.nba.com/headshots/nba/latest/260x190/${p.personId}.png" onerror="this.style.display='none'">` : ''}
+          <span>${p.name || ''}</span>
+        </div></td>
+        <td>${min}</td>
+        <td><b>${s.points||0}</b></td>
+        <td>${(s.reboundsTotal||0)}</td>
+        <td>${s.assists||0}</td>
+        <td>${s.steals||0}</td>
+        <td>${s.blocks||0}</td>
+        <td>${s.turnovers||0}</td>
+        <td>${s.foulsPersonal||0}</td>
+        <td>${s.fieldGoalsMade||0}-${s.fieldGoalsAttempted||0}</td>
+        <td>${s.threePointersMade||0}-${s.threePointersAttempted||0}</td>
+        <td>${s.freeThrowsMade||0}-${s.freeThrowsAttempted||0}</td>
+        <td style="color:${pmColor};font-weight:700;">${pm>0?'+':''}${pm}</td>
+      </tr>`;
+    }).join('');
+    return `<tbody class="box-team-rows" data-team="${team}" style="display:${BOX_TEAM===team?'':'none'}">${rows}</tbody>`;
+  }
+
+  return `
+    <div class="box-team-toggle">
+      <button class="box-team-btn ${BOX_TEAM==='away'?'active':''}" data-team="away">${awayAbbr}</button>
+      <button class="box-team-btn ${BOX_TEAM==='home'?'active':''}" data-team="home">${homeAbbr}</button>
+    </div>
+    <div class="box-wrap">
+      <table class="box-table">${header}<tbody>${''}</tbody>
+        ${playerRows(awayPlayers,'away')}
+        ${playerRows(homePlayers,'home')}
+      </table>
+    </div>`;
+}
+
+function sortPlayers(players) {
+  return [...players].sort((a,b) => {
+    const aMin = parseMinSecs(a.statistics?.minutes||'');
+    const bMin = parseMinSecs(b.statistics?.minutes||'');
+    return bMin - aMin;
+  });
+}
+function parseMinSecs(s) {
+  const m = (s||'').match(/PT(\d+)M([\d.]+)S/);
+  if (m) return parseInt(m[1])*60+parseFloat(m[2]);
+  if (s.includes(':')) { const p=s.split(':'); return parseInt(p[0])*60+parseInt(p[1]); }
+  return 0;
+}
+function fmtMin(s) {
+  const m = (s||'').match(/PT(\d+)M([\d.]+)S/);
+  if (m) return `${m[1]}:${String(Math.floor(parseFloat(m[2]))).padStart(2,'0')}`;
+  return s||'0:00';
+}
+
+// ── Play-by-Play ──────────────────────────────────────────────────
+function buildPbp(pbp, box) {
+  if (!pbp) return '<div class="loading-state">Play-by-play unavailable.</div>';
+  const actions = (pbp.actions || pbp.game?.actions || []);
+  if (!actions.length) return '<div class="loading-state">No plays yet.</div>';
+
+  const awayAbbr = box?.awayTeam?.teamTricode || '';
+  const homeAbbr = box?.homeTeam?.teamTricode || '';
+
+  // Group by period
+  const periods = {};
+  const periodOrder = [];
+  actions.forEach(a => {
+    const p = a.period ?? 1;
+    if (!periods[p]) { periods[p] = []; periodOrder.push(p); }
+    periods[p].push(a);
+  });
+  // Deduplicate periods
+  const uniqPeriods = [...new Set(periodOrder)];
+  const maxPeriod = Math.max(...uniqPeriods);
+  const activePeriod = maxPeriod;
+
+  const tabHtml = `<div class="pbp-tabs">${uniqPeriods.map(p => {
+    const label = p <= 4 ? `Q${p}` : `OT${p-4}`;
+    const plays = periods[p];
+    const last = [...plays].reverse().find(a => a.scoreHome != null && a.scoreAway != null);
+    const score = last ? `${last.scoreAway}–${last.scoreHome}` : '';
+    return `<button class="pbp-q-btn ${p===activePeriod?'active':''}" data-q="${p}">${label}${score ? `<br><span style="font-size:9px;opacity:.7">${score}</span>` : ''}</button>`;
+  }).join('')}</div>`;
+
+  const panelsHtml = uniqPeriods.map(p => {
+    const plays = [...(periods[p]||[])].reverse(); // most recent first
+    const rows = plays.map(a => buildPbpRow(a, awayAbbr, homeAbbr)).filter(Boolean).join('');
+    return `<div class="pbp-quarter-panel ${p===activePeriod?'active':''}" data-q="${p}">${rows || '<div style="padding:16px;color:var(--ink4);font-size:12px;">No plays.</div>'}</div>`;
+  }).join('');
+
+  return tabHtml + panelsHtml;
+}
+
+function buildPbpRow(a, awayAbbr, homeAbbr) {
+  const type = (a.actionType||'').toLowerCase();
+  const desc = a.description || '';
+  if (!desc || type === 'period' || type === 'game') {
+    return `<div class="pbp-row"><div class="pbp-clock"></div><div class="pbp-score-snap"></div><div class="pbp-desc"><span class="period-marker">${desc}</span></div></div>`;
+  }
+  const clock = fmtClock(a.clock||'');
+  const score = (a.scoreAway != null && a.scoreHome != null) ? `${a.scoreAway}–${a.scoreHome}` : '';
+
+  // Color-code description
+  let descHtml = desc;
+  if ((type==='2pt'||type==='3pt') && a.shotResult==='Made') descHtml = `<span class="made">${desc}</span>`;
+  else if ((type==='2pt'||type==='3pt') && a.shotResult==='Missed') descHtml = `<span class="miss">${desc}</span>`;
+  else if (type==='turnover') descHtml = `<span class="tov">${desc}</span>`;
+
+  // Team dot color
+  const tc = a.teamTricode || '';
+  let dotColor = 'var(--ink4)';
+  if (tc === awayAbbr) dotColor = 'var(--orange)';
+  else if (tc === homeAbbr) dotColor = 'var(--ink2)';
+
+  return `<div class="pbp-row">
+    <div class="pbp-clock">${clock}</div>
+    <div class="pbp-score-snap">${score}</div>
+    <div class="pbp-team-dot" style="background:${dotColor}"></div>
+    <div class="pbp-desc">${descHtml}</div>
+  </div>`;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────
+function fmtClock(s) {
+  if (!s) return '';
+  const m = s.match(/PT(\d+)M([\d.]+)S/);
+  if (m) return `${m[1]}:${String(Math.floor(parseFloat(m[2]))).padStart(2,'0')}`;
+  return s;
+}
+
+// Rough NBA team ID lookup for logo CDN
+const TEAM_IDS = {
+  ATL:1610612737,BOS:1610612738,BKN:1610612751,CHA:1610612766,CHI:1610612741,
+  CLE:1610612739,DAL:1610612742,DEN:1610612743,DET:1610612765,GSW:1610612744,
+  HOU:1610612745,IND:1610612754,LAC:1610612746,LAL:1610612747,MEM:1610612763,
+  MIA:1610612748,MIL:1610612749,MIN:1610612750,NOP:1610612740,NYK:1610612752,
+  OKC:1610612760,ORL:1610612753,PHI:1610612755,PHX:1610612756,POR:1610612757,
+  SAC:1610612758,SAS:1610612759,TOR:1610612761,UTA:1610612762,WAS:1610612764,
+};
+function nbaTeamId(abbr) { return TEAM_IDS[abbr] || 0; }
+</script>
+</body>
+</html>

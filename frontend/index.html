@@ -7,7 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-
 <style>
 /* ── Reset & tokens ─────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -25,19 +24,16 @@
   --orange-lt: #fff0ea;
   --green:     #1a7a4a;
   --red:       #c0392b;
-  --blue:      #1a4fa0;
 
   --ff-serif: 'DM Serif Display', Georgia, serif;
   --ff-sans:  'Instrument Sans', system-ui, sans-serif;
   --ff-mono:  'DM Mono', 'Courier New', monospace;
-
   --nav-h: 56px;
-  --sidebar-w: 240px;
-
   font-size: 15px;
 }
 
 html { scroll-behavior: smooth; }
+
 body {
   font-family: var(--ff-sans);
   background: var(--paper);
@@ -46,11 +42,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Grain overlay ──────────────────────────────────────────── */
+/* grain */
 body::before {
   content: '';
-  position: fixed;
-  inset: 0;
+  position: fixed; inset: 0;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
   opacity: 0.022;
   pointer-events: none;
@@ -67,7 +62,7 @@ nav {
   display: flex;
   align-items: center;
   padding: 0 24px;
-  gap: 32px;
+  gap: 24px;
   z-index: 100;
 }
 
@@ -78,2858 +73,843 @@ nav {
   letter-spacing: -0.01em;
   text-decoration: none;
   flex-shrink: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 1px;
 }
-.nav-wordmark em {
-  font-style: italic;
-  color: var(--orange);
-}
+.nav-wordmark em { font-style: italic; color: var(--orange); }
 
-.nav-tabs {
+.nav-links {
   display: flex;
   gap: 2px;
-  flex: 1;
 }
-.nav-tab {
+.nav-link {
   font-family: var(--ff-mono);
   font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--ink3);
-  background: none;
-  border: none;
+  text-decoration: none;
   padding: 6px 14px;
-  cursor: pointer;
   border-radius: 4px;
   transition: color 0.15s, background 0.15s;
 }
-.nav-tab:hover { color: var(--ink); background: var(--paper2); }
-.nav-tab.active {
-  color: var(--ink);
-  background: var(--paper3);
-}
+.nav-link:hover { color: var(--ink); background: var(--paper2); }
+.nav-link.active { color: var(--ink); background: var(--paper3); }
 
-.nav-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-left: auto;
-}
-.season-select {
-  font-family: var(--ff-mono);
-  font-size: 11px;
-  color: var(--ink2);
-  background: var(--paper2);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 5px 10px;
-  cursor: pointer;
-  outline: none;
-}
-.season-select:focus { border-color: var(--orange); }
+/* ── Page layout ────────────────────────────────────────────── */
+.page { padding-top: var(--nav-h); }
 
-/* ── Layout ─────────────────────────────────────────────────── */
-.app {
-  padding-top: var(--nav-h);
-  display: flex;
-  min-height: 100vh;
-}
-
-/* ── Page header ────────────────────────────────────────────── */
-.page-header {
+/* ── Scoreboard section ─────────────────────────────────────── */
+.scoreboard-section {
+  padding: 32px 32px 0;
   border-bottom: 1px solid var(--rule);
-  padding: 28px 32px 22px;
-  display: flex;
-  align-items: flex-end;
-  gap: 24px;
 }
-.page-title {
+
+.scoreboard-top {
+  margin-bottom: 16px;
+}
+
+.section-title {
   font-family: var(--ff-serif);
-  font-size: 28px;
+  font-size: 26px;
   letter-spacing: -0.02em;
-  line-height: 1;
   color: var(--ink);
 }
-.page-subtitle {
-  font-family: var(--ff-mono);
-  font-size: 11px;
-  color: var(--ink3);
-  letter-spacing: 0.04em;
-  padding-bottom: 2px;
-}
 
-/* ── View containers ────────────────────────────────────────── */
-.view { display: none; flex: 1; flex-direction: column; width: 100%; }
-.view.active { display: flex; }
-
-/* ════════════════════════════════════════════════════════════
-   STATS VIEW
-════════════════════════════════════════════════════════════ */
-
-.stats-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 32px;
-  border-bottom: 1px solid var(--rule);
-  flex-wrap: wrap;
-}
-
-.search-wrap {
-  position: relative;
-  flex: 1;
-  max-width: 280px;
-}
-.search-wrap svg {
-  position: absolute;
-  left: 10px; top: 50%;
-  transform: translateY(-50%);
-  color: var(--ink4);
-  width: 14px; height: 14px;
-}
-.search-input {
-  width: 100%;
-  font-family: var(--ff-sans);
-  font-size: 13px;
-  background: var(--paper2);
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  padding: 7px 12px 7px 32px;
-  color: var(--ink);
-  outline: none;
-  transition: border-color 0.15s;
-}
-.search-input::placeholder { color: var(--ink4); }
-.search-input:focus { border-color: var(--orange); background: #fff; }
-
-.pos-filters { display: flex; gap: 4px; }
-.pos-btn {
-  font-family: var(--ff-mono);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  padding: 5px 10px;
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--ink3);
-  cursor: pointer;
-  transition: all 0.12s;
-}
-.pos-btn:hover { color: var(--ink); border-color: var(--ink3); }
-.pos-btn.active {
-  background: var(--ink);
-  color: var(--paper);
-  border-color: var(--ink);
-}
-
-.filters-toggle {
-  font-family: var(--ff-mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 7px 14px;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  background: var(--paper2);
-  color: var(--ink2);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 0.15s, background 0.15s;
-}
-.filters-toggle:hover { border-color: var(--ink3); background: #fff; }
-.filters-toggle.active {
-  border-color: var(--orange);
-  color: var(--orange);
-  background: var(--orange-lt);
-}
-.stat-mode-toggle {
-  display: flex;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
+/* ── Calendar date strip ─────────────────────────────────────── */
+.cal-strip-wrap {
+  border-top: 1px solid var(--paper3);
+  border-bottom: 1px solid var(--paper3);
+  margin: 0 -32px 16px;
   overflow: hidden;
-  flex-shrink: 0;
 }
-.stat-mode-btn {
-  font-family: var(--ff-mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 7px 12px;
-  border: none;
-  background: var(--paper2);
-  color: var(--ink2);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
-}
-.stat-mode-btn + .stat-mode-btn {
-  border-left: 1px solid var(--rule);
-}
-.stat-mode-btn.active {
-  background: var(--ink);
-  color: #fff;
-}
-.stat-mode-btn:hover:not(.active) { background: #fff; color: var(--ink2); }
-
-.stat-filters-panel {
-  display: none;
-  padding: 12px 32px 14px;
-  border-bottom: 1px solid var(--rule);
-  background: var(--paper2);
-}
-.stat-filters-panel.open { display: block; }
-.stat-filters-grid {
+.cal-strip {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px 20px;
-  align-items: flex-end;
+  gap: 0;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  padding: 0 32px;
 }
-.stat-filter-field {
+.cal-strip::-webkit-scrollbar { display: none; }
+
+.cal-day {
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  min-width: 120px;
-}
-.stat-filter-field label {
-  font-family: var(--ff-mono);
-  font-size: 9px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--ink3);
-}
-.stat-filter-field input {
-  font-family: var(--ff-sans);
-  font-size: 13px;
-  width: 100%;
-  max-width: 110px;
-  padding: 6px 8px;
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  background: #fff;
-  color: var(--ink);
-}
-.stat-filter-field input:focus {
-  outline: none;
-  border-color: var(--orange);
-}
-.stat-filters-actions {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  margin-left: auto;
-}
-.stat-filters-clear {
-  font-family: var(--ff-mono);
-  font-size: 10px;
-  color: var(--ink3);
-  background: none;
-  border: none;
-  cursor: pointer;
-  text-decoration: underline;
-  padding: 6px 0;
-}
-.stat-filters-clear:hover { color: var(--ink); }
-
-.stat-cat-bar {
-  display: flex;
-  gap: 2px;
-  padding: 10px 32px 0;
-  border-bottom: 1px solid var(--rule);
-}
-.stat-cat-btn {
-  font-family: var(--ff-sans);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 8px 16px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: none;
-  color: var(--ink3);
-  cursor: pointer;
-  margin-bottom: -1px;
-  transition: color 0.15s;
-}
-.stat-cat-btn:hover { color: var(--ink2); }
-.stat-cat-btn.active { color: var(--ink); border-bottom-color: var(--ink); }
-.stat-cat-btn[data-cat="impact"].active { color: var(--orange); border-bottom-color: var(--orange); }
-.stat-cat-btn[data-cat="impact"] { color: var(--ink2); }
-
-.stat-group-tabs {
-  display: flex;
-  gap: 2px;
-  border-bottom: 1px solid var(--rule);
-  padding: 0 32px;
-  background: var(--paper2);
-  overflow-x: auto;
-}
-.stat-group-tab {
-  font-family: var(--ff-mono);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 10px 14px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: none;
-  color: var(--ink3);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color 0.15s;
-  margin-bottom: -1px;
-}
-.stat-group-tab:hover { color: var(--ink2); }
-.stat-group-tab.active {
-  color: var(--orange);
-  border-bottom-color: var(--orange);
-}
-
-.min-filter-wrap {
-  display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 32px;
-  border-bottom: 1px solid var(--rule);
-}
-.min-label {
-  font-family: var(--ff-mono);
-  font-size: 10px;
-  color: var(--ink3);
-  letter-spacing: 0.05em;
-}
-.min-slider {
-  accent-color: var(--orange);
-  width: 120px;
+  gap: 2px;
+  padding: 10px 14px 9px;
   cursor: pointer;
-}
-.min-value {
-  font-family: var(--ff-mono);
-  font-size: 11px;
-  color: var(--ink2);
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
   min-width: 52px;
 }
-.player-count {
+.cal-day:hover { background: var(--paper2); }
+.cal-day.active {
+  border-bottom-color: var(--orange);
+}
+.cal-day.active .cal-day-num { color: var(--ink); font-weight: 700; }
+.cal-day.active .cal-month { color: var(--orange); }
+
+.cal-month {
   font-family: var(--ff-mono);
-  font-size: 11px;
-  color: var(--ink4);
-  margin-left: auto;
-}
-
-/* ── Stats Table ────────────────────────────────────────────── */
-.table-wrap {
-  flex: 1;
-  overflow: auto;
-  position: relative;
-}
-
-table.stats-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-table.stats-table thead {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-table.stats-table th {
-  font-family: var(--ff-mono);
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: 0.06em;
+  font-size: 8px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--ink3);
-  text-align: right;
-  padding: 10px 14px;
-  background: var(--paper2);
-  border-bottom: 1px solid var(--rule);
-  white-space: nowrap;
-  cursor: pointer;
-  user-select: none;
-  transition: color 0.12s;
-}
-table.stats-table th:first-child,
-table.stats-table th:nth-child(2),
-table.stats-table th:nth-child(3) {
-  text-align: left;
-}
-table.stats-table th:hover { color: var(--ink); }
-table.stats-table th.sorted { color: var(--orange); }
-table.stats-table th.sorted::after {
-  content: attr(data-dir);
-  margin-left: 4px;
-  font-size: 9px;
-}
-
-table.stats-table td {
-  padding: 6px 14px;
-  border-bottom: 1px solid var(--paper3);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  text-align: right;
-  color: var(--ink2);
-}
-table.stats-table td:first-child { text-align: left; }
-table.stats-table td:nth-child(2),
-table.stats-table td:nth-child(3) { text-align: left; }
-
-table.stats-table tbody tr {
-  transition: background 0.08s;
-}
-table.stats-table tbody tr:hover {
-  background: var(--paper2);
-  cursor: pointer;
-}
-table.stats-table tbody tr:hover td:first-child {
-  color: var(--orange);
-}
-
-.rank-cell {
-  font-family: var(--ff-mono);
-  font-size: 11px;
   color: var(--ink4);
-  width: 36px;
-  text-align: right;
-}
-.player-name-cell {
-  font-weight: 500;
-  color: var(--ink);
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.player-headshot {
-  width: 36px;
-  height: 26px;
-  object-fit: cover;
-  object-position: top center;
-  border-radius: 4px;
-  background: var(--paper3);
-  flex-shrink: 0;
-  display: block;
-}
-.player-headshot-fallback {
-  width: 36px;
-  height: 26px;
-  border-radius: 4px;
-  background: var(--paper3);
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
   line-height: 1;
 }
-.player-name-text {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  flex-wrap: nowrap;
-}
-.pos-badge {
+.cal-day-num {
   font-family: var(--ff-mono);
-  font-size: 9px;
-  letter-spacing: 0.05em;
-  color: var(--ink4);
-  background: var(--paper3);
-  padding: 2px 5px;
-  border-radius: 3px;
-  margin-left: 6px;
-}
-.team-cell {
-  font-family: var(--ff-mono);
-  font-size: 11px;
-  color: var(--ink3);
-}
-
-/* Color coding for extreme values */
-td.top10  { color: var(--green)  !important; font-weight: 600; }
-td.bot10  { color: var(--red)    !important; }
-
-.table-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 80px 32px;
-  gap: 8px;
-  color: var(--ink4);
-}
-.table-empty-icon {
-  font-size: 32px;
-  margin-bottom: 4px;
-  opacity: 0.4;
-}
-
-/* ════════════════════════════════════════════════════════════
-   BUILDER VIEW
-════════════════════════════════════════════════════════════ */
-
-.builder-layout {
-  flex: 1;
-  display: grid;
-  grid-template-columns: var(--sidebar-w) 1fr;
-  overflow: hidden;
-}
-
-/* Left panel */
-.builder-panel {
-  border-right: 1px solid var(--rule);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.builder-panel-head {
-  padding: 16px 20px 12px;
-  border-bottom: 1px solid var(--rule);
-}
-.builder-panel-title {
-  font-family: var(--ff-serif);
   font-size: 16px;
-  color: var(--ink);
-}
-.builder-panel-sub {
-  font-family: var(--ff-mono);
-  font-size: 10px;
-  color: var(--ink3);
-  margin-top: 2px;
-  letter-spacing: 0.04em;
-}
-
-.builder-stat-search {
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--rule);
-}
-.builder-stat-search input {
-  width: 100%;
-  font-family: var(--ff-sans);
-  font-size: 12px;
-  background: var(--paper2);
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 6px 10px;
-  color: var(--ink);
-  outline: none;
-}
-.builder-stat-search input:focus { border-color: var(--orange); }
-
-.builder-stat-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 6px 0;
-}
-.builder-stat-group-wrap {
-  display: flex;
-  align-items: center;
-}
-.builder-stat-group-label {
-  font-family: var(--ff-mono);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink4);
-  padding: 10px 20px 4px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  flex: 1;
-  user-select: none;
-  transition: color 0.1s;
-}
-.builder-stat-group-label:hover { color: var(--ink2); }
-.builder-stat-group-label .group-chevron {
-  font-size: 8px;
-  transition: transform 0.18s;
-  opacity: 0.5;
-}
-.builder-stat-group-label.open .group-chevron { transform: rotate(90deg); }
-.builder-stat-group-label .group-sel-count {
-  font-size: 8px;
-  background: var(--orange);
-  color: #fff;
-  border-radius: 8px;
-  padding: 1px 5px;
-  margin-right: auto;
-  margin-left: 6px;
-  display: none;
-}
-.builder-stat-group-label .group-sel-count.visible { display: inline-block; }
-.builder-stat-group-items {
-  display: none;
-}
-.builder-stat-group-items.open { display: block; }
-.builder-stat-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 20px;
-  cursor: pointer;
-  transition: background 0.1s;
-  border: none;
-  background: none;
-  width: 100%;
-  text-align: left;
-}
-.builder-stat-item:hover { background: var(--paper2); }
-.builder-stat-item.selected { background: var(--orange-lt); }
-.builder-stat-item.selected .builder-stat-name { color: var(--orange); }
-
-.builder-check {
-  width: 14px; height: 14px;
-  border: 1.5px solid var(--rule);
-  border-radius: 3px;
-  flex-shrink: 0;
-  transition: all 0.12s;
-  display: flex; align-items: center; justify-content: center;
-}
-.builder-stat-item.selected .builder-check {
-  background: var(--orange);
-  border-color: var(--orange);
-}
-.builder-check-mark { color: white; font-size: 9px; display: none; }
-.builder-stat-item.selected .builder-check-mark { display: block; }
-
-.builder-stat-name {
-  font-family: var(--ff-sans);
-  font-size: 12px;
-  color: var(--ink2);
-  flex: 1;
-}
-.builder-stat-key {
-  font-family: var(--ff-mono);
-  font-size: 9px;
-  color: var(--ink4);
-}
-
-.builder-run-wrap {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--rule);
-}
-.builder-run-row {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-.btn-run {
-  flex: 1;
-  font-family: var(--ff-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  background: var(--ink);
-  color: var(--paper);
-  border: none;
-  border-radius: 6px;
-  padding: 10px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.btn-run:hover { background: var(--orange); }
-.btn-run:disabled { background: var(--rule); color: var(--ink4); cursor: not-allowed; }
-.btn-select-all {
-  font-family: var(--ff-mono);
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  background: none;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  padding: 10px 10px;
-  color: var(--ink3);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
-  flex-shrink: 0;
-}
-.btn-select-all:hover { border-color: var(--ink3); color: var(--ink); background: var(--paper2); }
-.btn-select-all.all-selected { border-color: var(--orange); color: var(--orange); background: var(--orange-lt); }
-/* Group-level "all" button inside header */
-.group-all-btn {
-  font-family: var(--ff-mono);
-  font-size: 8px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  background: none;
-  border: 1px solid var(--rule);
-  border-radius: 3px;
-  padding: 2px 7px;
-  color: var(--ink4);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s, background 0.15s, border-color 0.15s;
-  margin-right: 12px;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-.builder-stat-group-wrap:hover .group-all-btn { opacity: 1; }
-.group-all-btn:hover,
-.group-all-btn.group-all-selected { color: var(--orange); background: var(--orange-lt); border-color: var(--orange); opacity: 1; }
-.builder-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 8px;
-  min-height: 22px;
-  max-height: 80px;
-  overflow-y: auto;
-}
-.builder-chip {
-  font-family: var(--ff-mono);
-  font-size: 10px;
-  background: var(--ink);
-  color: var(--paper);
-  padding: 3px 8px 3px 10px;
-  border-radius: 12px;
-  display: flex; align-items: center; gap: 4px;
-  cursor: pointer;
-}
-.builder-chip:hover { background: var(--orange); }
-.builder-chip-x { opacity: 0.6; font-size: 11px; }
-
-/* Right panel */
-.builder-results {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.builder-results-head {
-  padding: 16px 32px;
-  border-bottom: 1px solid var(--rule);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.builder-results-head-top {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
-}
-.builder-results-title {
-  font-family: var(--ff-serif);
-  font-size: 22px;
-  color: var(--ink);
-}
-.builder-results-meta {
-  font-family: var(--ff-mono);
-  font-size: 10px;
-  color: var(--ink3);
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.builder-results-meta.expanded {
-  white-space: normal;
-  overflow: visible;
-}
-.builder-meta-toggle {
-  font-family: var(--ff-mono);
-  font-size: 9px;
-  color: var(--ink4);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  flex-shrink: 0;
-  text-decoration: underline;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-}
-.builder-meta-toggle:hover { color: var(--ink2); }
-.builder-min-wrap {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.builder-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--ink4);
-}
-.builder-empty-icon { font-size: 48px; opacity: 0.3; }
-.builder-empty-text { font-family: var(--ff-mono); font-size: 12px; }
-.builder-empty-sub  { font-family: var(--ff-sans); font-size: 13px; color: var(--ink3); }
-
-/* ── Player spotlight card ───────────────────────────────── */
-.builder-spotlight {
-  border-bottom: 1px solid var(--rule);
-  background: var(--paper);
-}
-.spotlight-inner {
-  padding: 20px 28px;
-  display: flex;
-  gap: 28px;
-  align-items: flex-start;
-  position: relative;
-  max-height: 320px;
-}
-.spotlight-close {
-  position: absolute;
-  top: 12px; right: 16px;
-  font-size: 18px;
-  color: var(--ink4);
-  background: none;
-  border: none;
-  cursor: pointer;
-  line-height: 1;
-  padding: 2px 6px;
-  border-radius: 4px;
-  transition: color 0.1s, background 0.1s;
-}
-.spotlight-close:hover { color: var(--ink); background: var(--paper2); }
-.spotlight-identity {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  flex-shrink: 0;
-  width: 220px;
-}
-.spotlight-headshot-wrap {
-  width: 72px; height: 72px;
-  border-radius: 50%;
-  overflow: hidden;
-  background: var(--paper2);
-  border: 2px solid var(--rule);
-  flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 28px;
-}
-.spotlight-headshot {
-  width: 100%; height: 100%;
-  object-fit: cover;
-  object-position: top center;
-}
-.spotlight-headshot.hidden { display: none; }
-.spotlight-headshot-fallback { display: none; }
-.spotlight-headshot-fallback.visible { display: block; }
-.spotlight-name {
-  font-family: var(--ff-serif);
-  font-size: 17px;
-  color: var(--ink);
-  line-height: 1.2;
-}
-.spotlight-sub {
-  font-family: var(--ff-mono);
-  font-size: 10px;
-  color: var(--ink3);
-  margin-top: 3px;
-  letter-spacing: 0.04em;
-}
-.spotlight-score-wrap {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin-top: 8px;
-}
-.spotlight-score-label {
-  font-family: var(--ff-mono);
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--ink4);
-}
-.spotlight-score {
-  font-family: var(--ff-mono);
-  font-size: 22px;
   font-weight: 500;
-  color: var(--orange);
-}
-.spotlight-chart {
-  flex: 1;
-  min-width: 0;
-  max-height: 260px;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-.sp-bar-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 7px;
-}
-.sp-bar-label {
-  font-family: var(--ff-mono);
-  font-size: 10px;
   color: var(--ink3);
-  width: 140px;
-  flex-shrink: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: right;
+  line-height: 1;
 }
-.sp-bar-track {
-  flex: 1;
-  height: 8px;
-  background: var(--paper3);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.sp-bar-fill {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.45s cubic-bezier(.4,0,.2,1);
-}
-.sp-bar-fill.hi  { background: var(--green); }
-.sp-bar-fill.mid { background: var(--orange); }
-.sp-bar-fill.lo  { background: var(--red); }
-.sp-bar-pct {
+.cal-dow {
   font-family: var(--ff-mono);
-  font-size: 10px;
-  color: var(--ink3);
-  width: 32px;
-  text-align: right;
-  flex-shrink: 0;
-}
-
-.builder-table-wrap { flex: 1; overflow: auto; }
-
-table.builder-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-table.builder-table thead {
-  position: sticky;
-  top: 0; z-index: 5;
-}
-table.builder-table th {
-  font-family: var(--ff-mono);
-  font-size: 10px;
-  font-weight: 400;
+  font-size: 8px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--ink3);
-  background: var(--paper2);
-  border-bottom: 1px solid var(--rule);
-  padding: 10px 16px;
-  text-align: left;
-}
-table.builder-table th:last-child { text-align: right; }
-table.builder-table td {
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--paper3);
-  color: var(--ink2);
-}
-
-.b-rank-num {
-  font-family: var(--ff-mono);
-  font-size: 13px;
   color: var(--ink4);
-  width: 36px;
+  line-height: 1;
 }
-.b-rank-num.gold   { color: #c4922a; font-weight: 600; }
-.b-rank-num.silver { color: #888; font-weight: 600; }
-.b-rank-num.bronze { color: #a0684a; font-weight: 600; }
+/* dot under days that have games */
+.cal-day-dot {
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--rule);
+  margin-top: 2px;
+}
+.cal-day.active .cal-day-dot { background: var(--orange); opacity: 0.5; }
 
-.b-score {
+/* Scroll strip */
+.scoreboard-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 20px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) transparent;
+}
+.scoreboard-strip::-webkit-scrollbar { height: 4px; }
+.scoreboard-strip::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 2px; }
+.scoreboard-strip::-webkit-scrollbar-thumb:hover { background: var(--ink4); }
+
+/* ── Game card ───────────────────────────────────────────────── */
+.game-card {
+  flex-shrink: 0;
+  width: 152px;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 13px 12px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.12s, box-shadow 0.15s;
+  user-select: none;
+}
+.game-card:hover {
+  border-color: var(--orange);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.07);
+}
+.game-card.is-live { border-color: rgba(231,76,60,0.4); }
+.game-card.is-live:hover { border-color: #e74c3c; }
+
+.card-status {
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-align: center;
+  margin-bottom: 11px;
+  color: var(--ink4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 13px;
+}
+.card-status.live { color: #e74c3c; }
+.card-status.upcoming { color: var(--orange); }
+
+.live-pip {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #e74c3c;
+  flex-shrink: 0;
+  animation: pip 1.4s ease-in-out infinite;
+}
+@keyframes pip {
+  0%,100% { opacity:1; transform:scale(1); }
+  50%      { opacity:0.4; transform:scale(0.75); }
+}
+
+.card-team {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.card-logo {
+  width: 26px; height: 26px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.card-logo-fallback {
+  width: 26px; height: 26px;
+  font-size: 16px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.card-abbr {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  flex: 1;
+  color: var(--ink3);
+}
+.card-abbr.winner { color: var(--ink); }
+.card-abbr.loser  { color: var(--ink4); }
+.card-score {
   font-family: var(--ff-mono);
   font-size: 15px;
-  font-weight: 500;
-  color: var(--ink);
+  font-weight: 600;
+  min-width: 24px;
   text-align: right;
+  color: var(--ink3);
+  letter-spacing: -0.5px;
+}
+.card-score.winner { color: var(--ink); }
+.card-score.loser  { color: var(--ink4); }
+
+.card-divider {
+  height: 1px;
+  background: var(--paper3);
+  margin: 4px 0;
 }
 
-.b-bar-wrap {
+/* loading / empty state inside strip */
+.strip-state {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 180px;
-}
-.b-bar-bg {
-  flex: 1;
-  height: 4px;
-  background: var(--paper3);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.b-bar-fill {
-  height: 100%;
-  background: var(--orange);
-  border-radius: 2px;
-  transition: width 0.4s ease;
+  gap: 8px;
+  padding: 20px 0 24px;
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  color: var(--ink4);
 }
 
-.b-breakdown {
+/* ── Body grid (performers + news) ──────────────────────────── */
+.body-grid {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  min-height: 0;
+}
+@media (max-width: 860px) {
+  .body-grid { grid-template-columns: 1fr; }
+  .news-aside { border-left: none; border-top: 1px solid var(--rule); }
+}
+
+/* ── Top Performers (main column) ───────────────────────────── */
+.performers-col {
+  padding: 28px 32px 48px;
+  border-right: 1px solid var(--rule);
+}
+
+.col-title {
+  font-family: var(--ff-serif);
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+  color: var(--ink);
+}
+.col-subtitle {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  color: var(--ink4);
+  letter-spacing: 0.05em;
+  margin-bottom: 20px;
+}
+
+/* Performer rows */
+.performer-list { display: flex; flex-direction: column; gap: 0; }
+
+.performer-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  max-height: 52px;
-  overflow: hidden;
-  position: relative;
-}
-.b-breakdown.expanded {
-  max-height: none;
-}
-.b-breakdown-pill {
-  font-family: var(--ff-mono);
-  font-size: 9px;
-  padding: 2px 6px;
-  border-radius: 10px;
-  background: var(--paper2);
-  color: var(--ink3);
-}
-.b-breakdown-pill.hi { background: #e8f5ee; color: var(--green); }
-.b-breakdown-pill.lo { background: #fdf0ef; color: var(--red); }
-.b-breakdown-more {
-  font-family: var(--ff-mono);
-  font-size: 9px;
-  padding: 2px 7px;
-  border-radius: 10px;
-  background: var(--paper3);
-  color: var(--ink3);
-  border: none;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--paper3);
   cursor: pointer;
-  white-space: nowrap;
+  transition: background 0.1s;
+  text-decoration: none;
+  color: inherit;
+}
+.performer-row:last-child { border-bottom: none; }
+.performer-row:hover .performer-name { color: var(--orange); }
+
+.performer-rank {
+  font-family: var(--ff-mono);
+  font-size: 13px;
+  color: var(--ink4);
+  width: 18px;
+  flex-shrink: 0;
+  text-align: right;
+}
+.performer-rank.r1 { color: #c4922a; font-weight: 700; }
+.performer-rank.r2 { color: #888;    font-weight: 700; }
+.performer-rank.r3 { color: #a0684a; font-weight: 700; }
+
+.performer-headshot {
+  width: 48px; height: 36px;
+  border-radius: 6px;
+  object-fit: cover;
+  object-position: top center;
+  background: var(--paper3);
   flex-shrink: 0;
 }
-.b-breakdown-more:hover { background: var(--rule); color: var(--ink); }
 
-table.builder-table tbody tr:hover { background: var(--paper2); }
-table.builder-table tbody tr.spotlight-active { background: var(--orange-lt); }
+.performer-info { flex: 1; min-width: 0; }
+.performer-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  transition: color 0.12s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.performer-meta {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  color: var(--ink4);
+  margin-top: 2px;
+  letter-spacing: 0.03em;
+}
 
-/* ════════════════════════════════════════════════════════════
-   Loading / Error states
-════════════════════════════════════════════════════════════ */
-.loading-spinner {
+.performer-stats {
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.performer-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 32px;
+}
+.performer-stat-val {
+  font-family: var(--ff-mono);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1;
+}
+.performer-stat-lbl {
+  font-family: var(--ff-mono);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink4);
+}
+
+.performer-total {
+  font-family: var(--ff-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink3);
+  min-width: 36px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.performers-loading, .performers-empty {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  color: var(--ink4);
+  padding: 20px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── News aside (right column) ───────────────────────────────── */
+.news-aside {
+  padding: 28px 20px 48px;
+  border-left: 1px solid var(--rule);
+}
+
+.aside-title {
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink4);
+  margin-bottom: 16px;
+}
+
+.news-list { display: flex; flex-direction: column; gap: 0; }
+
+.news-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--paper3);
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+.news-item:last-child { border-bottom: none; }
+.news-item:hover .news-title { color: var(--orange); }
+
+.news-source {
+  font-family: var(--ff-mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--orange);
+}
+.news-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.4;
+  transition: color 0.12s;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.news-meta {
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  color: var(--ink4);
+}
+.news-loading-msg, .news-error-msg {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  color: var(--ink4);
+  padding: 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Loading spinner ─────────────────────────────────────────── */
+.spin {
   display: inline-block;
-  width: 16px; height: 16px;
+  width: 13px; height: 13px;
   border: 2px solid var(--rule);
   border-top-color: var(--orange);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
-  vertical-align: middle;
-  margin-right: 8px;
+  flex-shrink: 0;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.status-bar {
-  font-family: var(--ff-mono);
-  font-size: 11px;
-  color: var(--ink3);
-  padding: 8px 32px;
-  border-top: 1px solid var(--rule);
-  background: var(--paper2);
-  display: flex; align-items: center; gap: 6px;
-  min-height: 34px;
-}
-
-/* ── Scrollbar ───────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+/* ── Scrollbar ───────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--ink4); }
-
-/* ── Animations ─────────────────────────────────────────── */
-.fade-in {
-  opacity: 0;
-  animation: fadeIn 0.3s ease forwards;
-}
-@keyframes fadeIn { to { opacity: 1; } }
-
-tbody tr {
-  animation: rowIn 0.2s ease both;
-}
-@keyframes rowIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
 </style>
 </head>
 <body>
 
-<!-- ── Navigation ───────────────────────────────────────────── -->
+<!-- ── Nav ─────────────────────────────────────────────────── -->
 <nav>
-  <a class="nav-wordmark" href="#">nothingbutnet</a>
-
-  <div class="nav-tabs">
-    <button class="nav-tab active" data-view="stats">Stats</button>
-    <button class="nav-tab" data-view="builder">Builder</button>
-  </div>
-
-  <div class="nav-right">
-    <select class="season-select" id="season-select">
-      <option value="2025-26" selected>2025–26</option>
-      <option value="2024-25">2024–25</option>
-      <option value="2023-24">2023–24</option>
-    </select>
+  <a class="nav-wordmark" href="/">nothingbutnet</a>
+  <div class="nav-links">
+    <a class="nav-link" href="/stats.html">Stats</a>
+    <a class="nav-link" href="/builder.html">Builder</a>
+    <a class="nav-link" href="/onoff">On/Off</a>
   </div>
 </nav>
 
-<!-- ── App ─────────────────────────────────────────────────── -->
-<div class="app">
+<!-- ── Page ────────────────────────────────────────────────── -->
+<div class="page">
 
-  <!-- ══ STATS VIEW ═══════════════════════════════════════════ -->
-  <div class="view active" id="view-stats">
-
-    <div class="page-header">
-      <div class="page-title">Player Stats</div>
-      <div class="page-subtitle" id="page-subtitle">2025–26 · Regular Season</div>
+  <!-- Scoreboard -->
+  <div class="scoreboard-section">
+    <div class="scoreboard-top">
+      <h2 class="section-title">Scoreboard</h2>
     </div>
-
-    <!-- Toolbar -->
-    <div class="stats-toolbar">
-      <div class="search-wrap">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-          <circle cx="6.5" cy="6.5" r="4.5"/>
-          <line x1="10" y1="10" x2="14" y2="14"/>
-        </svg>
-        <input class="search-input" id="search-input" type="text" placeholder="Search player…">
-      </div>
-
-      <button type="button" class="filters-toggle" id="filters-toggle" aria-expanded="false">Stat filters</button>
-
-      <div class="stat-mode-toggle" id="stat-mode-toggle">
-        <button class="stat-mode-btn active" data-mode="per_game">Per Game</button>
-        <button class="stat-mode-btn" data-mode="totals">Totals</button>
-      </div>
-
-      <div class="pos-filters" id="pos-filters">
-        <button class="pos-btn active" data-pos="ALL">All</button>
-        <button class="pos-btn" data-pos="G">G</button>
-        <button class="pos-btn" data-pos="GF">GF</button>
-        <button class="pos-btn" data-pos="F">F</button>
-        <button class="pos-btn" data-pos="FC">FC</button>
-        <button class="pos-btn" data-pos="C">C</button>
-      </div>
+    <!-- Calendar date strip -->
+    <div class="cal-strip-wrap">
+      <div class="cal-strip" id="cal-strip"></div>
     </div>
-
-    <div class="stat-filters-panel" id="stat-filters-panel">
-      <div class="stat-filters-grid" id="stat-filters-grid"></div>
-    </div>
-
-    <!-- NBA-style two-level nav: Category → Sub-category -->
-    <div class="stat-cat-bar" id="stat-cat-bar">
-      <button class="stat-cat-btn active" data-cat="impact">Impact</button>
-      <button class="stat-cat-btn" data-cat="general">General</button>
-      <button class="stat-cat-btn" data-cat="tracking">Tracking</button>
-      <button class="stat-cat-btn" data-cat="playtypes">Playtypes</button>
-      <button class="stat-cat-btn" data-cat="defense">Defense</button>
-      <button class="stat-cat-btn" data-cat="hustle">Hustle</button>
-    </div>
-    <div class="stat-group-tabs" id="stat-group-tabs">
-      <!-- populated by JS based on selected category -->
-    </div>
-
-    <!-- Min minutes -->
-    <div class="min-filter-wrap">
-      <span class="min-label">Min. Minutes</span>
-      <input class="min-slider" id="min-slider" type="range" min="0" max="2000" step="100" value="500">
-      <span class="min-value" id="min-value">500 min</span>
-      <span class="player-count" id="player-count"></span>
-    </div>
-
-    <!-- Table -->
-    <div class="table-wrap">
-      <table class="stats-table" id="stats-table">
-        <thead id="stats-thead">
-          <tr id="stats-header-row"></tr>
-        </thead>
-        <tbody id="stats-tbody">
-          <tr>
-            <td colspan="20">
-              <div class="table-empty">
-                <div class="table-empty-icon">🏀</div>
-                <span style="font-family:var(--ff-mono);font-size:12px;color:var(--ink3)">Connecting to database…</span>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="status-bar" id="stats-status">
-      <span class="loading-spinner"></span> Loading stats…
-    </div>
-
-  </div>
-
-  <!-- ══ BUILDER VIEW ═════════════════════════════════════════ -->
-  <div class="view" id="view-builder">
-
-    <div class="page-header">
-      <div class="page-title">Builder</div>
-      <div class="page-subtitle">Select stats · Find who excels across all of them</div>
-    </div>
-
-    <div class="builder-layout">
-
-      <!-- Left: stat selector -->
-      <div class="builder-panel">
-        <div class="builder-panel-head">
-          <div class="builder-panel-title">Pick Stats</div>
-          <div class="builder-panel-sub">Each contributes its league percentile</div>
-        </div>
-
-        <div class="builder-run-wrap">
-          <div class="builder-chips" id="builder-chips"></div>
-          <div class="builder-run-row">
-            <button class="btn-run" id="builder-run" disabled>Run Composite →</button>
-            <button class="btn-select-all" id="builder-select-all" title="Select / deselect all stats">All</button>
-          </div>
-        </div>
-
-        <div class="builder-stat-search">
-          <input type="text" id="builder-search" placeholder="Filter stats…">
-        </div>
-
-        <div class="builder-stat-list" id="builder-stat-list">
-          <div style="padding:20px;font-family:var(--ff-mono);font-size:11px;color:var(--ink4)">
-            Loading available stats…
-          </div>
-        </div>
-      </div>
-
-      <!-- Right: results -->
-      <div class="builder-results" id="builder-results-panel">
-        <div class="builder-results-head">
-          <div class="builder-results-head-top">
-            <div class="builder-results-title">Rankings</div>
-            <div class="builder-min-wrap">
-              <span class="min-label">Min. Min</span>
-              <input class="min-slider" id="builder-min-slider" type="range" min="0" max="2000" step="100" value="500">
-              <span class="min-value" id="builder-min-value">500</span>
-            </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-            <div class="builder-results-meta" id="builder-meta">Select stats and run</div>
-            <button class="builder-meta-toggle" id="builder-meta-toggle" style="display:none">show</button>
-          </div>
-        </div>
-
-        <div class="builder-empty" id="builder-empty">
-          <div class="builder-empty-icon">⚗️</div>
-          <div class="builder-empty-text">No results yet</div>
-          <div class="builder-empty-sub">Pick stats on the left, then run</div>
-        </div>
-
-        <!-- Selected player spotlight -->
-        <div class="builder-spotlight" id="builder-spotlight" style="display:none">
-          <div class="spotlight-inner">
-            <button class="spotlight-close" id="spotlight-close" title="Dismiss">×</button>
-            <div class="spotlight-identity">
-              <div class="spotlight-headshot-wrap">
-                <img class="spotlight-headshot" id="spotlight-img" src="" alt="">
-                <span class="spotlight-headshot-fallback" id="spotlight-fallback">🏀</span>
-              </div>
-              <div class="spotlight-info">
-                <div class="spotlight-name" id="spotlight-name"></div>
-                <div class="spotlight-sub" id="spotlight-sub"></div>
-                <div class="spotlight-score-wrap">
-                  <span class="spotlight-score-label">Composite</span>
-                  <span class="spotlight-score" id="spotlight-score"></span>
-                </div>
-              </div>
-            </div>
-            <div class="spotlight-chart" id="spotlight-chart"></div>
-          </div>
-        </div>
-
-        <div class="builder-table-wrap" id="builder-table-wrap" style="display:none">
-          <table class="builder-table">
-            <thead>
-              <tr>
-                <th style="width:48px">#</th>
-                <th>Player</th>
-                <th>Team</th>
-                <th style="width:200px">Score</th>
-                <th>Breakdown</th>
-                <th style="text-align:right">Avg Pctile</th>
-              </tr>
-            </thead>
-            <tbody id="builder-tbody"></tbody>
-          </table>
-        </div>
-      </div>
-
+    <div class="scoreboard-strip" id="scoreboard-strip">
+      <div class="strip-state"><span class="spin"></span> Loading games…</div>
     </div>
   </div>
 
+  <!-- Body: Performers + News -->
+  <div class="body-grid">
+
+    <!-- Top Performers -->
+    <div class="performers-col">
+      <h2 class="col-title">Top Performers</h2>
+      <div class="col-subtitle" id="performers-subtitle">PTS + REB + AST</div>
+      <div id="performers-container">
+        <div class="performers-loading"><span class="spin"></span> Loading…</div>
+      </div>
+    </div>
+
+    <!-- News aside -->
+    <div class="news-aside">
+      <div class="aside-title">Around the League</div>
+      <div id="news-container">
+        <div class="news-loading-msg"><span class="spin"></span> Loading…</div>
+      </div>
+    </div>
+
+  </div>
 </div>
 
-<!-- ════════════════════════════════════════════════════════════
-  JavaScript
-════════════════════════════════════════════════════════════ -->
 <script>
-// ── Config ───────────────────────────────────────────────────
-// When served via Flask (python backend/server.py → localhost:5000),
-// use relative URLs. When opening index.html directly as a file://,
-// point to the local server explicitly.
-const API = window.location.protocol === 'file:'
-  ? 'http://localhost:5000'
-  : '';
+const API = window.location.protocol === 'file:' ? 'http://localhost:5000' : '';
 
-// ── State ────────────────────────────────────────────────────
-const ST = {
-  season:      '2025-26',
-  seasonType:  'Regular Season',
-  view:        'stats',
-
-  // Stats table
-  statCat:     'impact',
-  statGroup:   'darko',
-  pos:         'ALL',
-  search:      '',
-  sortCol:     'darko_dpm',
-  sortDir:     'desc',
-  minMin:      500,
-  statFilterVals: {},
-  filtersOpen: false,
-  statMode:    'per_game',   // 'per_game' | 'totals'
-  players:     [],
-
-  // Builder
-  builderSelected: [],   // array of stat keys
-  builderResults:  [],
-  statKeys:        [],
+// ── NBA team ID map ───────────────────────────────────────────
+const TEAM_IDS = {
+  ATL:1610612737, BOS:1610612738, BKN:1610612751, CHA:1610612766,
+  CHI:1610612741, CLE:1610612739, DAL:1610612742, DEN:1610612743,
+  DET:1610612765, GSW:1610612744, HOU:1610612745, IND:1610612754,
+  LAC:1610612746, LAL:1610612747, MEM:1610612763, MIA:1610612748,
+  MIL:1610612749, MIN:1610612750, NOP:1610612740, NYK:1610612752,
+  OKC:1610612760, ORL:1610612753, PHI:1610612755, PHX:1610612756,
+  POR:1610612757, SAC:1610612758, SAS:1610612759, TOR:1610612761,
+  UTA:1610612762, WAS:1610612764,
 };
-
-// ── NBA-style two-level stat nav ─────────────────────────────
-// Structure mirrors stats.nba.com: Category → Sub-category
-// 'computed' columns are derived client-side from raw API values
-
-const BASE_COLS = [
-  { key: 'rank',        label: '#',    fmt: 'rank', nosort: true },
-  { key: 'player_name', label: 'Player', fmt: 'name' },
-  { key: 'team_abbr',   label: 'Team', fmt: 'team' },
-  { key: 'gp',          label: 'GP',   fmt: 'int'  },
-  { key: 'min_per_game',label: 'MPG',  fmt: '1f'   },
-];
-
-const STAT_CATS = {
-  impact: {
-    label: 'Impact',
-    subs: {
-      darko: {
-        label: 'DARKO',
-        defaultSort: 'darko_dpm',
-        cols: [
-          ...BASE_COLS,
-          { key: 'darko_dpm',  label: 'DPM',        fmt: '2f' },
-          { key: 'darko_odpm', label: 'O-DPM',       fmt: '2f' },
-          { key: 'darko_ddpm', label: 'D-DPM',       fmt: '2f' },
-          { key: 'darko_box',  label: 'Box DPM',     fmt: '2f' },
-          { key: 'min',        label: 'MIN',        fmt: 'int' },
-          { key: 'off_rating', label: 'ORtg',        fmt: '1f' },
-          { key: 'def_rating', label: 'DRtg',        fmt: '1f' },
-          { key: 'net_rating', label: 'NRtg',        fmt: '1f' },
-          { key: 'pie',        label: 'PIE',         fmt: 'pct' },
-        ]
-      },
-      lebron: {
-        label: 'LEBRON',
-        defaultSort: 'lebron',
-        cols: [
-          ...BASE_COLS,
-          { key: 'lebron',     label: 'LEBRON',       fmt: '2f' },
-          { key: 'o_lebron',   label: 'O-LEBRON',     fmt: '2f' },
-          { key: 'd_lebron',   label: 'D-LEBRON',     fmt: '2f' },
-          { key: 'war',        label: 'WAR',          fmt: '2f' },
-          { key: 'min',        label: 'MIN',          fmt: 'int' },
-          { key: 'off_rating', label: 'ORtg',         fmt: '1f' },
-          { key: 'def_rating', label: 'DRtg',         fmt: '1f' },
-          { key: 'net_rating', label: 'NRtg',         fmt: '1f' },
-          { key: 'pie',        label: 'PIE',          fmt: 'pct' },
-        ]
-      },
-      net_pts: {
-        label: 'Net Pts/100',
-        defaultSort: 'net_pts100',
-        cols: [
-          ...BASE_COLS,
-          { key: 'net_pts100',   label: 'Net Pts/100',  fmt: '2f' },
-          { key: 'o_net_pts100', label: 'Off Net/100',  fmt: '2f' },
-          { key: 'd_net_pts100', label: 'Def Net/100',  fmt: '2f' },
-          { key: 'net_rating',   label: 'NRtg',         fmt: '1f' },
-          { key: 'off_rating',   label: 'ORtg',         fmt: '1f' },
-          { key: 'def_rating',   label: 'DRtg',         fmt: '1f' },
-          { key: 'min',          label: 'MIN',          fmt: 'int' },
-        ]
-      },
-      clutch: {
-        label: 'Clutch',
-        defaultSort: 'clutch_net_rating',
-        cols: [
-          ...BASE_COLS,
-          { key: 'clutch_net_rating', label: 'Clutch NRtg', fmt: '1f' },
-          { key: 'clutch_ts_pct',     label: 'Clutch TS%',  fmt: 'pct' },
-          { key: 'clutch_usg_pct',    label: 'Clutch USG%', fmt: 'pct' },
-          { key: 'clutch_min',        label: 'Clutch MIN',  fmt: '1f' },
-          { key: 'off_rating',        label: 'ORtg',        fmt: '1f' },
-          { key: 'def_rating',        label: 'DRtg',        fmt: '1f' },
-          { key: 'net_rating',        label: 'NRtg',        fmt: '1f' },
-          { key: 'ts_pct',            label: 'TS%',         fmt: 'pct' },
-          { key: 'usg_pct',           label: 'USG%',        fmt: 'pct' },
-        ]
-      },
-    }
-  },
-  general: {
-    label: 'General',
-    subs: {
-      traditional: {
-        label: 'Traditional',
-        defaultSort: 'pts',
-        cols: [
-          ...BASE_COLS,
-          { key: 'pts',       label: 'PTS',  fmt: '1f' },
-          { key: 'fgm',       label: 'FGM',  fmt: '1f' },
-          { key: 'fga',       label: 'FGA',  fmt: '1f' },
-          { key: 'fg_pct',    label: 'FG%',  fmt: 'pct' },
-          { key: '_fg2m',     label: '2PM',  fmt: '1f', computed: true },
-          { key: '_fg2a',     label: '2PA',  fmt: '1f', computed: true },
-          { key: '_fg2_pct',  label: '2P%',  fmt: 'pct', computed: true },
-          { key: 'fg3m',      label: '3PM',  fmt: '1f' },
-          { key: 'fg3a',      label: '3PA',  fmt: '1f' },
-          { key: 'fg3_pct',   label: '3P%',  fmt: 'pct' },
-          { key: 'ftm',       label: 'FTM',  fmt: '1f' },
-          { key: 'fta',       label: 'FTA',  fmt: '1f' },
-          { key: 'ft_pct',    label: 'FT%',  fmt: 'pct' },
-          { key: 'oreb',      label: 'OREB', fmt: '1f' },
-          { key: 'dreb',      label: 'DREB', fmt: '1f' },
-          { key: 'reb',       label: 'REB',  fmt: '1f' },
-          { key: 'ast',       label: 'AST',  fmt: '1f' },
-          { key: 'stl',       label: 'STL',  fmt: '1f' },
-          { key: 'blk',       label: 'BLK',  fmt: '1f' },
-          { key: 'tov',       label: 'TOV',  fmt: '1f' },
-          { key: 'pf',        label: 'PF',   fmt: '1f' },
-          { key: 'pfd',       label: 'PFD',  fmt: '1f' },
-          { key: 'plus_minus',label: '+/-',  fmt: 'pm'  },
-        ]
-      },
-      advanced: {
-        label: 'Advanced',
-        defaultSort: 'net_rating',
-        cols: [
-          ...BASE_COLS,
-          { key: 'off_rating', label: 'ORtg',    fmt: '1f' },
-          { key: 'def_rating', label: 'DRtg',    fmt: '1f' },
-          { key: 'net_rating', label: 'NRtg',    fmt: '1f' },
-          { key: 'ts_pct',     label: 'TS%',     fmt: 'pct' },
-          { key: 'efg_pct',    label: 'eFG%',    fmt: 'pct' },
-          { key: 'usg_pct',    label: 'USG%',    fmt: 'pct' },
-          { key: 'ast_pct',    label: 'AST%',    fmt: 'pct' },
-          { key: 'oreb_pct',   label: 'OREB%',   fmt: 'pct' },
-          { key: 'dreb_pct',   label: 'DREB%',   fmt: 'pct' },
-          { key: 'reb_pct',    label: 'REB%',    fmt: 'pct' },
-          { key: 'ast_to',     label: 'AST/TOV', fmt: '2f'  },
-          { key: 'pie',        label: 'PIE',     fmt: 'pct' },
-          { key: 'plus_minus', label: '+/-',     fmt: 'pm'  },
-          { key: 'min_per_game', label: 'MPG',   fmt: '1f' },
-          { key: 'gp',         label: 'GP',      fmt: 'int' },
-        ]
-      },
-      misc: {
-        label: 'Misc',
-        defaultSort: 'pts',
-        cols: [
-          ...BASE_COLS,
-          { key: 'pts',             label: 'PTS',               fmt: '1f' },
-          { key: 'oreb',            label: 'OREB',              fmt: '1f' },
-          { key: 'dreb',            label: 'DREB',              fmt: '1f' },
-          { key: 'reb',             label: 'REB',               fmt: '1f' },
-          { key: 'ast',             label: 'AST',               fmt: '1f' },
-          { key: 'stl',             label: 'STL',               fmt: '1f' },
-          { key: 'blk',             label: 'BLK',               fmt: '1f' },
-          { key: 'tov',             label: 'TOV',               fmt: '1f' },
-          { key: 'pf',              label: 'PF',                fmt: '1f' },
-          { key: 'pfd',             label: 'PFD',               fmt: '1f' },
-          { key: 'bad_pass_tov',    label: 'Bad Pass TOV',      fmt: '1f' },
-          { key: 'lost_ball_tov',   label: 'Lost Ball TOV',     fmt: '1f' },
-          { key: '_pot_ast_per_bp', label: 'Pot AST / Bad Pass',fmt: '2f', computed: true },
-          { key: 'pts_paint',       label: 'Paint PTS',         fmt: '1f' },
-          { key: 'pct_uast_fgm',    label: 'Unasstd FG%',      fmt: 'pct' },
-          { key: 'pct_pts_paint',   label: '% Pts Paint',      fmt: 'pct' },
-          { key: 'pct_pts_3pt',     label: '% Pts 3PT',        fmt: 'pct' },
-          { key: 'pct_pts_ft',      label: '% Pts FT',         fmt: 'pct' },
-        ]
-      },
-      scoring: {
-        label: 'Scoring',
-        defaultSort: 'pts',
-        cols: [
-          ...BASE_COLS,
-          { key: 'pts',            label: 'PTS',       fmt: '1f' },
-          { key: 'fgm',            label: 'FGM',       fmt: '1f' },
-          { key: 'fga',            label: 'FGA',       fmt: '1f' },
-          { key: 'fg_pct',         label: 'FG%',       fmt: 'pct' },
-          { key: '_fg2m',          label: '2PM',       fmt: '1f', computed: true },
-          { key: '_fg2a',          label: '2PA',       fmt: '1f', computed: true },
-          { key: '_fg2_pct',       label: '2P%',       fmt: 'pct', computed: true },
-          { key: 'fg3m',           label: '3PM',       fmt: '1f' },
-          { key: 'fg3a',           label: '3PA',       fmt: '1f' },
-          { key: 'fg3_pct',        label: '3P%',       fmt: 'pct' },
-          { key: 'ftm',            label: 'FTM',       fmt: '1f' },
-          { key: 'fta',            label: 'FTA',       fmt: '1f' },
-          { key: 'ft_pct',         label: 'FT%',       fmt: 'pct' },
-          { key: 'efg_pct',        label: 'eFG%',      fmt: 'pct' },
-          { key: 'ts_pct',         label: 'TS%',       fmt: 'pct' },
-          { key: 'pull_up_efg_pct',label: 'Pull-Up eFG%', fmt: 'pct' },
-          { key: 'cs_efg_pct',     label: 'C&S eFG%',  fmt: 'pct' },
-          { key: 'pct_uast_fgm',   label: 'Unasstd%',  fmt: 'pct' },
-          { key: 'pct_pts_paint',  label: 'Paint Pts%',fmt: 'pct' },
-          { key: 'pct_pts_3pt',    label: '3PT Pts%',  fmt: 'pct' },
-          { key: 'pct_pts_ft',     label: 'FT Pts%',   fmt: 'pct' },
-        ]
-      },
-      usage: {
-        label: 'Usage',
-        defaultSort: 'usg_pct',
-        cols: [
-          ...BASE_COLS,
-          { key: 'usg_pct',     label: 'USG%',    fmt: 'pct' },
-          { key: 'pts',         label: 'PTS',     fmt: '1f'  },
-          { key: 'fgm',         label: 'FGM',     fmt: '1f'  },
-          { key: 'fga',         label: 'FGA',     fmt: '1f'  },
-          { key: 'fg3m',        label: '3PM',     fmt: '1f'  },
-          { key: 'fg3a',        label: '3PA',     fmt: '1f'  },
-          { key: 'fta',         label: 'FTA',     fmt: '1f'  },
-          { key: 'tov',         label: 'TOV',     fmt: '1f'  },
-          { key: 'touches',     label: 'Touches', fmt: '1f'  },
-          { key: 'time_of_poss',label: 'ToP (min)',fmt: '1f' },
-          { key: 'drives',      label: 'Drives',  fmt: '1f'  },
-          { key: 'post_touches',label: 'Post Tch',fmt: '1f'  },
-          { key: 'paint_touches',label:'Paint Tch',fmt: '1f' },
-          { key: 'elbow_touches',label:'Elbow Tch',fmt: '1f' },
-        ]
-      },
-    }
-  },
-  tracking: {
-    label: 'Tracking',
-    subs: {
-      drives: {
-        label: 'Drives',
-        defaultSort: 'drives',
-        cols: [
-          ...BASE_COLS,
-          { key: 'drives',      label: 'Drives',     fmt: '1f' },
-          { key: 'drive_fga',   label: 'Drive FGA',  fmt: '1f' },
-          { key: 'drive_fgm',   label: 'Drive FGM',  fmt: '1f' },
-          { key: 'drive_fg_pct',label: 'Drive FG%',  fmt: 'pct' },
-          { key: 'drive_pts',   label: 'Drive PTS',  fmt: '1f' },
-          { key: 'drive_ast',   label: 'Drive AST',  fmt: '1f' },
-          { key: 'drive_tov',   label: 'Drive TOV',  fmt: '1f' },
-          { key: 'drive_passes',label: 'Drive Pass', fmt: '1f' },
-          { key: 'drive_pf',    label: 'Drive PF',   fmt: '1f' },
-        ]
-      },
-      passing: {
-        label: 'Passing',
-        defaultSort: 'ast_pts_created',
-        cols: [
-          ...BASE_COLS,
-          { key: 'ast',             label: 'AST',              fmt: '1f' },
-          { key: 'tov',             label: 'TOV',              fmt: '1f' },
-          { key: 'passes_made',     label: 'Passes',           fmt: '1f' },
-          { key: 'passes_received', label: 'Rec.',             fmt: '1f' },
-          { key: 'ast_pts_created', label: 'AST Pts Created',  fmt: '1f' },
-          { key: 'potential_ast',   label: 'Pot. AST',         fmt: '1f' },
-          { key: 'secondary_ast',   label: '2nd AST',          fmt: '1f' },
-          { key: 'ft_ast',          label: 'FT AST',           fmt: '1f' },
-          { key: 'bad_pass_tov',    label: 'Bad Pass TOV',     fmt: '1f' },
-          { key: '_pot_ast_per_bp', label: 'Pot AST / Bad Pass', fmt: '2f', computed: true },
-        ]
-      },
-      touches: {
-        label: 'Touches',
-        defaultSort: 'touches',
-        cols: [
-          ...BASE_COLS,
-          { key: 'touches',            label: 'Touches',        fmt: '1f' },
-          { key: 'time_of_poss',       label: 'Poss. Time (min)',fmt: '1f' },
-          { key: 'avg_sec_per_touch',  label: 'Sec/Touch',      fmt: '2f' },
-          { key: 'avg_drib_per_touch', label: 'Drib/Touch',     fmt: '2f' },
-          { key: 'elbow_touches',      label: 'Elbow',          fmt: '1f' },
-          { key: 'post_touches',       label: 'Post',           fmt: '1f' },
-          { key: 'paint_touches',      label: 'Paint',          fmt: '1f' },
-        ]
-      },
-      pullup: {
-        label: 'Pull-Up',
-        defaultSort: 'pull_up_fga',
-        cols: [
-          ...BASE_COLS,
-          { key: 'pull_up_fga',     label: 'Pull-Up FGA', fmt: '1f'  },
-          { key: 'pull_up_fgm',     label: 'Pull-Up FGM', fmt: '1f'  },
-          { key: 'pull_up_fg_pct',  label: 'Pull-Up FG%', fmt: 'pct' },
-          { key: 'pull_up_fg3a',    label: 'Pull-Up 3PA', fmt: '1f'  },
-          { key: 'pull_up_fg3_pct', label: 'Pull-Up 3P%', fmt: 'pct' },
-          { key: 'pull_up_efg_pct', label: 'Pull-Up eFG%',fmt: 'pct' },
-        ]
-      },
-      catchshoot: {
-        label: 'Catch & Shoot',
-        defaultSort: 'cs_fga',
-        cols: [
-          ...BASE_COLS,
-          { key: 'cs_fga',    label: 'C&S FGA', fmt: '1f'  },
-          { key: 'cs_fgm',    label: 'C&S FGM', fmt: '1f'  },
-          { key: 'cs_fg_pct', label: 'C&S FG%', fmt: 'pct' },
-          { key: 'cs_fg3a',   label: 'C&S 3PA', fmt: '1f'  },
-          { key: 'cs_fg3_pct',label: 'C&S 3P%', fmt: 'pct' },
-          { key: 'cs_efg_pct',label: 'C&S eFG%',fmt: 'pct' },
-        ]
-      },
-      post: {
-        label: 'Post-Up',
-        defaultSort: 'post_touch_fga',
-        cols: [
-          ...BASE_COLS,
-          { key: 'post_touch_fga', label: 'Post FGA', fmt: '1f' },
-          { key: 'post_touch_fg_pct', label: 'Post FG%', fmt: 'pct' },
-          { key: 'post_touch_pts', label: 'Post PTS', fmt: '1f' },
-          { key: 'post_touch_ast', label: 'Post AST', fmt: '1f' },
-          { key: 'post_touch_tov', label: 'Post TOV', fmt: '1f' },
-        ]
-      },
-      speed: {
-        label: 'Speed & Distance',
-        defaultSort: 'dist_miles',
-        cols: [
-          ...BASE_COLS,
-          { key: 'dist_miles',     label: 'Dist (mi)',    fmt: '2f' },
-          { key: 'dist_miles_off', label: 'Dist Off (mi)',fmt: '2f' },
-          { key: 'dist_miles_def', label: 'Dist Def (mi)',fmt: '2f' },
-          { key: 'avg_speed',      label: 'Avg Speed',    fmt: '2f' },
-          { key: 'avg_speed_off',  label: 'Spd Off',      fmt: '2f' },
-          { key: 'avg_speed_def',  label: 'Spd Def',      fmt: '2f' },
-        ]
-      },
-      closest_def: {
-        label: 'Closest defender',
-        defaultSort: 'cd_fga_op',
-        cols: [
-          ...BASE_COLS,
-          { key: 'cd_fga_vt', label: 'VT FGA', fmt: '1f' },
-          { key: 'cd_fgm_vt', label: 'VT FGM', fmt: '1f' },
-          { key: 'cd_fga_tg', label: 'Tight FGA', fmt: '1f' },
-          { key: 'cd_fgm_tg', label: 'Tight FGM', fmt: '1f' },
-          { key: 'cd_fga_op', label: 'Open FGA', fmt: '1f' },
-          { key: 'cd_fgm_op', label: 'Open FGM', fmt: '1f' },
-          { key: 'cd_fga_wo', label: 'Wide FGA', fmt: '1f' },
-          { key: 'cd_fgm_wo', label: 'Wide FGM', fmt: '1f' },
-        ]
-      },
-    }
-  },
-  playtypes: {
-    label: 'Playtypes',
-    subs: {
-      isolation: {
-        label: 'Isolation',
-        defaultSort: 'iso_ppp',
-        cols: [
-          ...BASE_COLS,
-          { key: 'iso_ppp',     label: 'Off PPP',   fmt: '2f' },
-          { key: 'iso_fga',     label: 'Off FGA',   fmt: '1f' },
-          { key: 'iso_efg_pct', label: 'Off eFG%',  fmt: 'pct' },
-          { key: 'iso_tov_pct', label: 'Off TOV%',  fmt: 'pct' },
-          { key: 'def_iso_ppp', label: 'Def PPP',   fmt: '2f', invert: true },
-        ]
-      },
-      pnr_ballhandler: {
-        label: 'PnR Ball-handler',
-        defaultSort: 'pnr_bh_ppp',
-        cols: [
-          ...BASE_COLS,
-          { key: 'pnr_bh_ppp', label: 'Off PPP', fmt: '2f' },
-          { key: 'pnr_bh_fga', label: 'Off FGA', fmt: '1f' },
-          { key: 'def_pnr_bh_ppp', label: 'Def PPP', fmt: '2f', invert: true },
-        ]
-      },
-      pnr_roll: {
-        label: 'PnR Roll',
-        defaultSort: 'pnr_roll_ppp',
-        cols: [
-          ...BASE_COLS,
-          { key: 'pnr_roll_ppp',  label: 'Off PPP',  fmt: '2f' },
-          { key: 'pnr_roll_poss', label: 'Off Poss', fmt: '1f' },
-          { key: 'def_pnr_roll_ppp', label: 'Def PPP', fmt: '2f', invert: true },
-        ]
-      },
-      post: {
-        label: 'Post-Up',
-        defaultSort: 'post_ppp',
-        cols: [
-          ...BASE_COLS,
-          { key: 'post_ppp',  label: 'Off PPP',  fmt: '2f' },
-          { key: 'post_poss', label: 'Off Poss', fmt: '1f' },
-          { key: 'def_post_ppp', label: 'Def PPP', fmt: '2f', invert: true },
-        ]
-      },
-      spotup: {
-        label: 'Spot-Up',
-        defaultSort: 'spotup_ppp',
-        cols: [
-          ...BASE_COLS,
-          { key: 'spotup_ppp',     label: 'Off PPP',  fmt: '2f' },
-          { key: 'spotup_efg_pct', label: 'Off eFG%', fmt: 'pct' },
-          { key: 'def_spotup_ppp', label: 'Def PPP',  fmt: '2f', invert: true },
-        ]
-      },
-      transition: {
-        label: 'Transition',
-        defaultSort: 'transition_ppp',
-        cols: [
-          ...BASE_COLS,
-          { key: 'transition_ppp', label: 'Off PPP', fmt: '2f' },
-          { key: 'transition_fga', label: 'Off FGA', fmt: '1f' },
-        ]
-      },
-    }
-  },
-  defense: {
-    label: 'Defense',
-    subs: {
-      overall: {
-        label: 'Overall',
-        defaultSort: 'def_rating',
-        cols: [
-          ...BASE_COLS,
-          { key: 'def_rating',      label: 'DRtg',        fmt: '1f'  },
-          { key: 'off_rating',      label: 'ORtg',        fmt: '1f'  },
-          { key: 'net_rating',      label: 'NRtg',        fmt: '1f'  },
-          { key: 'def_ws',          label: 'Def WS',      fmt: '2f'  },
-          { key: 'stl',             label: 'STL',         fmt: '1f'  },
-          { key: 'blk',             label: 'BLK',         fmt: '1f'  },
-          { key: 'oreb',            label: 'OREB',        fmt: '1f'  },
-          { key: 'dreb',            label: 'DREB',        fmt: '1f'  },
-          { key: 'oreb_pct',        label: 'OREB%',       fmt: 'pct' },
-          { key: 'dreb_pct',        label: 'DREB%',       fmt: 'pct' },
-          { key: 'pfd',             label: 'Drawn Fouls', fmt: '1f'  },
-          { key: 'def_rim_fga',     label: 'Rim FGA Def', fmt: '1f'  },
-          { key: 'def_rim_fgm',     label: 'Rim FGM Def', fmt: '1f'  },
-          { key: 'def_rim_fg_pct',  label: 'Rim FG% Def', fmt: 'pct' },
-          { key: 'contested_shots', label: 'Cont. Shots', fmt: '1f'  },
-          { key: 'contested_2pt',   label: 'Cont. 2PT',   fmt: '1f'  },
-          { key: 'contested_3pt',   label: 'Cont. 3PT',   fmt: '1f'  },
-          { key: 'deflections',     label: 'Deflections', fmt: '1f'  },
-          { key: 'charges_drawn',   label: 'Charges',     fmt: '1f'  },
-        ]
-      },
-    }
-  },
-  hustle: {
-    label: 'Hustle',
-    subs: {
-      hustle: {
-        label: 'Hustle',
-        defaultSort: 'contested_shots',
-        cols: [
-          ...BASE_COLS,
-          { key: 'contested_shots', label: 'Cont. Shots',  fmt: '1f' },
-          { key: 'contested_2pt',   label: 'Cont. 2PT',    fmt: '1f' },
-          { key: 'contested_3pt',   label: 'Cont. 3PT',    fmt: '1f' },
-          { key: 'deflections',     label: 'Deflections',  fmt: '1f' },
-          { key: 'charges_drawn',   label: 'Charges',      fmt: '1f' },
-          { key: 'screen_assists',  label: 'Screen AST',   fmt: '1f' },
-          { key: 'screen_ast_pts',  label: 'Screen AST Pts',fmt: '1f' },
-          { key: 'loose_balls',     label: 'Loose Balls',  fmt: '1f' },
-          { key: 'box_outs',        label: 'Box Outs',     fmt: '1f' },
-          { key: 'off_box_outs',    label: 'Off Box Outs', fmt: '1f' },
-          { key: 'def_box_outs',    label: 'Def Box Outs', fmt: '1f' },
-        ]
-      },
-    }
-  },
-};
-
-// ── Contextual stat filters (min thresholds; empty = no filter) ─
-const DEFAULT_CONTEXT_FILTERS = [
-  { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-  { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-];
-
-const CONTEXT_FILTERS = {
-  impact: {
-    darko: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'min_tot', key: 'min', label: 'Min season MIN', scale: 'raw' },
-    ],
-    lebron: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'min_tot', key: 'min', label: 'Min season MIN', scale: 'raw' },
-    ],
-    net_pts: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'net_rtg', key: 'net_rating', label: 'Min NRtg', scale: 'raw' },
-    ],
-    clutch: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'clutch_min', key: 'clutch_min', label: 'Min clutch MIN/g', scale: 'raw' },
-      { id: 'clutch_nrtg', key: 'clutch_net_rating', label: 'Min clutch NRtg', scale: 'raw' },
-    ],
-  },
-  general: {
-    traditional: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'pts_pg', key: 'pts', label: 'Min PTS/G', scale: 'per_game' },
-      { id: 'fga_pg', key: 'fga', label: 'Min FGA/G', scale: 'per_game' },
-      { id: 'fg3a_pg', key: 'fg3a', label: 'Min 3PA/G', scale: 'per_game' },
-      { id: 'ast_tot', key: 'ast', label: 'Min AST (season)', scale: 'season' },
-      { id: 'ast_pg', key: 'ast', label: 'Min AST/G', scale: 'per_game' },
-    ],
-    advanced: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'net_rtg', key: 'net_rating', label: 'Min NRtg', scale: 'raw' },
-      { id: 'usg', key: 'usg_pct', label: 'Min USG (0–1)', scale: 'raw' },
-      { id: 'ts', key: 'ts_pct', label: 'Min TS% (enter 0–100)', scale: 'raw', inputKind: 'pct100' },
-    ],
-    misc: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'pts_pg', key: 'pts', label: 'Min PTS/G', scale: 'per_game' },
-      { id: 'tov_pg', key: 'tov', label: 'Min TOV/G', scale: 'per_game' },
-      { id: 'pts_paint', key: 'pts_paint', label: 'Min paint PTS/G', scale: 'per_game' },
-    ],
-    scoring: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'pts_pg', key: 'pts', label: 'Min PTS/G', scale: 'per_game' },
-      { id: 'fga_pg', key: 'fga', label: 'Min FGA/G', scale: 'per_game' },
-      { id: 'ts', key: 'ts_pct', label: 'Min TS% (0–100)', scale: 'raw', inputKind: 'pct100' },
-      { id: 'efg', key: 'efg_pct', label: 'Min eFG% (0–100)', scale: 'raw', inputKind: 'pct100' },
-    ],
-    usage: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'usg', key: 'usg_pct', label: 'Min USG (0–1)', scale: 'raw' },
-      { id: 'fga_pg', key: 'fga', label: 'Min FGA/G', scale: 'per_game' },
-      { id: 'touches_pg', key: 'touches', label: 'Min touches/G', scale: 'per_game' },
-    ],
-  },
-  tracking: {
-    drives: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'drives_pg', key: 'drives', label: 'Min drives/G', scale: 'per_game' },
-      { id: 'drive_pts', key: 'drive_pts', label: 'Min drive PTS/G', scale: 'per_game' },
-    ],
-    passing: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'ast_pg', key: 'ast', label: 'Min AST/G', scale: 'per_game' },
-      { id: 'ast_tot', key: 'ast', label: 'Min AST (season)', scale: 'season' },
-      { id: 'pot_ast', key: 'potential_ast', label: 'Min pot. AST/G', scale: 'per_game' },
-      { id: 'ast_pts_cr', key: 'ast_pts_created', label: 'Min AST pts created/G', scale: 'per_game' },
-    ],
-    touches: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'touches_pg', key: 'touches', label: 'Min touches/G', scale: 'per_game' },
-      { id: 'paint_tch', key: 'paint_touches', label: 'Min paint touches/G', scale: 'per_game' },
-    ],
-    pullup: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'pu_fga', key: 'pull_up_fga', label: 'Min pull-up FGA/G', scale: 'per_game' },
-    ],
-    catchshoot: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'cs_fga', key: 'cs_fga', label: 'Min C&S FGA/G', scale: 'per_game' },
-    ],
-    post: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'post_fga', key: 'post_touch_fga', label: 'Min post FGA/G', scale: 'per_game' },
-      { id: 'post_tch', key: 'post_touches', label: 'Min post touches/G', scale: 'per_game' },
-    ],
-    speed: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'dist', key: 'dist_miles', label: 'Min mi/g', scale: 'per_game' },
-    ],
-    closest_def: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'open_fga', key: 'cd_fga_op', label: 'Min open FGA (tot)', scale: 'raw' },
-    ],
-  },
-  playtypes: {
-    isolation: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'iso_fga', key: 'iso_fga', label: 'Min ISO FGA/G', scale: 'per_game' },
-    ],
-    pnr_ballhandler: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'pnr_fga', key: 'pnr_bh_fga', label: 'Min PnR BH FGA/G', scale: 'per_game' },
-    ],
-    pnr_roll: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'roll_poss', key: 'pnr_roll_poss', label: 'Min roll poss/G', scale: 'per_game' },
-    ],
-    post: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'post_poss', key: 'post_poss', label: 'Min post poss/G', scale: 'per_game' },
-    ],
-    spotup: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-    ],
-    transition: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'tr_fga', key: 'transition_fga', label: 'Min transition FGA/G', scale: 'per_game' },
-    ],
-  },
-  defense: {
-    overall: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'stl_pg', key: 'stl', label: 'Min STL/G', scale: 'per_game' },
-      { id: 'blk_pg', key: 'blk', label: 'Min BLK/G', scale: 'per_game' },
-      { id: 'dreb_pg', key: 'dreb', label: 'Min DREB/G', scale: 'per_game' },
-      { id: 'def_rtg', key: 'def_rating', label: 'Max DRtg (lower)', scale: 'raw', inputKind: 'max' },
-    ],
-  },
-  hustle: {
-    hustle: [
-      { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
-      { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
-      { id: 'contest', key: 'contested_shots', label: 'Min contests (tot)', scale: 'raw' },
-    ],
-  },
-};
-
-function getContextFilters(cat, group) {
-  const list = CONTEXT_FILTERS[cat]?.[group];
-  if (list && list.length) return list;
-  return DEFAULT_CONTEXT_FILTERS;
+function teamLogoUrl(abbr) {
+  const id = TEAM_IDS[abbr];
+  return id ? `https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg` : null;
 }
 
-function getFilterPlayerValue(p, def) {
-  const k = def.key;
-  if (def.scale === 'season') {
-    const pg = p[k];
-    if (pg == null || p.gp == null) return null;
-    return pg * p.gp;
-  }
-  return p[k];
+// ── Date helpers ──────────────────────────────────────────────
+function todayStr() {
+  const d = new Date();
+  const z = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
 }
 
-function parseFilterThreshold(def, raw) {
-  const n = parseFloat(String(raw).trim());
-  if (Number.isNaN(n)) return null;
-  if (def.inputKind === 'pct100') return n / 100;
-  return n;
+function addDays(dateStr, n) {
+  const [y,m,d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m-1, d);
+  dt.setDate(dt.getDate() + n);
+  const z = v => String(v).padStart(2,'0');
+  return `${dt.getFullYear()}-${z(dt.getMonth()+1)}-${z(dt.getDate())}`;
 }
 
-function passesContextFilters(p) {
-  const defs = getContextFilters(ST.statCat, ST.statGroup);
-  for (const def of defs) {
-    const raw = ST.statFilterVals[def.id];
-    if (raw === undefined || raw === '' || raw == null) continue;
-    const need = parseFilterThreshold(def, raw);
-    if (need === null) continue;
-    const pv = getFilterPlayerValue(p, def);
-    if (pv == null) return false;
-    if (def.inputKind === 'max') {
-      if (pv > need) return false;
-    } else {
-      if (pv < need) return false;
-    }
-  }
-  return true;
+function fmtClock(s) {
+  if (!s) return '';
+  const m = s.match(/PT(\d+)M([\d.]+)S/);
+  if (m) return `${m[1]}:${String(Math.floor(parseFloat(m[2]))).padStart(2,'0')}`;
+  if (s.includes(':')) return s;
+  return '';
 }
 
-function renderFilterPanel() {
-  const panel = document.getElementById('stat-filters-panel');
-  const grid = document.getElementById('stat-filters-grid');
-  const defs = getContextFilters(ST.statCat, ST.statGroup);
-  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-  grid.innerHTML = defs.map((def) => {
-    const v = ST.statFilterVals[def.id];
-    const valAttr = v !== undefined && v !== '' ? ` value="${esc(v)}"` : '';
-    return `<div class="stat-filter-field">
-      <label for="sf-${def.id}">${def.label}</label>
-      <input type="number" step="any" id="sf-${def.id}" data-filter-id="${def.id}" placeholder="Any"${valAttr} />
-    </div>`;
-  }).join('') + '<div class="stat-filters-actions"><button type="button" class="stat-filters-clear" id="stat-filters-clear">Clear</button></div>';
-
-  grid.querySelectorAll('input[data-filter-id]').forEach((inp) => {
-    inp.addEventListener('input', () => {
-      const id = inp.dataset.filterId;
-      const val = inp.value.trim();
-      if (val === '') delete ST.statFilterVals[id];
-      else ST.statFilterVals[id] = val;
-      renderStatsTable();
-    });
-  });
-  const clr = document.getElementById('stat-filters-clear');
-  if (clr) {
-    clr.addEventListener('click', () => {
-      ST.statFilterVals = {};
-      renderFilterPanel();
-      renderStatsTable();
-    });
-  }
-  const ft = document.getElementById('filters-toggle');
-  if (ft) {
-    ft.classList.toggle('active', ST.filtersOpen);
-    ft.setAttribute('aria-expanded', ST.filtersOpen ? 'true' : 'false');
-  }
-  panel.classList.toggle('open', ST.filtersOpen);
-}
-
-// Compute derived columns client-side
-function computeRow(player) {
-  const p = { ...player };
-  const fgm = p.fgm, fg3m = p.fg3m, fga = p.fga, fg3a = p.fg3a;
-  if (fgm != null && fg3m != null) p._fg2m = fgm - fg3m;
-  if (fga != null && fg3a != null) p._fg2a = fga - fg3a;
-  if (p._fg2m != null && p._fg2a != null && p._fg2a > 0)
-    p._fg2_pct = p._fg2m / p._fg2a;
-  // Pot AST / Bad Pass TOV — the key stat
-  const potAst   = p.potential_ast;
-  const badPass  = p.bad_pass_tov;
-  const gp       = p.gp || 1;
-  if (potAst != null && badPass != null && badPass > 0) {
-    p._pot_ast_per_bp = (potAst / gp) / (badPass / gp);
-  } else if (potAst != null && p.tov != null && p.tov > 0) {
-    p._pot_ast_per_bp = null;
-  } else {
-    p._pot_ast_per_bp = null;
-  }
-  return p;
-}
-
-// ── Builder stat catalog ─────────────────────────────────────
-const BUILDER_CATALOG = [
-
-  // ── Scoring ───────────────────────────────────────────────
-  // Traditional + efficiency + pull-up + catch & shoot + drive finishing
-  { group: 'Scoring', key: 'pts',              label: 'PPG' },
-  { group: 'Scoring', key: 'fgm',              label: 'FGM/G' },
-  { group: 'Scoring', key: 'fga',              label: 'FGA/G' },
-  { group: 'Scoring', key: 'fg_pct',           label: 'FG%' },
-  { group: 'Scoring', key: 'fg3m',             label: '3PM/G' },
-  { group: 'Scoring', key: 'fg3a',             label: '3PA/G' },
-  { group: 'Scoring', key: 'fg3_pct',          label: '3P%' },
-  { group: 'Scoring', key: 'ftm',              label: 'FTM/G' },
-  { group: 'Scoring', key: 'fta',              label: 'FTA/G' },
-  { group: 'Scoring', key: 'ft_pct',           label: 'FT%' },
-  { group: 'Scoring', key: 'ts_pct',           label: 'TS%' },
-  { group: 'Scoring', key: 'efg_pct',          label: 'eFG%' },
-  { group: 'Scoring', key: 'usg_pct',          label: 'USG%' },
-  { group: 'Scoring', key: 'pfd',              label: 'Fouls Drawn/G' },
-  { group: 'Scoring', key: 'pf',               label: 'Fouls/G' },
-  { group: 'Scoring', key: 'pct_pts_paint',    label: '% Pts from Paint' },
-  { group: 'Scoring', key: 'pct_pts_3pt',      label: '% Pts from 3' },
-  { group: 'Scoring', key: 'pct_pts_ft',       label: '% Pts from FT' },
-  { group: 'Scoring', key: 'pct_uast_fgm',     label: '% Unassisted FGM' },
-  // Drive finishing
-  { group: 'Scoring', key: 'drives',           label: 'Drives/G' },
-  { group: 'Scoring', key: 'drive_fga',        label: 'Drive FGA/G' },
-  { group: 'Scoring', key: 'drive_fgm',        label: 'Drive FGM/G' },
-  { group: 'Scoring', key: 'drive_fg_pct',     label: 'Drive FG%' },
-  { group: 'Scoring', key: 'drive_pts',        label: 'Drive PTS/G' },
-  { group: 'Scoring', key: 'drive_pf',         label: 'Drive Fouls Drawn/G' },
-  // Pull-up shooting
-  { group: 'Scoring', key: 'pull_up_fga',      label: 'Pull-Up FGA/G' },
-  { group: 'Scoring', key: 'pull_up_fgm',      label: 'Pull-Up FGM/G' },
-  { group: 'Scoring', key: 'pull_up_fg_pct',   label: 'Pull-Up FG%' },
-  { group: 'Scoring', key: 'pull_up_fg3a',     label: 'Pull-Up 3PA/G' },
-  { group: 'Scoring', key: 'pull_up_fg3_pct',  label: 'Pull-Up 3P%' },
-  { group: 'Scoring', key: 'pull_up_efg_pct',  label: 'Pull-Up eFG%' },
-  // Catch & shoot
-  { group: 'Scoring', key: 'cs_fga',           label: 'C&S FGA/G' },
-  { group: 'Scoring', key: 'cs_fgm',           label: 'C&S FGM/G' },
-  { group: 'Scoring', key: 'cs_fg_pct',        label: 'C&S FG%' },
-  { group: 'Scoring', key: 'cs_fg3a',          label: 'C&S 3PA/G' },
-  { group: 'Scoring', key: 'cs_fg3_pct',       label: 'C&S 3P%' },
-  { group: 'Scoring', key: 'cs_efg_pct',       label: 'C&S eFG%' },
-
-  // ── Playmaking ────────────────────────────────────────────
-  // Assists + passing + turnovers + drive creation + playtypes
-  { group: 'Playmaking', key: 'ast',              label: 'APG' },
-  { group: 'Playmaking', key: 'tov',              label: 'TOV/G' },
-  { group: 'Playmaking', key: 'ast_pct',          label: 'AST%' },
-  { group: 'Playmaking', key: 'ast_to',           label: 'AST/TOV' },
-  { group: 'Playmaking', key: 'potential_ast',    label: 'Pot. AST/G' },
-  { group: 'Playmaking', key: 'ast_pts_created',  label: 'AST Pts Created/G' },
-  { group: 'Playmaking', key: 'secondary_ast',    label: 'Secondary AST/G' },
-  { group: 'Playmaking', key: 'ft_ast',           label: 'FT AST/G' },
-  { group: 'Playmaking', key: 'passes_made',      label: 'Passes Made/G' },
-  { group: 'Playmaking', key: 'passes_received',  label: 'Passes Received/G' },
-  { group: 'Playmaking', key: 'bad_pass_tov',     label: 'Bad Pass TOV/G' },
-  { group: 'Playmaking', key: 'lost_ball_tov',    label: 'Lost Ball TOV/G' },
-  { group: 'Playmaking', key: 'screen_ast_pts',   label: 'Screen AST Pts/G' },
-  // Drive creation / passing
-  { group: 'Playmaking', key: 'drive_ast',        label: 'Drive AST/G' },
-  { group: 'Playmaking', key: 'drive_passes',     label: 'Drive Passes/G' },
-  { group: 'Playmaking', key: 'drive_tov',        label: 'Drive TOV/G' },
-  // Playtypes — offense
-  { group: 'Playmaking', key: 'iso_ppp',          label: 'ISO Off. PPP' },
-  { group: 'Playmaking', key: 'iso_fga',          label: 'ISO FGA/G' },
-  { group: 'Playmaking', key: 'iso_efg_pct',      label: 'ISO eFG%' },
-  { group: 'Playmaking', key: 'iso_tov_pct',      label: 'ISO TOV%' },
-  { group: 'Playmaking', key: 'pnr_bh_ppp',       label: 'PnR BH Off. PPP' },
-  { group: 'Playmaking', key: 'pnr_bh_fga',       label: 'PnR BH FGA/G' },
-  { group: 'Playmaking', key: 'pnr_roll_ppp',     label: 'PnR Roll Off. PPP' },
-  { group: 'Playmaking', key: 'post_ppp',          label: 'Post-Up Off. PPP' },
-  { group: 'Playmaking', key: 'spotup_ppp',        label: 'Spot-Up Off. PPP' },
-  { group: 'Playmaking', key: 'spotup_efg_pct',    label: 'Spot-Up eFG%' },
-  { group: 'Playmaking', key: 'transition_ppp',    label: 'Transition Off. PPP' },
-  { group: 'Playmaking', key: 'transition_fga',    label: 'Transition FGA/G' },
-
-  // ── Defense ───────────────────────────────────────────────
-  // Traditional + hustle + rim + closest defender + defensive playtypes
-  { group: 'Defense', key: 'stl',               label: 'SPG' },
-  { group: 'Defense', key: 'blk',               label: 'BPG' },
-  { group: 'Defense', key: 'def_rating',        label: 'DRtg' },
-  { group: 'Defense', key: 'def_ws',            label: 'Def. Win Shares' },
-  { group: 'Defense', key: 'contested_shots',   label: 'Contested Shots/G' },
-  { group: 'Defense', key: 'deflections',       label: 'Deflections/G' },
-  { group: 'Defense', key: 'charges_drawn',     label: 'Charges Drawn/G' },
-  { group: 'Defense', key: 'def_rim_fga',       label: 'Rim Def. FGA/G' },
-  { group: 'Defense', key: 'def_rim_fgm',       label: 'Rim Def. FGM/G' },
-  { group: 'Defense', key: 'def_rim_fg_pct',    label: 'Rim Def. FG%' },
-  // Closest defender buckets
-  { group: 'Defense', key: 'cd_fga_vt',         label: 'CD FGA/G (Very Tight)' },
-  { group: 'Defense', key: 'cd_fgm_vt',         label: 'CD FGM/G (Very Tight)' },
-  { group: 'Defense', key: 'cd_fga_tg',         label: 'CD FGA/G (Tight)' },
-  { group: 'Defense', key: 'cd_fgm_tg',         label: 'CD FGM/G (Tight)' },
-  { group: 'Defense', key: 'cd_fga_op',         label: 'CD FGA/G (Open)' },
-  { group: 'Defense', key: 'cd_fgm_op',         label: 'CD FGM/G (Open)' },
-  { group: 'Defense', key: 'cd_fga_wo',         label: 'CD FGA/G (Wide Open)' },
-  { group: 'Defense', key: 'cd_fgm_wo',         label: 'CD FGM/G (Wide Open)' },
-  // Defensive playtypes
-  { group: 'Defense', key: 'def_iso_ppp',       label: 'ISO Def. PPP' },
-  { group: 'Defense', key: 'def_pnr_bh_ppp',    label: 'PnR BH Def. PPP' },
-  { group: 'Defense', key: 'def_pnr_roll_ppp',  label: 'PnR Roll Def. PPP' },
-  { group: 'Defense', key: 'def_post_ppp',       label: 'Post-Up Def. PPP' },
-  { group: 'Defense', key: 'def_spotup_ppp',     label: 'Spot-Up Def. PPP' },
-
-  // ── Rebounding ────────────────────────────────────────────
-  { group: 'Rebounding', key: 'reb',           label: 'RPG' },
-  { group: 'Rebounding', key: 'oreb',          label: 'OREB/G' },
-  { group: 'Rebounding', key: 'dreb',          label: 'DREB/G' },
-  { group: 'Rebounding', key: 'oreb_pct',      label: 'OREB%' },
-  { group: 'Rebounding', key: 'dreb_pct',      label: 'DREB%' },
-  { group: 'Rebounding', key: 'reb_pct',       label: 'REB%' },
-  { group: 'Rebounding', key: 'box_outs',      label: 'Box Outs/G' },
-  { group: 'Rebounding', key: 'off_box_outs',  label: 'Off. Box Outs/G' },
-  { group: 'Rebounding', key: 'def_box_outs',  label: 'Def. Box Outs/G' },
-
-  // ── Overall ───────────────────────────────────────────────
-  // On/off ratings + advanced models + hustle + movement + clutch
-  { group: 'Overall', key: 'off_rating',        label: 'ORtg' },
-  { group: 'Overall', key: 'net_rating',        label: 'NRtg' },
-  { group: 'Overall', key: 'plus_minus',        label: '+/-' },
-  { group: 'Overall', key: 'pie',               label: 'PIE' },
-  { group: 'Overall', key: 'net_pts100',        label: 'Net Pts/100' },
-  { group: 'Overall', key: 'o_net_pts100',      label: 'Off. Net Pts/100' },
-  { group: 'Overall', key: 'd_net_pts100',      label: 'Def. Net Pts/100' },
-  // Advanced models
-  { group: 'Overall', key: 'darko_dpm',         label: 'DARKO DPM' },
-  { group: 'Overall', key: 'darko_odpm',        label: 'DARKO O-DPM' },
-  { group: 'Overall', key: 'darko_ddpm',        label: 'DARKO D-DPM' },
-  { group: 'Overall', key: 'darko_box',         label: 'DARKO Box DPM' },
-  { group: 'Overall', key: 'lebron',            label: 'LEBRON' },
-  { group: 'Overall', key: 'o_lebron',          label: 'O-LEBRON' },
-  { group: 'Overall', key: 'd_lebron',          label: 'D-LEBRON' },
-  { group: 'Overall', key: 'war',               label: 'WAR' },
-  // Clutch
-  { group: 'Overall', key: 'clutch_net_rating', label: 'Clutch NRtg' },
-  { group: 'Overall', key: 'clutch_ts_pct',     label: 'Clutch TS%' },
-  { group: 'Overall', key: 'clutch_usg_pct',    label: 'Clutch USG%' },
-  // Hustle & movement
-  { group: 'Overall', key: 'screen_assists',    label: 'Screen AST/G' },
-  { group: 'Overall', key: 'loose_balls',       label: 'Loose Balls/G' },
-  { group: 'Overall', key: 'dist_miles',        label: 'Distance/G (mi)' },
-  { group: 'Overall', key: 'dist_miles_off',    label: 'Off. Distance/G (mi)' },
-  { group: 'Overall', key: 'dist_miles_def',    label: 'Def. Distance/G (mi)' },
-  { group: 'Overall', key: 'avg_speed',         label: 'Avg Speed' },
-  { group: 'Overall', key: 'avg_speed_off',     label: 'Off. Avg Speed' },
-  { group: 'Overall', key: 'avg_speed_def',     label: 'Def. Avg Speed' },
-];
-
-// ── Format helpers ────────────────────────────────────────────
-function fmt(val, type) {
-  if (val === null || val === undefined) return '—';
-  switch (type) {
-    case 'pct':  return (val * 100).toFixed(1) + '%';
-    case '1f':   return parseFloat(val).toFixed(1);
-    case '2f':   return parseFloat(val).toFixed(2);
-    case 'int':  return Math.round(val);
-    case 'pm':   return (val >= 0 ? '+' : '') + parseFloat(val).toFixed(1);
-    default:     return val;
-  }
-}
-
-// ── Nav / view switching ──────────────────────────────────────
-document.querySelectorAll('.nav-tab').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    btn.classList.add('active');
-    const view = btn.dataset.view;
-    document.getElementById(`view-${view}`).classList.add('active');
-    ST.view = view;
-    if (view === 'builder') initBuilder();
-  });
-});
-
-// ── Season select ─────────────────────────────────────────────
-document.getElementById('season-select').addEventListener('change', function() {
-  ST.season = this.value;
-  const display = this.value.replace('-', '–');
-  document.getElementById('page-subtitle').textContent = `${display} · Regular Season`;
-  loadStats();
-});
-
-// ── Two-level stat nav wiring ─────────────────────────────────
-function renderSubTabs(cat) {
-  const subs = STAT_CATS[cat].subs;
-  const tabBar = document.getElementById('stat-group-tabs');
-  tabBar.innerHTML = Object.entries(subs).map(([key, sub], i) =>
-    `<button class="stat-group-tab ${i === 0 ? 'active' : ''}" data-group="${key}">${sub.label}</button>`
-  ).join('');
-  ST.statFilterVals = {};
-  renderFilterPanel();
-  tabBar.querySelectorAll('.stat-group-tab').forEach(btn => {
-    btn.addEventListener('click', () => {
-      tabBar.querySelectorAll('.stat-group-tab').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      ST.statGroup = btn.dataset.group;
-      ST.statFilterVals = {};
-      renderFilterPanel();
-      const sub = STAT_CATS[ST.statCat].subs[ST.statGroup];
-      ST.sortCol = sub?.defaultSort || 'pts';
-      ST.sortDir = 'desc';
-      renderStatsTable();
-    });
-  });
-}
-
-document.querySelectorAll('.stat-cat-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.stat-cat-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    ST.statCat = btn.dataset.cat;
-    const firstSub = Object.keys(STAT_CATS[ST.statCat].subs)[0];
-    ST.statGroup = firstSub;
-    const sub = STAT_CATS[ST.statCat].subs[firstSub];
-    ST.sortCol = sub?.defaultSort || 'pts';
-    ST.sortDir = 'desc';
-    renderSubTabs(ST.statCat);
-    renderStatsTable();
-  });
-});
-
-document.getElementById('filters-toggle').addEventListener('click', () => {
-  ST.filtersOpen = !ST.filtersOpen;
-  const panel = document.getElementById('stat-filters-panel');
-  const ft = document.getElementById('filters-toggle');
-  panel.classList.toggle('open', ST.filtersOpen);
-  ft.classList.toggle('active', ST.filtersOpen);
-  ft.setAttribute('aria-expanded', ST.filtersOpen ? 'true' : 'false');
-});
-
-// ── Stats view: min-minutes slider ───────────────────────────
-const minSlider = document.getElementById('min-slider');
-const minValue  = document.getElementById('min-value');
-
-minSlider.addEventListener('input', function() {
-  ST.minMin = parseInt(this.value, 10);
-  minValue.textContent = ST.minMin > 0 ? `${ST.minMin} min` : 'All players';
-  renderStatsTable();
-});
-// Default 500 min matches slider value & ST.minMin
-minSlider.value = String(ST.minMin);
-
-
-// ── Position filters ─────────────────────────────────────────
-document.querySelectorAll('.pos-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.pos-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    ST.pos = btn.dataset.pos;
-    renderStatsTable();
-  });
-});
-
-// ── Search ────────────────────────────────────────────────────
-let searchTimer;
-document.getElementById('search-input').addEventListener('input', function() {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
-    ST.search = this.value.trim().toLowerCase();
-    renderStatsTable();
-  }, 150);
-});
-
-// ── Load stats from API ───────────────────────────────────────
-async function loadStats() {
-  setStatus('<span class="loading-spinner"></span> Loading stats…');
+function fmtTipoff(utcStr) {
   try {
-    const params = new URLSearchParams({
-      season:      ST.season,
-      season_type: ST.seasonType,
-      limit:       500,
-    });
-    const res  = await fetch(`${API}/api/players?${params}`);
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    ST.players = data.players || [];
-    renderStatsTable();
-    const display = ST.season.replace('-', '–');
-    setStatus(`${ST.players.length} players · ${display} ${ST.seasonType}`);
-  } catch (e) {
-    setStatus(`⚠ ${e.message}`);
-  }
+    const d = new Date(utcStr);
+    if (isNaN(d)) return '';
+    return d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit', timeZoneName:'short'});
+  } catch(e) { return ''; }
 }
 
-function showDemoData() {
-  // Show placeholder data so the UI is visible even without a live API
-  ST.players = [
-    { player_name:'Nikola Jokić',    team_abbr:'DEN', position_group:'C',  gp:79, min_per_game:33.8, pts:29.6, reb:12.7, ast:9.4, stl:1.4, blk:0.7, tov:3.2, fg_pct:.593, fg3_pct:.359, ft_pct:.820, ts_pct:.658, efg_pct:.630, usg_pct:.296, net_rating:10.2, off_rating:124.5, def_rating:114.3, ast_pct:.437, oreb_pct:.128, dreb_pct:.310, plus_minus:6.5, pie:.227, ast_to:2.94 },
-    { player_name:'Shai Gilgeous-Alexander', team_abbr:'OKC', position_group:'G', gp:75, min_per_game:33.5, pts:32.7, reb:5.5, ast:6.3, stl:2.2, blk:0.9, tov:2.5, fg_pct:.535, fg3_pct:.352, ft_pct:.888, ts_pct:.640, efg_pct:.574, usg_pct:.322, net_rating:14.1, off_rating:123.8, def_rating:109.7, ast_pct:.314, oreb_pct:.022, dreb_pct:.168, plus_minus:9.8, pie:.198 },
-    { player_name:'Giannis Antetokounmpo', team_abbr:'MIL', position_group:'F', gp:73, min_per_game:35.2, pts:32.1, reb:11.5, ast:5.9, stl:1.3, blk:1.1, tov:3.6, fg_pct:.612, fg3_pct:.274, ft_pct:.657, ts_pct:.629, efg_pct:.620, usg_pct:.330, net_rating:7.3, off_rating:120.1, def_rating:112.8, ast_pct:.288, oreb_pct:.085, dreb_pct:.281, plus_minus:4.9, pie:.213 },
-    { player_name:'Luka Dončić',      team_abbr:'LAL', position_group:'G', gp:60, min_per_game:37.5, pts:28.7, reb:8.6, ast:7.8, stl:1.4, blk:0.5, tov:4.1, fg_pct:.465, fg3_pct:.364, ft_pct:.787, ts_pct:.574, efg_pct:.514, usg_pct:.336, net_rating:5.2, off_rating:118.4, def_rating:113.2, ast_pct:.379, oreb_pct:.048, dreb_pct:.221, plus_minus:3.8, pie:.195 },
-    { player_name:'LeBron James',     team_abbr:'LAL', position_group:'F', gp:71, min_per_game:35.3, pts:24.0, reb:8.3, ast:9.2, stl:1.3, blk:0.6, tov:3.5, fg_pct:.540, fg3_pct:.410, ft_pct:.750, ts_pct:.619, efg_pct:.581, usg_pct:.289, net_rating:6.1, off_rating:119.8, def_rating:113.7, ast_pct:.438, oreb_pct:.041, dreb_pct:.217, plus_minus:4.2, pie:.186 },
-    { player_name:'Jayson Tatum',     team_abbr:'BOS', position_group:'F', gp:74, min_per_game:35.9, pts:26.9, reb:8.1, ast:4.9, stl:1.0, blk:0.6, tov:2.8, fg_pct:.458, fg3_pct:.389, ft_pct:.820, ts_pct:.602, efg_pct:.536, usg_pct:.300, net_rating:11.5, off_rating:122.3, def_rating:110.8, ast_pct:.224, oreb_pct:.045, dreb_pct:.210, plus_minus:8.2, pie:.183 },
-    { player_name:'Anthony Davis',    team_abbr:'LAL', position_group:'FC',gp:76, min_per_game:35.7, pts:25.7, reb:12.6, ast:3.6, stl:1.2, blk:2.3, tov:2.1, fg_pct:.557, fg3_pct:.278, ft_pct:.841, ts_pct:.622, efg_pct:.568, usg_pct:.278, net_rating:8.4, off_rating:119.5, def_rating:111.1, ast_pct:.156, oreb_pct:.096, dreb_pct:.312, plus_minus:5.5, pie:.191 },
-    { player_name:'Stephen Curry',    team_abbr:'GSW', position_group:'G', gp:74, min_per_game:32.7, pts:26.4, reb:4.6, ast:5.4, stl:1.0, blk:0.4, tov:2.9, fg_pct:.450, fg3_pct:.427, ft_pct:.923, ts_pct:.645, efg_pct:.568, usg_pct:.289, net_rating:9.2, off_rating:122.7, def_rating:113.5, ast_pct:.274, oreb_pct:.014, dreb_pct:.125, plus_minus:6.4, pie:.168 },
-  ];
-  renderStatsTable();
-}
+// ── Scoreboard state ──────────────────────────────────────────
+const SB = {
+  today: todayStr(),
+  date: null,          // null = today; 'YYYY-MM-DD' = specific day
+  loading: false,
+  liveTimer: null,
+};
 
-// ── Render stats table ────────────────────────────────────────
-// Fmt types that represent counting stats and scale with games played
-const COUNTING_FMTS = new Set(['1f', 'int']);
+// ── Calendar strip ────────────────────────────────────────────
+const CAL_DAYS_BACK = 14;   // how many past days to show
+const CAL_DAYS_FWD  = 7;    // how many future days to show
 
-// Returns the value to display for a cell, applying per-game vs totals mode
-function getStatVal(p, col) {
-  const raw = p[col.key];
-  if (raw == null) return null;
-  // Only scale counting stats; percentages, ratings, +/-, etc. stay as-is
-  if (ST.statMode === 'totals' && COUNTING_FMTS.has(col.fmt) && p.gp != null) {
-    return raw * p.gp;
-  }
-  return raw;
-}
+const DAYS_SHORT  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-// Wire up stat-mode toggle buttons
-document.getElementById('stat-mode-toggle').addEventListener('click', (e) => {
-  const btn = e.target.closest('.stat-mode-btn');
-  if (!btn) return;
-  ST.statMode = btn.dataset.mode;
-  document.querySelectorAll('.stat-mode-btn').forEach(b =>
-    b.classList.toggle('active', b.dataset.mode === ST.statMode)
-  );
-  renderStatsTable();
-});
+function buildCalStrip() {
+  const strip = document.getElementById('cal-strip');
+  if (!strip) return;
 
-function renderStatsTable() {
-  const sub     = STAT_CATS[ST.statCat]?.subs[ST.statGroup];
-  const cols    = sub?.cols || [];
-  const headerRow = document.getElementById('stats-header-row');
-  const tbody     = document.getElementById('stats-tbody');
-
-  // Filter + compute derived columns
-  let players = ST.players.map(computeRow);
-  if (ST.search)  players = players.filter(p => p.player_name.toLowerCase().includes(ST.search));
-  if (ST.pos !== 'ALL') players = players.filter(p => p.position_group === ST.pos);
-  if (ST.minMin > 0)    players = players.filter(p => (p.min || 0) >= ST.minMin);
-  players = players.filter(passesContextFilters);
-
-  // Sort
-  players = [...players].sort((a, b) => {
-    const av = a[ST.sortCol];
-    const bv = b[ST.sortCol];
-    if (av == null) return 1;
-    if (bv == null) return -1;
-    if (ST.sortDir === 'desc') return bv - av;
-    return av - bv;
-  });
-
-  document.getElementById('player-count').textContent =
-    `${players.length} player${players.length !== 1 ? 's' : ''}`;
-
-  // Compute column ranges for color coding
-  const ranges = {};
-  for (const col of cols) {
-    if (col.fmt === 'rank' || col.fmt === 'name' || col.fmt === 'team') continue;
-    const vals = players.map(p => getStatVal(p, col)).filter(v => v != null).sort((a, b) => a - b);
-    if (!vals.length) continue;
-    const n = vals.length;
-    ranges[col.key] = { p10: vals[Math.floor(n * 0.10)], p90: vals[Math.floor(n * 0.90)] };
-  }
-
-  // Header
-  headerRow.innerHTML = cols.map(col => {
-    if (col.nosort) return `<th>${col.label}</th>`;
-    const isSorted = ST.sortCol === col.key;
-    // In totals mode, append a small indicator to counting stat headers
-    const modeTag = (ST.statMode === 'totals' && COUNTING_FMTS.has(col.fmt))
-      ? ' <span style="font-size:9px;opacity:0.55;font-weight:400">TOT</span>' : '';
-    return `<th class="${isSorted ? 'sorted' : ''}" data-col="${col.key}" data-dir="${ST.sortDir === 'desc' ? '↓' : '↑'}">${col.label}${modeTag}</th>`;
-  }).join('');
-
-  headerRow.querySelectorAll('th[data-col]').forEach(th => {
-    th.addEventListener('click', () => {
-      const col = th.dataset.col;
-      if (ST.sortCol === col) {
-        ST.sortDir = ST.sortDir === 'desc' ? 'asc' : 'desc';
-      } else {
-        ST.sortCol = col;
-        ST.sortDir = 'desc';
-      }
-      renderStatsTable();
-    });
-  });
-
-  // Rows
-  if (!players.length) {
-    tbody.innerHTML = `<tr><td colspan="${cols.length}">
-      <div class="table-empty">
-        <div class="table-empty-icon">🔍</div>
-        <span style="font-family:var(--ff-mono);font-size:12px;color:var(--ink3)">No players match your filters</span>
-      </div></td></tr>`;
-    return;
-  }
-
-  tbody.innerHTML = players.map((p, i) => {
-    const cells = cols.map(col => {
-      if (col.fmt === 'rank') return `<td class="rank-cell">${i + 1}</td>`;
-      if (col.fmt === 'name') {
-        const badge = p.position_group ? `<span class="pos-badge">${p.position_group}</span>` : '';
-        const headshotUrl = `https://cdn.nba.com/headshots/nba/latest/260x190/${p.player_id}.png`;
-        const img = `<img class="player-headshot"
-          src="${headshotUrl}"
-          alt=""
-          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-          <span class="player-headshot-fallback" style="display:none">🏀</span>`;
-        return `<td class="player-name-cell">${img}<span class="player-name-text">${p.player_name}${badge}</span></td>`;
-      }
-      if (col.fmt === 'team') return `<td class="team-cell">${p.team_abbr || '—'}</td>`;
-
-      const val = getStatVal(p, col);
-      let cls = '';
-      if (val != null && ranges[col.key]) {
-        const { p10, p90 } = ranges[col.key];
-        if (col.invert) {
-          if (val <= p10) cls = 'top10';
-          else if (val >= p90) cls = 'bot10';
-        } else {
-          if (val >= p90) cls = 'top10';
-          else if (val <= p10) cls = 'bot10';
-        }
-      }
-      return `<td class="${cls}">${fmt(val, col.fmt)}</td>`;
-    }).join('');
-    return `<tr style="animation-delay:${Math.min(i * 10, 300)}ms">${cells}</tr>`;
-  }).join('');
-}
-
-// ════════════════════════════════════════════════════════════
-// BUILDER
-// ════════════════════════════════════════════════════════════
-
-let builderInited = false;
-
-function updateSelectAllBtn() {
-  const btn = document.getElementById('builder-select-all');
-  if (!btn) return;
-  const allKeys = BUILDER_CATALOG.map(i => i.key);
-  const allSelected = allKeys.every(k => ST.builderSelected.includes(k));
-  const noneSelected = ST.builderSelected.length === 0;
-  btn.textContent = noneSelected ? 'All' : allSelected ? 'Clear' : 'Clear';
-  btn.classList.toggle('all-selected', !noneSelected);
-}
-
-function initBuilder() {
-  if (builderInited) return;
-  builderInited = true;
-  renderBuilderStatList();
-  setupBuilderSearch();
-  document.getElementById('builder-min-slider').addEventListener('input', function() {
-    document.getElementById('builder-min-value').textContent = `${this.value}`;
-  });
-  document.getElementById('builder-run').addEventListener('click', runBuilder);
-
-  // Meta stat-list expand/collapse toggle
-  document.getElementById('builder-meta-toggle').addEventListener('click', () => {
-    const meta = document.getElementById('builder-meta');
-    const btn  = document.getElementById('builder-meta-toggle');
-    const expanded = meta.classList.toggle('expanded');
-    btn.textContent = expanded ? 'hide' : 'show all';
-  });
-
-  // Global select-all / clear-all
-  document.getElementById('builder-select-all').addEventListener('click', () => {
-    const allKeys = BUILDER_CATALOG.map(i => i.key);
-    const noneSelected = ST.builderSelected.length === 0;
-    if (noneSelected) {
-      // Select every stat and expand every group
-      ST.builderSelected = [...allKeys];
-      for (const item of BUILDER_CATALOG) BUILDER_OPEN_GROUPS.add(item.group);
-    } else {
-      ST.builderSelected = [];
-    }
-    renderBuilderStatList(document.getElementById('builder-search').value.trim().toLowerCase());
-    renderBuilderChips();
-    updateSelectAllBtn();
-    document.getElementById('builder-run').disabled = ST.builderSelected.length === 0;
-  });
-}
-
-// Track which groups are open: open if has selected stats, or user explicitly opened
-const BUILDER_OPEN_GROUPS = new Set();
-
-function renderBuilderStatList(filter = '') {
-  const list = document.getElementById('builder-stat-list');
-  const groups = {};
-  for (const item of BUILDER_CATALOG) {
-    if (filter && !item.label.toLowerCase().includes(filter) && !item.key.includes(filter)) continue;
-    if (!groups[item.group]) groups[item.group] = [];
-    groups[item.group].push(item);
-  }
-
-  // When searching, show all groups open; otherwise respect BUILDER_OPEN_GROUPS
-  const isFiltering = filter.length > 0;
+  const today = SB.today;
+  const start = addDays(today, -CAL_DAYS_BACK);
+  const end   = addDays(today,  CAL_DAYS_FWD);
 
   let html = '';
-  for (const [group, items] of Object.entries(groups)) {
-    const selCount = items.filter(i => ST.builderSelected.includes(i.key)).length;
-    // Auto-open groups that have selected stats
-    if (selCount > 0) BUILDER_OPEN_GROUPS.add(group);
-    const isOpen = isFiltering || BUILDER_OPEN_GROUPS.has(group);
-    const countBadge = selCount > 0
-      ? `<span class="group-sel-count visible">${selCount}</span>` : `<span class="group-sel-count"></span>`;
+  let cursor = start;
+  while (cursor <= end) {
+    const [y,m,d] = cursor.split('-').map(Number);
+    const dt = new Date(y, m-1, d);
+    const dow = DAYS_SHORT[dt.getDay()];
+    const mon = MONTHS_SHORT[m-1];
+    const isToday = cursor === today;
+    const isActive = (SB.date === null && isToday) || SB.date === cursor;
 
-    const allGroupKeys = items.map(i => i.key);
-    const allGroupSelected = allGroupKeys.every(k => ST.builderSelected.includes(k));
-    const groupAllCls = allGroupSelected ? 'group-all-btn group-all-selected' : 'group-all-btn';
-    const groupAllLabel = allGroupSelected ? 'Clear' : 'All';
-
-    html += `<div class="builder-stat-group-wrap">
-      <div class="builder-stat-group-label ${isOpen ? 'open' : ''}" data-group="${group}">
-        <span>${group}</span>${countBadge}<span class="group-chevron">▶</span>
-      </div>
-      <button class="${groupAllCls}" data-group-all="${group}" title="Select all in ${group}">${groupAllLabel}</button>
+    html += `<div class="cal-day ${isActive ? 'active' : ''}" data-date="${cursor}">
+      <span class="cal-month">${mon}</span>
+      <span class="cal-day-num">${d}</span>
+      <span class="cal-dow">${dow}</span>
+      <div class="cal-day-dot"></div>
     </div>`;
-    html += `<div class="builder-stat-group-items ${isOpen ? 'open' : ''}" data-group-items="${group}">`;
-    for (const item of items) {
-      const sel = ST.builderSelected.includes(item.key);
-      html += `
-        <button class="builder-stat-item ${sel ? 'selected' : ''}" data-key="${item.key}">
-          <div class="builder-check">
-            <span class="builder-check-mark">✓</span>
-          </div>
-          <span class="builder-stat-name">${item.label}</span>
-          <span class="builder-stat-key">${item.key}</span>
-        </button>`;
-    }
-    html += `</div>`;
+    cursor = addDays(cursor, 1);
   }
+  strip.innerHTML = html;
 
-  if (!html) html = `<div style="padding:20px;font-family:var(--ff-mono);font-size:11px;color:var(--ink4)">No matching stats</div>`;
-  list.innerHTML = html;
-
-  // Wire group header toggles
-  list.querySelectorAll('.builder-stat-group-label').forEach(header => {
-    header.addEventListener('click', () => {
-      const group = header.dataset.group;
-      const itemsEl = list.querySelector(`[data-group-items="${group}"]`);
-      const isNowOpen = !header.classList.contains('open');
-      header.classList.toggle('open', isNowOpen);
-      itemsEl.classList.toggle('open', isNowOpen);
-      if (isNowOpen) BUILDER_OPEN_GROUPS.add(group);
-      else BUILDER_OPEN_GROUPS.delete(group);
+  strip.querySelectorAll('.cal-day').forEach(el => {
+    el.addEventListener('click', () => {
+      const date = el.dataset.date;
+      SB.date = date >= SB.today ? null : date;
+      // Update active state
+      strip.querySelectorAll('.cal-day').forEach(d => {
+        const isActive = (SB.date === null && d.dataset.date === SB.today) || d.dataset.date === SB.date;
+        d.classList.toggle('active', isActive);
+      });
+      loadScoreboard();
+      loadPerformers();
     });
   });
 
-  // Wire per-group select-all buttons
-  list.querySelectorAll('.group-all-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const group = btn.dataset.groupAll;
-      const groupItems = BUILDER_CATALOG.filter(i => i.group === group);
-      const groupKeys = groupItems.map(i => i.key);
-      const allSelected = groupKeys.every(k => ST.builderSelected.includes(k));
-      if (allSelected) {
-        // Deselect all in group
-        ST.builderSelected = ST.builderSelected.filter(k => !groupKeys.includes(k));
-      } else {
-        // Select all in group — no cap on bulk select
-        for (const key of groupKeys) {
-          if (!ST.builderSelected.includes(key)) {
-            ST.builderSelected.push(key);
-          }
-        }
-      }
-      renderBuilderStatList(document.getElementById('builder-search').value.trim().toLowerCase());
-      renderBuilderChips();
-      updateSelectAllBtn();
-      document.getElementById('builder-run').disabled = ST.builderSelected.length === 0;
+  // Scroll today into center view
+  const todayEl = strip.querySelector(`[data-date="${today}"]`);
+  if (todayEl) {
+    requestAnimationFrame(() => {
+      const stripWidth = strip.offsetWidth;
+      const elLeft = todayEl.offsetLeft;
+      const elWidth = todayEl.offsetWidth;
+      strip.scrollLeft = elLeft - stripWidth/2 + elWidth/2;
     });
-  });
-
-  list.querySelectorAll('.builder-stat-item').forEach(btn => {
-    btn.addEventListener('click', () => toggleBuilderStat(btn.dataset.key));
-  });
-
-  updateSelectAllBtn();
-}
-
-function setupBuilderSearch() {
-  document.getElementById('builder-search').addEventListener('input', function() {
-    renderBuilderStatList(this.value.trim().toLowerCase());
-  });
-}
-
-function toggleBuilderStat(key) {
-  if (ST.builderSelected.includes(key)) {
-    ST.builderSelected = ST.builderSelected.filter(k => k !== key);
-  } else {
-    ST.builderSelected.push(key);
   }
-  renderBuilderStatList(document.getElementById('builder-search').value.trim().toLowerCase());
-  renderBuilderChips();
-  updateSelectAllBtn();
-  document.getElementById('builder-run').disabled = ST.builderSelected.length === 0;
 }
 
-function renderBuilderChips() {
-  const chips = document.getElementById('builder-chips');
-  chips.innerHTML = ST.builderSelected.map(key => {
-    const item = BUILDER_CATALOG.find(i => i.key === key);
-    const label = item ? item.label : key;
-    return `<div class="builder-chip" data-key="${key}">${label} <span class="builder-chip-x">×</span></div>`;
-  }).join('');
-  chips.querySelectorAll('.builder-chip').forEach(chip => {
-    chip.addEventListener('click', () => toggleBuilderStat(chip.dataset.key));
-  });
-}
+// ── Scoreboard ────────────────────────────────────────────────
+async function loadScoreboard() {
+  if (SB.loading) return;
+  SB.loading = true;
+  clearTimeout(SB.liveTimer);
 
-async function runBuilder() {
-  if (!ST.builderSelected.length) return;
-
-  const runBtn = document.getElementById('builder-run');
-  runBtn.disabled = true;
-  runBtn.textContent = 'Running…';
-  document.getElementById('builder-spotlight').style.display = 'none';
-  document.getElementById('builder-empty').style.display = 'flex';
-  document.getElementById('builder-table-wrap').style.display = 'none';
-  document.getElementById('builder-meta').textContent = 'Computing…';
-
-  const minMin = parseInt(document.getElementById('builder-min-slider').value);
+  const gameStrip = document.getElementById('scoreboard-strip');
+  gameStrip.innerHTML = '<div class="strip-state"><span class="spin"></span> Loading…</div>';
 
   try {
-    const res = await fetch(`${API}/api/builder`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        season:      ST.season,
-        season_type: ST.seasonType,
-        selected:    ST.builderSelected,
-        min_minutes: minMin,
-      }),
-    });
+    const qs = SB.date ? `?date=${SB.date}` : '';
+    const res = await fetch(`${API}/api/scoreboard${qs}`);
     const data = await res.json();
-    if (data.error) throw new Error(data.error);
+    const games = data.games || [];
 
-    ST.builderResults = data.results || [];
-    renderBuilderResults();
-    const statNames = ST.builderSelected.map(k => {
-      const item = BUILDER_CATALOG.find(i => i.key === k);
-      return item ? item.label : k;
-    });
-    document.getElementById('builder-meta').textContent =
-      `Top ${Math.min(data.n, 50)} of ${data.n} players · ${statNames.join(', ')}`;
-    document.getElementById('builder-meta').classList.remove('expanded');
-    // Show expand toggle only when there are enough stats to overflow one line
-    const toggleBtn = document.getElementById('builder-meta-toggle');
-    if (statNames.length > 5) {
-      toggleBtn.style.display = '';
-      toggleBtn.textContent = 'show all';
-    } else {
-      toggleBtn.style.display = 'none';
+    if (!games.length) {
+      gameStrip.innerHTML = '<div class="strip-state">No games on this date.</div>';
+      return;
     }
 
-  } catch (e) {
-    document.getElementById('builder-meta').textContent = `⚠ ${e.message}`;
-    // Show demo builder results if API unavailable
-    showDemoBuilderResults();
+    // Sort: live first, upcoming next, final last
+    const rank = {2:0, 1:1, 3:2};
+    games.sort((a,b) => (rank[a.gameStatus]??9) - (rank[b.gameStatus]??9));
+
+    gameStrip.innerHTML = games.map(buildCard).join('');
+    gameStrip.querySelectorAll('.game-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const gid    = card.dataset.gameId;
+        const status = parseInt(card.dataset.gameStatus || '3', 10);
+        if (!gid) return;
+        if (status === 1) {
+          // Upcoming → preview page
+          const away    = card.dataset.away || '';
+          const home    = card.dataset.home || '';
+          const time    = card.dataset.time || '';
+          const awayRec = card.dataset.awayRec || '';
+          const homeRec = card.dataset.homeRec || '';
+          const qs = new URLSearchParams({ gameId: gid, away, home, time, awayRec, homeRec });
+          window.location.href = `/preview?${qs}`;
+        } else {
+          // Live or final → game detail page
+          window.location.href = `/game?gameId=${gid}`;
+        }
+      });
+    });
+
+    // Auto-refresh live games
+    if (games.some(g => g.gameStatus === 2) && !SB.date) {
+      SB.liveTimer = setTimeout(() => { SB.loading = false; loadScoreboard(); }, 30000);
+    }
+
+  } catch(e) {
+    gameStrip.innerHTML = '<div class="strip-state">Could not load scoreboard.</div>';
+  } finally {
+    SB.loading = false;
+  }
+}
+
+function buildCard(g) {
+  const away = g.away || {};
+  const home = g.home || {};
+  const status = g.gameStatus;
+  const isLive = status === 2;
+  const isFinal = status === 3;
+  const isUpcoming = status === 1;
+  // Always show scores for live and final; historical past days are always final
+  const showScore = isLive || isFinal;
+  const awayScore = away.score ?? 0;
+  const homeScore = home.score ?? 0;
+  const awayWon = isFinal && awayScore > homeScore;
+  const homeWon = isFinal && homeScore > awayScore;
+
+  // Status line
+  let statusHtml;
+  if (isLive) {
+    const period = g.period || 1;
+    const pLabel = period > 4 ? `OT${period-4}` : `Q${period}`;
+    const clock = fmtClock(g.gameClock || '');
+    statusHtml = `<div class="card-status live"><div class="live-pip"></div>${pLabel}${clock ? ' · '+clock : ''}</div>`;
+  } else if (isFinal) {
+    statusHtml = `<div class="card-status">Final</div>`;
+  } else {
+    // Upcoming — show tip-off time
+    const tip = fmtTipoff(g.gameTimeUTC || '');
+    statusHtml = `<div class="card-status upcoming">${tip || g.gameStatusText || 'Upcoming'}</div>`;
   }
 
-  runBtn.disabled = false;
-  runBtn.textContent = 'Run Composite →';
-}
-
-function showDemoBuilderResults() {
-  ST.builderResults = [
-    { rank:1, player_id:203999, player_name:'Nikola Jokić',    position_group:'C',  team_abbr:'DEN', score:91.2, covered:3, total:3, breakdown:[{stat:'pts',pctile:88},{stat:'ast',pctile:96},{stat:'reb',pctile:89}] },
-    { rank:2, player_id:1629029,player_name:'Shai Gilgeous-Alexander', position_group:'G', team_abbr:'OKC', score:87.4, covered:3, total:3, breakdown:[{stat:'pts',pctile:95},{stat:'ast',pctile:79},{stat:'reb',pctile:88}] },
-    { rank:3, player_id:203076, player_name:'Anthony Davis',   position_group:'FC', team_abbr:'LAL', score:84.1, covered:3, total:3, breakdown:[{stat:'pts',pctile:80},{stat:'ast',pctile:62},{stat:'reb',pctile:91}] },
-    { rank:4, player_id:1628384,player_name:'Jayson Tatum',    position_group:'F',  team_abbr:'BOS', score:79.8, covered:3, total:3, breakdown:[{stat:'pts',pctile:82},{stat:'ast',pctile:71},{stat:'reb',pctile:86}] },
-    { rank:5, player_id:201939, player_name:'Stephen Curry',   position_group:'G',  team_abbr:'GSW', score:77.3, covered:3, total:3, breakdown:[{stat:'pts',pctile:81},{stat:'ast',pctile:74},{stat:'reb',pctile:77}] },
-  ];
-  renderBuilderResults();
-}
-
-function showSpotlight(r) {
-  const card = document.getElementById('builder-spotlight');
-  const img  = document.getElementById('spotlight-img');
-  const fallback = document.getElementById('spotlight-fallback');
-
-  // Headshot
-  const headshotUrl = `https://cdn.nba.com/headshots/nba/latest/260x190/${r.player_id}.png`;
-  img.src = headshotUrl;
-  img.className = 'spotlight-headshot';
-  fallback.className = 'spotlight-headshot-fallback';
-  img.onerror = () => {
-    img.className = 'spotlight-headshot hidden';
-    fallback.className = 'spotlight-headshot-fallback visible';
-  };
-
-  // Identity
-  document.getElementById('spotlight-name').textContent = r.player_name;
-  document.getElementById('spotlight-sub').textContent =
-    `${r.position_group || ''}  ·  ${r.team_abbr || '—'}  ·  Rank #${r.rank}`;
-  document.getElementById('spotlight-score').textContent = r.score.toFixed(1);
-
-  // Bar chart — one row per stat in breakdown, sorted by pctile desc
-  const sorted = [...r.breakdown].sort((a, b) => b.pctile - a.pctile);
-  document.getElementById('spotlight-chart').innerHTML = sorted.map(b => {
-    const item = BUILDER_CATALOG.find(x => x.key === b.stat);
-    const label = item ? item.label : b.stat;
-    const cls = b.pctile >= 70 ? 'hi' : b.pctile <= 35 ? 'lo' : 'mid';
-    return `<div class="sp-bar-row">
-      <div class="sp-bar-label" title="${label}">${label}</div>
-      <div class="sp-bar-track">
-        <div class="sp-bar-fill ${cls}" style="width:${b.pctile.toFixed(1)}%"></div>
-      </div>
-      <div class="sp-bar-pct">${b.pctile.toFixed(0)}</div>
+  function teamRow(abbr, score, won, lost) {
+    const logoUrl = teamLogoUrl(abbr);
+    const logoHtml = logoUrl
+      ? `<img class="card-logo" src="${logoUrl}" alt="${abbr}" onerror="this.outerHTML='<div class=\\'card-logo-fallback\\'>🏀</div>'">`
+      : `<div class="card-logo-fallback">🏀</div>`;
+    const abbrClass = showScore ? (won ? 'winner' : lost ? 'loser' : '') : '';
+    const scoreClass = showScore ? (won ? 'winner' : lost ? 'loser' : '') : '';
+    return `<div class="card-team">
+      ${logoHtml}
+      <span class="card-abbr ${abbrClass}">${abbr || '???'}</span>
+      ${showScore ? `<span class="card-score ${scoreClass}">${score}</span>` : ''}
     </div>`;
-  }).join('');
-
-  card.style.display = '';
-
-  // Highlight selected row
-  document.querySelectorAll('#builder-tbody tr').forEach(tr =>
-    tr.classList.toggle('spotlight-active', tr.dataset.playerId === String(r.player_id))
-  );
-}
-
-document.getElementById('spotlight-close').addEventListener('click', () => {
-  document.getElementById('builder-spotlight').style.display = 'none';
-  document.querySelectorAll('#builder-tbody tr').forEach(tr => tr.classList.remove('spotlight-active'));
-});
-
-function renderBuilderResults() {
-  const results = ST.builderResults;
-  const empty = document.getElementById('builder-empty');
-  const wrap  = document.getElementById('builder-table-wrap');
-
-  if (!results.length) {
-    empty.style.display = 'flex';
-    wrap.style.display  = 'none';
-    return;
   }
 
-  empty.style.display = 'none';
-  wrap.style.display  = '';
+  const awayRec = away.wins != null ? `${away.wins}-${away.losses}` : '';
+  const homeRec = home.wins != null ? `${home.wins}-${home.losses}` : '';
+  const tipText = isUpcoming ? fmtTipoff(g.gameTimeUTC || '') : '';
 
-  const maxScore = results[0]?.score || 100;
-  const tbody = document.getElementById('builder-tbody');
-  const display = results.slice(0, 50);
-
-  tbody.innerHTML = display.map((r, i) => {
-    const rankClass = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
-    const barPct = (r.score / maxScore * 100).toFixed(1);
-
-    const pills = r.breakdown.map(b => {
-      const cls = b.pctile >= 75 ? 'hi' : b.pctile <= 30 ? 'lo' : '';
-      const item = BUILDER_CATALOG.find(x => x.key === b.stat);
-      const label = item ? item.label : b.stat;
-      return `<span class="b-breakdown-pill ${cls}">${label} ${b.pctile.toFixed(0)}p</span>`;
-    }).join('');
-
-    // Show-more button only rendered when there are enough pills to overflow ~2 rows
-    const moreBtn = r.breakdown.length > 8
-      ? `<button class="b-breakdown-more" data-more>+${r.breakdown.length - 8} more</button>`
-      : '';
-
-    return `<tr data-player-id="${r.player_id}" style="cursor:pointer;animation-delay:${Math.min(i * 10, 300)}ms">
-      <td><span class="b-rank-num ${rankClass}">${r.rank}</span></td>
-      <td>
-        <span style="font-weight:500;color:var(--ink)">${r.player_name}</span>
-        <span class="pos-badge">${r.position_group || ''}</span>
-      </td>
-      <td class="team-cell">${r.team_abbr || '—'}</td>
-      <td>
-        <div class="b-bar-wrap">
-          <div class="b-bar-bg"><div class="b-bar-fill" style="width:${barPct}%"></div></div>
-        </div>
-      </td>
-      <td><div class="b-breakdown" data-total="${r.breakdown.length}">${pills}${moreBtn}</div></td>
-      <td><span class="b-score">${r.score.toFixed(1)}</span></td>
-    </tr>`;
-  }).join('');
-
-  // Wire row clicks → spotlight
-  const resultMap = Object.fromEntries(display.map(r => [String(r.player_id), r]));
-  tbody.querySelectorAll('tr').forEach(tr => {
-    tr.addEventListener('click', (e) => {
-      // Don't open spotlight if clicking the show-more button
-      if (e.target.closest('[data-more]')) return;
-      const r = resultMap[tr.dataset.playerId];
-      if (r) showSpotlight(r);
-    });
-  });
-
-  // Wire show-more toggles
-  tbody.querySelectorAll('[data-more]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const breakdown = btn.closest('.b-breakdown');
-      const total = parseInt(breakdown.dataset.total);
-      const expanded = breakdown.classList.toggle('expanded');
-      btn.textContent = expanded ? 'show less' : `+${total - 8} more`;
-    });
-  });
-
-  // Scroll top of results into view so rank #1 is visible
-  document.getElementById('builder-results-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-  // Auto-spotlight the #1 player
-  if (results.length > 0) showSpotlight(results[0]);
+  return `<div class="game-card ${isLive ? 'is-live' : ''}"
+    data-game-id="${g.gameId}"
+    data-game-status="${g.gameStatus}"
+    data-away="${away.abbr || ''}"
+    data-home="${home.abbr || ''}"
+    data-time="${tipText}"
+    data-away-rec="${awayRec}"
+    data-home-rec="${homeRec}">
+    ${statusHtml}
+    ${teamRow(away.abbr, awayScore, awayWon, homeWon)}
+    <div class="card-divider"></div>
+    ${teamRow(home.abbr, homeScore, homeWon, awayWon)}
+  </div>`;
 }
 
-// ── Status bar ────────────────────────────────────────────────
-function setStatus(html) {
-  document.getElementById('stats-status').innerHTML = html;
+// ── Top Performers ────────────────────────────────────────────
+async function loadPerformers() {
+  const container  = document.getElementById('performers-container');
+  const subtitle   = document.getElementById('performers-subtitle');
+  if (!container) return;
+
+  container.innerHTML = '<div class="performers-loading"><span class="spin"></span> Loading…</div>';
+
+  const qs = SB.date ? `?date=${SB.date}` : '';
+  try {
+    const res  = await fetch(`${API}/api/top-performers${qs}`);
+    const data = await res.json();
+    const players = data.players || [];
+
+    if (subtitle && data.date) {
+      const [y,m,d] = data.date.split('-').map(Number);
+      const label = new Date(y,m-1,d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+      subtitle.textContent = `PTS + REB + AST · ${label}`;
+    }
+
+    if (!players.length) {
+      container.innerHTML = '<div class="performers-empty">No data available for this date.</div>';
+      return;
+    }
+
+    const rankClass = i => i === 0 ? 'r1' : i === 1 ? 'r2' : i === 2 ? 'r3' : '';
+
+    container.innerHTML = `<div class="performer-list">${
+      players.map((p, i) => {
+        const headshot = p.player_id
+          ? `<img class="performer-headshot" src="https://cdn.nba.com/headshots/nba/latest/260x190/${p.player_id}.png" alt="${p.name}" onerror="this.style.opacity=0">`
+          : '';
+        return `<div class="performer-row" onclick="window.location.href='/game?gameId=${p.game_id}'">
+          <span class="performer-rank ${rankClass(i)}">${i+1}</span>
+          ${headshot}
+          <div class="performer-info">
+            <div class="performer-name">${p.name}</div>
+            <div class="performer-meta">${p.team} · ${p.matchup}</div>
+          </div>
+          <div class="performer-stats">
+            <div class="performer-stat">
+              <span class="performer-stat-val">${p.pts}</span>
+              <span class="performer-stat-lbl">PTS</span>
+            </div>
+            <div class="performer-stat">
+              <span class="performer-stat-val">${p.reb}</span>
+              <span class="performer-stat-lbl">REB</span>
+            </div>
+            <div class="performer-stat">
+              <span class="performer-stat-val">${p.ast}</span>
+              <span class="performer-stat-lbl">AST</span>
+            </div>
+          </div>
+          <div class="performer-total">${p.total}</div>
+        </div>`;
+      }).join('')
+    }</div>`;
+
+  } catch(e) {
+    container.innerHTML = '<div class="performers-empty">Could not load performers.</div>';
+  }
+}
+
+// ── News ──────────────────────────────────────────────────────
+const NEWS_URL = 'https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fwww.espn.com%2Fespn%2Frss%2Fnba%2Fnews';
+
+async function loadNews() {
+  const container = document.getElementById('news-container');
+  if (!container) return;
+  try {
+    const res  = await fetch(NEWS_URL);
+    const data = await res.json();
+    if (data.status !== 'ok' || !data.items?.length) {
+      container.innerHTML = '<div class="news-error-msg">Unavailable.</div>';
+      return;
+    }
+    function timeAgo(pub) {
+      if (!pub) return '';
+      const diff = Date.now() - new Date(pub).getTime();
+      const h = Math.floor(diff / 3600000);
+      if (h < 1) return 'Just now';
+      if (h < 24) return `${h}h ago`;
+      return `${Math.floor(h/24)}d ago`;
+    }
+    container.innerHTML = `<div class="news-list">${
+      data.items.slice(0, 8).map(item => `
+        <a class="news-item" href="${item.link}" target="_blank" rel="noopener noreferrer">
+          <div class="news-source">ESPN</div>
+          <div class="news-title">${item.title || ''}</div>
+          <div class="news-meta">${timeAgo(item.pubDate)}</div>
+        </a>`).join('')
+    }</div>`;
+  } catch(e) {
+    container.innerHTML = '<div class="news-error-msg">Unavailable.</div>';
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────
-renderSubTabs(ST.statCat);  // populates sub-tabs, contextual filters, clears filter vals
-loadStats();
+buildCalStrip();
+loadScoreboard();
+loadPerformers();
+loadNews();
 </script>
 </body>
 </html>

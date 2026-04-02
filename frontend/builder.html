@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Builder — NothingButNet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+/* ── Reset & tokens ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --ink:       #0c0c0d;
+  --ink2:      #2a2a2e;
+  --ink3:      #6b6b78;
+  --ink4:      #a8a8b3;
+  --paper:     #f7f5f0;
+  --paper2:    #eeecea;
+  --paper3:    #e5e2dc;
+  --rule:      #d8d5cf;
+  --orange:    #e8530a;
+  --orange-lt: #fff0ea;
+  --green:     #1a7a4a;
+  --red:       #c0392b;
+
+  --ff-serif: 'DM Serif Display', Georgia, serif;
+  --ff-sans:  'Instrument Sans', system-ui, sans-serif;
+  --ff-mono:  'DM Mono', 'Courier New', monospace;
+  --nav-h: 56px;
+  --sidebar-w: 240px;
+  font-size: 15px;
+}
+
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--ff-sans);
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  opacity: 0.022;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── Nav ────────────────────────────────────────────────────── */
+nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--nav-h);
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 32px;
+  z-index: 100;
+}
+
+.nav-wordmark {
+  font-family: var(--ff-serif);
+  font-size: 20px;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+.nav-wordmark em { font-style: italic; color: var(--orange); }
+
+.nav-tabs { display: flex; gap: 2px; }
+.nav-tab {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  background: none;
+  border: none;
+  padding: 6px 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  text-decoration: none;
+  display: inline-block;
+}
+.nav-tab:hover { color: var(--ink); background: var(--paper2); }
+.nav-tab.active { color: var(--ink); background: var(--paper3); }
+
+.nav-right { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.season-select {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  color: var(--ink2);
+  background: var(--paper2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+  outline: none;
+}
+.season-select:focus { border-color: var(--orange); }
+
+/* ── Page layout ────────────────────────────────────────────── */
+.app { padding-top: var(--nav-h); display: flex; min-height: 100vh; }
+
+/* ── Page header ─────────────────────────────────────────────── */
+.page-header {
+  border-bottom: 1px solid var(--rule);
+  padding: 28px 32px 22px;
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+}
+.page-title {
+  font-family: var(--ff-serif);
+  font-size: 28px;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.page-subtitle {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  color: var(--ink3);
+  letter-spacing: 0.04em;
+  padding-bottom: 2px;
+}
+
+/* ── Builder layout ──────────────────────────────────────────── */
+.builder-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  overflow: hidden;
+}
+
+/* Left panel */
+.builder-panel {
+  border-right: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.builder-panel-head {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--rule);
+}
+.builder-panel-title { font-family: var(--ff-serif); font-size: 16px; color: var(--ink); }
+.builder-panel-sub { font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); margin-top: 2px; letter-spacing: 0.04em; }
+
+.builder-stat-search { padding: 10px 16px; border-bottom: 1px solid var(--rule); }
+.builder-stat-search input {
+  width: 100%;
+  font-family: var(--ff-sans);
+  font-size: 12px;
+  background: var(--paper2);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 6px 10px;
+  color: var(--ink);
+  outline: none;
+}
+.builder-stat-search input:focus { border-color: var(--orange); }
+
+.builder-stat-list { flex: 1; overflow-y: auto; padding: 6px 0; }
+
+.builder-stat-group-wrap { display: flex; align-items: center; }
+.builder-stat-group-label {
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink4);
+  padding: 10px 20px 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  user-select: none;
+  transition: color 0.1s;
+}
+.builder-stat-group-label:hover { color: var(--ink2); }
+.builder-stat-group-label .group-chevron { font-size: 8px; transition: transform 0.18s; opacity: 0.5; }
+.builder-stat-group-label.open .group-chevron { transform: rotate(90deg); }
+.builder-stat-group-label .group-sel-count {
+  font-size: 8px; background: var(--orange); color: #fff;
+  border-radius: 8px; padding: 1px 5px; margin-right: auto; margin-left: 6px; display: none;
+}
+.builder-stat-group-label .group-sel-count.visible { display: inline-block; }
+.builder-stat-group-items { display: none; }
+.builder-stat-group-items.open { display: block; }
+
+.builder-stat-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 20px; cursor: pointer; transition: background 0.1s;
+  border: none; background: none; width: 100%; text-align: left;
+}
+.builder-stat-item:hover { background: var(--paper2); }
+.builder-stat-item.selected { background: var(--orange-lt); }
+.builder-stat-item.selected .builder-stat-name { color: var(--orange); }
+
+.builder-check {
+  width: 14px; height: 14px; border: 1.5px solid var(--rule); border-radius: 3px;
+  flex-shrink: 0; transition: all 0.12s; display: flex; align-items: center; justify-content: center;
+}
+.builder-stat-item.selected .builder-check { background: var(--orange); border-color: var(--orange); }
+.builder-check-mark { color: white; font-size: 9px; display: none; }
+.builder-stat-item.selected .builder-check-mark { display: block; }
+.builder-stat-name { font-family: var(--ff-sans); font-size: 12px; color: var(--ink2); flex: 1; }
+.builder-stat-key { font-family: var(--ff-mono); font-size: 9px; color: var(--ink4); }
+
+.builder-run-wrap { padding: 12px 16px; border-bottom: 1px solid var(--rule); }
+.builder-run-row { display: flex; gap: 6px; margin-top: 8px; }
+.btn-run {
+  flex: 1; font-family: var(--ff-mono); font-size: 11px;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  background: var(--ink); color: var(--paper);
+  border: none; border-radius: 6px; padding: 10px; cursor: pointer; transition: background 0.15s;
+}
+.btn-run:hover { background: var(--orange); }
+.btn-run:disabled { background: var(--rule); color: var(--ink4); cursor: not-allowed; }
+.btn-select-all {
+  font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase;
+  background: none; border: 1px solid var(--rule); border-radius: 6px; padding: 10px 10px;
+  color: var(--ink3); cursor: pointer; white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s, background 0.15s; flex-shrink: 0;
+}
+.btn-select-all:hover { border-color: var(--ink3); color: var(--ink); background: var(--paper2); }
+.btn-select-all.all-selected { border-color: var(--orange); color: var(--orange); background: var(--orange-lt); }
+
+.group-all-btn {
+  font-family: var(--ff-mono); font-size: 8px; letter-spacing: 0.05em; text-transform: uppercase;
+  background: none; border: 1px solid var(--rule); border-radius: 3px; padding: 2px 7px;
+  color: var(--ink4); cursor: pointer; opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s, border-color 0.15s;
+  margin-right: 12px; flex-shrink: 0; white-space: nowrap;
+}
+.builder-stat-group-wrap:hover .group-all-btn { opacity: 1; }
+.group-all-btn:hover, .group-all-btn.group-all-selected {
+  color: var(--orange); background: var(--orange-lt); border-color: var(--orange); opacity: 1;
+}
+
+.builder-chips {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;
+  min-height: 22px; max-height: 80px; overflow-y: auto;
+}
+.builder-chip {
+  font-family: var(--ff-mono); font-size: 10px; background: var(--ink); color: var(--paper);
+  padding: 3px 8px 3px 10px; border-radius: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer;
+}
+.builder-chip:hover { background: var(--orange); }
+.builder-chip-x { opacity: 0.6; font-size: 11px; }
+
+/* Right panel */
+.builder-results { display: flex; flex-direction: column; overflow: hidden; }
+.builder-results-head {
+  padding: 16px 32px; border-bottom: 1px solid var(--rule);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.builder-results-head-top { display: flex; align-items: baseline; gap: 16px; }
+.builder-results-title { font-family: var(--ff-serif); font-size: 22px; color: var(--ink); }
+.builder-results-meta {
+  font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); letter-spacing: 0.04em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.builder-results-meta.expanded { white-space: normal; overflow: visible; }
+.builder-meta-toggle {
+  font-family: var(--ff-mono); font-size: 9px; color: var(--ink4); background: none; border: none;
+  cursor: pointer; padding: 0; flex-shrink: 0; text-decoration: underline; letter-spacing: 0.04em; white-space: nowrap;
+}
+.builder-meta-toggle:hover { color: var(--ink2); }
+.builder-min-wrap { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.min-label { font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); letter-spacing: 0.05em; }
+.min-slider { accent-color: var(--orange); width: 120px; cursor: pointer; }
+.min-value { font-family: var(--ff-mono); font-size: 11px; color: var(--ink2); min-width: 40px; }
+
+.builder-empty {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; color: var(--ink4);
+}
+.builder-empty-icon { font-size: 48px; opacity: 0.3; }
+.builder-empty-text { font-family: var(--ff-mono); font-size: 12px; }
+.builder-empty-sub  { font-family: var(--ff-sans); font-size: 13px; color: var(--ink3); }
+
+/* Spotlight card */
+.builder-spotlight { border-bottom: 1px solid var(--rule); background: var(--paper); }
+.spotlight-inner { padding: 20px 28px; display: flex; gap: 28px; align-items: flex-start; position: relative; max-height: 320px; }
+.spotlight-close {
+  position: absolute; top: 12px; right: 16px; font-size: 18px; color: var(--ink4);
+  background: none; border: none; cursor: pointer; line-height: 1; padding: 2px 6px;
+  border-radius: 4px; transition: color 0.1s, background 0.1s;
+}
+.spotlight-close:hover { color: var(--ink); background: var(--paper2); }
+.spotlight-identity { display: flex; gap: 16px; align-items: center; flex-shrink: 0; width: 220px; }
+.spotlight-headshot-wrap {
+  width: 72px; height: 72px; border-radius: 50%; overflow: hidden;
+  background: var(--paper2); border: 2px solid var(--rule); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 28px;
+}
+.spotlight-headshot { width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+.spotlight-headshot.hidden { display: none; }
+.spotlight-headshot-fallback { display: none; }
+.spotlight-headshot-fallback.visible { display: block; }
+.spotlight-name { font-family: var(--ff-serif); font-size: 17px; color: var(--ink); line-height: 1.2; }
+.spotlight-sub { font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); margin-top: 3px; letter-spacing: 0.04em; }
+.spotlight-score-wrap { display: flex; align-items: baseline; gap: 6px; margin-top: 8px; }
+.spotlight-score-label { font-family: var(--ff-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink4); }
+.spotlight-score { font-family: var(--ff-mono); font-size: 22px; font-weight: 500; color: var(--orange); }
+.spotlight-chart { flex: 1; min-width: 0; max-height: 260px; overflow-y: auto; padding-right: 4px; }
+.sp-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.sp-bar-label { font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); width: 140px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.sp-bar-track { flex: 1; height: 8px; background: var(--paper3); border-radius: 4px; overflow: hidden; }
+.sp-bar-fill { height: 100%; border-radius: 4px; transition: width 0.45s cubic-bezier(.4,0,.2,1); }
+.sp-bar-fill.hi  { background: var(--green); }
+.sp-bar-fill.mid { background: var(--orange); }
+.sp-bar-fill.lo  { background: var(--red); }
+.sp-bar-pct { font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); width: 32px; text-align: right; flex-shrink: 0; }
+
+/* Results table */
+.builder-table-wrap { flex: 1; overflow: auto; }
+table.builder-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.builder-table thead { position: sticky; top: 0; z-index: 5; }
+table.builder-table th {
+  font-family: var(--ff-mono); font-size: 10px; font-weight: 400; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink3); background: var(--paper2);
+  border-bottom: 1px solid var(--rule); padding: 10px 16px; text-align: left;
+}
+table.builder-table th:last-child { text-align: right; }
+table.builder-table td { padding: 10px 16px; border-bottom: 1px solid var(--paper3); color: var(--ink2); }
+
+.b-rank-num { font-family: var(--ff-mono); font-size: 13px; color: var(--ink4); width: 36px; }
+.b-rank-num.gold   { color: #c4922a; font-weight: 600; }
+.b-rank-num.silver { color: #888;    font-weight: 600; }
+.b-rank-num.bronze { color: #a0684a; font-weight: 600; }
+.b-score { font-family: var(--ff-mono); font-size: 15px; font-weight: 500; color: var(--ink); text-align: right; }
+.b-bar-wrap { display: flex; align-items: center; gap: 10px; width: 180px; }
+.b-bar-bg { flex: 1; height: 4px; background: var(--paper3); border-radius: 2px; overflow: hidden; }
+.b-bar-fill { height: 100%; background: var(--orange); border-radius: 2px; transition: width 0.4s ease; }
+.b-breakdown { display: flex; flex-wrap: wrap; gap: 4px; max-height: 52px; overflow: hidden; position: relative; }
+.b-breakdown.expanded { max-height: none; }
+.b-breakdown-pill { font-family: var(--ff-mono); font-size: 9px; padding: 2px 6px; border-radius: 10px; background: var(--paper2); color: var(--ink3); }
+.b-breakdown-pill.hi { background: #e8f5ee; color: var(--green); }
+.b-breakdown-pill.lo { background: #fdf0ef; color: var(--red); }
+.b-breakdown-more {
+  font-family: var(--ff-mono); font-size: 9px; padding: 2px 7px; border-radius: 10px;
+  background: var(--paper3); color: var(--ink3); border: none; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+}
+.b-breakdown-more:hover { background: var(--rule); color: var(--ink); }
+table.builder-table tbody tr:hover { background: var(--paper2); }
+table.builder-table tbody tr.spotlight-active { background: var(--orange-lt); }
+
+/* pos badge */
+.pos-badge {
+  font-family: var(--ff-mono); font-size: 9px; letter-spacing: 0.05em;
+  color: var(--ink4); background: var(--paper3); padding: 2px 5px; border-radius: 3px; margin-left: 6px;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink4); }
+
+/* ── Animations ──────────────────────────────────────────────── */
+.fade-in { opacity: 0; animation: fadeIn 0.3s ease forwards; }
+@keyframes fadeIn { to { opacity: 1; } }
+tbody tr { animation: rowIn 0.2s ease both; }
+@keyframes rowIn { from { opacity:0;transform:translateY(4px); } to { opacity:1;transform:translateY(0); } }
+
+.loading-spinner {
+  display: inline-block; width: 16px; height: 16px;
+  border: 2px solid var(--rule); border-top-color: var(--orange);
+  border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 8px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="nav-wordmark" href="/">nothingbutnet</a>
+  <div class="nav-tabs">
+    <a class="nav-tab" href="/stats.html">Stats</a>
+    <a class="nav-tab active" href="/builder.html">Builder</a>
+    <a class="nav-tab" href="/onoff">On/Off</a>
+  </div>
+  <div class="nav-right">
+    <select class="season-select" id="season-select">
+      <option value="2025-26" selected>2025–26</option>
+      <option value="2024-25">2024–25</option>
+      <option value="2023-24">2023–24</option>
+    </select>
+  </div>
+</nav>
+
+<div class="app">
+  <div style="display:flex;flex:1;flex-direction:column;width:100%;">
+
+    <div class="page-header">
+      <div class="page-title">Builder</div>
+      <div class="page-subtitle">Select stats · Find who excels across all of them</div>
+    </div>
+
+    <div class="builder-layout">
+
+      <!-- Left: stat selector -->
+      <div class="builder-panel">
+        <div class="builder-panel-head">
+          <div class="builder-panel-title">Pick Stats</div>
+          <div class="builder-panel-sub">Each contributes its league percentile</div>
+        </div>
+
+        <div class="builder-run-wrap">
+          <div class="builder-chips" id="builder-chips"></div>
+          <div class="builder-run-row">
+            <button class="btn-run" id="builder-run" disabled>Run Composite →</button>
+            <button class="btn-select-all" id="builder-select-all" title="Select / deselect all stats">All</button>
+          </div>
+        </div>
+
+        <div class="builder-stat-search">
+          <input type="text" id="builder-search" placeholder="Filter stats…">
+        </div>
+
+        <div class="builder-stat-list" id="builder-stat-list">
+          <div style="padding:20px;font-family:var(--ff-mono);font-size:11px;color:var(--ink4)">
+            Loading available stats…
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: results -->
+      <div class="builder-results" id="builder-results-panel">
+        <div class="builder-results-head">
+          <div class="builder-results-head-top">
+            <div class="builder-results-title">Rankings</div>
+            <div class="builder-min-wrap">
+              <span class="min-label">Min. Min</span>
+              <input class="min-slider" id="builder-min-slider" type="range" min="0" max="2000" step="100" value="500">
+              <span class="min-value" id="builder-min-value">500</span>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+            <div class="builder-results-meta" id="builder-meta">Select stats and run</div>
+            <button class="builder-meta-toggle" id="builder-meta-toggle" style="display:none">show</button>
+          </div>
+        </div>
+
+        <div class="builder-empty" id="builder-empty">
+          <div class="builder-empty-icon">⚗️</div>
+          <div class="builder-empty-text">No results yet</div>
+          <div class="builder-empty-sub">Pick stats on the left, then run</div>
+        </div>
+
+        <div class="builder-spotlight" id="builder-spotlight" style="display:none">
+          <div class="spotlight-inner">
+            <button class="spotlight-close" id="spotlight-close" title="Dismiss">×</button>
+            <div class="spotlight-identity">
+              <div class="spotlight-headshot-wrap">
+                <img class="spotlight-headshot" id="spotlight-img" src="" alt="">
+                <span class="spotlight-headshot-fallback" id="spotlight-fallback">🏀</span>
+              </div>
+              <div class="spotlight-info">
+                <div class="spotlight-name" id="spotlight-name"></div>
+                <div class="spotlight-sub" id="spotlight-sub"></div>
+                <div class="spotlight-score-wrap">
+                  <span class="spotlight-score-label">Composite</span>
+                  <span class="spotlight-score" id="spotlight-score"></span>
+                </div>
+              </div>
+            </div>
+            <div class="spotlight-chart" id="spotlight-chart"></div>
+          </div>
+        </div>
+
+        <div class="builder-table-wrap" id="builder-table-wrap" style="display:none">
+          <table class="builder-table">
+            <thead>
+              <tr>
+                <th style="width:48px">#</th>
+                <th>Player</th>
+                <th>Team</th>
+                <th style="width:200px">Score</th>
+                <th>Breakdown</th>
+                <th style="text-align:right">Avg Pctile</th>
+              </tr>
+            </thead>
+            <tbody id="builder-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+const API = window.location.protocol === 'file:' ? 'http://localhost:5000' : '';
+
+const ST = {
+  season:     document.getElementById('season-select').value,
+  seasonType: 'Regular Season',
+  builderSelected: [],
+  builderResults:  [],
+};
+
+document.getElementById('season-select').addEventListener('change', function() {
+  ST.season = this.value;
+});
+
+// ── Builder stat catalog ──────────────────────────────────────
+const BUILDER_CATALOG = [
+  // ── Scoring ───────────────────────────────────────────────
+  { group: 'Scoring', key: 'pts',              label: 'PPG' },
+  { group: 'Scoring', key: 'fgm',              label: 'FGM/G' },
+  { group: 'Scoring', key: 'fga',              label: 'FGA/G' },
+  { group: 'Scoring', key: 'fg_pct',           label: 'FG%' },
+  { group: 'Scoring', key: 'fg3m',             label: '3PM/G' },
+  { group: 'Scoring', key: 'fg3a',             label: '3PA/G' },
+  { group: 'Scoring', key: 'fg3_pct',          label: '3P%' },
+  { group: 'Scoring', key: 'ftm',              label: 'FTM/G' },
+  { group: 'Scoring', key: 'fta',              label: 'FTA/G' },
+  { group: 'Scoring', key: 'ft_pct',           label: 'FT%' },
+  { group: 'Scoring', key: 'ts_pct',           label: 'TS%' },
+  { group: 'Scoring', key: 'efg_pct',          label: 'eFG%' },
+  { group: 'Scoring', key: 'usg_pct',          label: 'USG%' },
+  { group: 'Scoring', key: 'pfd',              label: 'Fouls Drawn/G' },
+  { group: 'Scoring', key: 'pf',               label: 'Fouls/G' },
+  { group: 'Scoring', key: 'pct_pts_paint',    label: '% Pts from Paint' },
+  { group: 'Scoring', key: 'pct_pts_3pt',      label: '% Pts from 3' },
+  { group: 'Scoring', key: 'pct_pts_ft',       label: '% Pts from FT' },
+  { group: 'Scoring', key: 'pct_uast_fgm',     label: '% Unassisted FGM' },
+  { group: 'Scoring', key: 'drives',           label: 'Drives/G' },
+  { group: 'Scoring', key: 'drive_fga',        label: 'Drive FGA/G' },
+  { group: 'Scoring', key: 'drive_fgm',        label: 'Drive FGM/G' },
+  { group: 'Scoring', key: 'drive_fg_pct',     label: 'Drive FG%' },
+  { group: 'Scoring', key: 'drive_pts',        label: 'Drive PTS/G' },
+  { group: 'Scoring', key: 'drive_pf',         label: 'Drive Fouls Drawn/G' },
+  { group: 'Scoring', key: 'pull_up_fga',      label: 'Pull-Up FGA/G' },
+  { group: 'Scoring', key: 'pull_up_fgm',      label: 'Pull-Up FGM/G' },
+  { group: 'Scoring', key: 'pull_up_fg_pct',   label: 'Pull-Up FG%' },
+  { group: 'Scoring', key: 'pull_up_fg3a',     label: 'Pull-Up 3PA/G' },
+  { group: 'Scoring', key: 'pull_up_fg3_pct',  label: 'Pull-Up 3P%' },
+  { group: 'Scoring', key: 'pull_up_efg_pct',  label: 'Pull-Up eFG%' },
+  { group: 'Scoring', key: 'cs_fga',           label: 'C&S FGA/G' },
+  { group: 'Scoring', key: 'cs_fgm',           label: 'C&S FGM/G' },
+  { group: 'Scoring', key: 'cs_fg_pct',        label: 'C&S FG%' },
+  { group: 'Scoring', key: 'cs_fg3a',          label: 'C&S 3PA/G' },
+  { group: 'Scoring', key: 'cs_fg3_pct',       label: 'C&S 3P%' },
+  { group: 'Scoring', key: 'cs_efg_pct',       label: 'C&S eFG%' },
+  // ── Playmaking ────────────────────────────────────────────
+  { group: 'Playmaking', key: 'ast',              label: 'APG' },
+  { group: 'Playmaking', key: 'tov',              label: 'TOV/G' },
+  { group: 'Playmaking', key: 'ast_pct',          label: 'AST%' },
+  { group: 'Playmaking', key: 'ast_to',           label: 'AST/TOV' },
+  { group: 'Playmaking', key: 'potential_ast',    label: 'Pot. AST/G' },
+  { group: 'Playmaking', key: 'ast_pts_created',  label: 'AST Pts Created/G' },
+  { group: 'Playmaking', key: 'secondary_ast',    label: 'Secondary AST/G' },
+  { group: 'Playmaking', key: 'ft_ast',           label: 'FT AST/G' },
+  { group: 'Playmaking', key: 'passes_made',      label: 'Passes Made/G' },
+  { group: 'Playmaking', key: 'passes_received',  label: 'Passes Received/G' },
+  { group: 'Playmaking', key: 'bad_pass_tov',     label: 'Bad Pass TOV/G' },
+  { group: 'Playmaking', key: 'lost_ball_tov',    label: 'Lost Ball TOV/G' },
+  { group: 'Playmaking', key: 'screen_ast_pts',   label: 'Screen AST Pts/G' },
+  { group: 'Playmaking', key: 'drive_ast',        label: 'Drive AST/G' },
+  { group: 'Playmaking', key: 'drive_passes',     label: 'Drive Passes/G' },
+  { group: 'Playmaking', key: 'drive_tov',        label: 'Drive TOV/G' },
+  { group: 'Playmaking', key: 'iso_ppp',          label: 'ISO Off. PPP' },
+  { group: 'Playmaking', key: 'iso_fga',          label: 'ISO FGA/G' },
+  { group: 'Playmaking', key: 'iso_efg_pct',      label: 'ISO eFG%' },
+  { group: 'Playmaking', key: 'iso_tov_pct',      label: 'ISO TOV%' },
+  { group: 'Playmaking', key: 'pnr_bh_ppp',       label: 'PnR BH Off. PPP' },
+  { group: 'Playmaking', key: 'pnr_bh_fga',       label: 'PnR BH FGA/G' },
+  { group: 'Playmaking', key: 'pnr_roll_ppp',     label: 'PnR Roll Off. PPP' },
+  { group: 'Playmaking', key: 'post_ppp',          label: 'Post-Up Off. PPP' },
+  { group: 'Playmaking', key: 'spotup_ppp',        label: 'Spot-Up Off. PPP' },
+  { group: 'Playmaking', key: 'spotup_efg_pct',    label: 'Spot-Up eFG%' },
+  { group: 'Playmaking', key: 'transition_ppp',    label: 'Transition Off. PPP' },
+  { group: 'Playmaking', key: 'transition_fga',    label: 'Transition FGA/G' },
+  // ── Defense ───────────────────────────────────────────────
+  { group: 'Defense', key: 'stl',               label: 'SPG' },
+  { group: 'Defense', key: 'blk',               label: 'BPG' },
+  { group: 'Defense', key: 'def_rating',        label: 'DRtg' },
+  { group: 'Defense', key: 'def_ws',            label: 'Def. Win Shares' },
+  { group: 'Defense', key: 'contested_shots',   label: 'Contested Shots/G' },
+  { group: 'Defense', key: 'deflections',       label: 'Deflections/G' },
+  { group: 'Defense', key: 'charges_drawn',     label: 'Charges Drawn/G' },
+  { group: 'Defense', key: 'def_rim_fga',       label: 'Rim Def. FGA/G' },
+  { group: 'Defense', key: 'def_rim_fgm',       label: 'Rim Def. FGM/G' },
+  { group: 'Defense', key: 'def_rim_fg_pct',    label: 'Rim Def. FG%' },
+  { group: 'Defense', key: 'cd_fga_vt',         label: 'CD FGA/G (Very Tight)' },
+  { group: 'Defense', key: 'cd_fgm_vt',         label: 'CD FGM/G (Very Tight)' },
+  { group: 'Defense', key: 'cd_fga_tg',         label: 'CD FGA/G (Tight)' },
+  { group: 'Defense', key: 'cd_fgm_tg',         label: 'CD FGM/G (Tight)' },
+  { group: 'Defense', key: 'cd_fga_op',         label: 'CD FGA/G (Open)' },
+  { group: 'Defense', key: 'cd_fgm_op',         label: 'CD FGM/G (Open)' },
+  { group: 'Defense', key: 'cd_fga_wo',         label: 'CD FGA/G (Wide Open)' },
+  { group: 'Defense', key: 'cd_fgm_wo',         label: 'CD FGM/G (Wide Open)' },
+  { group: 'Defense', key: 'def_iso_ppp',       label: 'ISO Def. PPP' },
+  { group: 'Defense', key: 'def_pnr_bh_ppp',    label: 'PnR BH Def. PPP' },
+  { group: 'Defense', key: 'def_pnr_roll_ppp',  label: 'PnR Roll Def. PPP' },
+  { group: 'Defense', key: 'def_post_ppp',       label: 'Post-Up Def. PPP' },
+  { group: 'Defense', key: 'def_spotup_ppp',     label: 'Spot-Up Def. PPP' },
+  // ── Rebounding ────────────────────────────────────────────
+  { group: 'Rebounding', key: 'reb',           label: 'RPG' },
+  { group: 'Rebounding', key: 'oreb',          label: 'OREB/G' },
+  { group: 'Rebounding', key: 'dreb',          label: 'DREB/G' },
+  { group: 'Rebounding', key: 'oreb_pct',      label: 'OREB%' },
+  { group: 'Rebounding', key: 'dreb_pct',      label: 'DREB%' },
+  { group: 'Rebounding', key: 'reb_pct',       label: 'REB%' },
+  { group: 'Rebounding', key: 'box_outs',      label: 'Box Outs/G' },
+  { group: 'Rebounding', key: 'off_box_outs',  label: 'Off. Box Outs/G' },
+  { group: 'Rebounding', key: 'def_box_outs',  label: 'Def. Box Outs/G' },
+  // ── Overall ───────────────────────────────────────────────
+  { group: 'Overall', key: 'off_rating',        label: 'ORtg' },
+  { group: 'Overall', key: 'net_rating',        label: 'NRtg' },
+  { group: 'Overall', key: 'plus_minus',        label: '+/-' },
+  { group: 'Overall', key: 'pie',               label: 'PIE' },
+  { group: 'Overall', key: 'net_pts100',        label: 'Net Pts/100' },
+  { group: 'Overall', key: 'o_net_pts100',      label: 'Off. Net Pts/100' },
+  { group: 'Overall', key: 'd_net_pts100',      label: 'Def. Net Pts/100' },
+  { group: 'Overall', key: 'darko_dpm',         label: 'DARKO DPM' },
+  { group: 'Overall', key: 'darko_odpm',        label: 'DARKO O-DPM' },
+  { group: 'Overall', key: 'darko_ddpm',        label: 'DARKO D-DPM' },
+  { group: 'Overall', key: 'darko_box',         label: 'DARKO Box DPM' },
+  { group: 'Overall', key: 'lebron',            label: 'LEBRON' },
+  { group: 'Overall', key: 'o_lebron',          label: 'O-LEBRON' },
+  { group: 'Overall', key: 'd_lebron',          label: 'D-LEBRON' },
+  { group: 'Overall', key: 'war',               label: 'WAR' },
+  { group: 'Overall', key: 'clutch_net_rating', label: 'Clutch NRtg' },
+  { group: 'Overall', key: 'clutch_ts_pct',     label: 'Clutch TS%' },
+  { group: 'Overall', key: 'clutch_usg_pct',    label: 'Clutch USG%' },
+  { group: 'Overall', key: 'screen_assists',    label: 'Screen AST/G' },
+  { group: 'Overall', key: 'loose_balls',       label: 'Loose Balls/G' },
+  { group: 'Overall', key: 'dist_miles',        label: 'Distance/G (mi)' },
+  { group: 'Overall', key: 'dist_miles_off',    label: 'Off. Distance/G (mi)' },
+  { group: 'Overall', key: 'dist_miles_def',    label: 'Def. Distance/G (mi)' },
+  { group: 'Overall', key: 'avg_speed',         label: 'Avg Speed' },
+  { group: 'Overall', key: 'avg_speed_off',     label: 'Off. Avg Speed' },
+  { group: 'Overall', key: 'avg_speed_def',     label: 'Def. Avg Speed' },
+];
+
+// ── Open group tracking ───────────────────────────────────────
+const OPEN_GROUPS = new Set();
+
+function updateSelectAllBtn() {
+  const btn = document.getElementById('builder-select-all');
+  if (!btn) return;
+  const allKeys = BUILDER_CATALOG.map(i => i.key);
+  const noneSelected = ST.builderSelected.length === 0;
+  btn.textContent = noneSelected ? 'All' : 'Clear';
+  btn.classList.toggle('all-selected', !noneSelected);
+}
+
+function renderStatList(filter = '') {
+  const list = document.getElementById('builder-stat-list');
+  const groups = {};
+  for (const item of BUILDER_CATALOG) {
+    if (filter && !item.label.toLowerCase().includes(filter) && !item.key.includes(filter)) continue;
+    if (!groups[item.group]) groups[item.group] = [];
+    groups[item.group].push(item);
+  }
+
+  const isFiltering = filter.length > 0;
+  let html = '';
+
+  for (const [group, items] of Object.entries(groups)) {
+    const selCount = items.filter(i => ST.builderSelected.includes(i.key)).length;
+    if (selCount > 0) OPEN_GROUPS.add(group);
+    const isOpen = isFiltering || OPEN_GROUPS.has(group);
+    const countBadge = selCount > 0
+      ? `<span class="group-sel-count visible">${selCount}</span>`
+      : `<span class="group-sel-count"></span>`;
+    const allGroupKeys = items.map(i => i.key);
+    const allGroupSel = allGroupKeys.every(k => ST.builderSelected.includes(k));
+    html += `<div class="builder-stat-group-wrap">
+      <div class="builder-stat-group-label ${isOpen ? 'open' : ''}" data-group="${group}">
+        <span>${group}</span>${countBadge}<span class="group-chevron">▶</span>
+      </div>
+      <button class="group-all-btn ${allGroupSel ? 'group-all-selected' : ''}" data-group-all="${group}">${allGroupSel ? 'Clear' : 'All'}</button>
+    </div>
+    <div class="builder-stat-group-items ${isOpen ? 'open' : ''}" data-group-items="${group}">`;
+    for (const item of items) {
+      const sel = ST.builderSelected.includes(item.key);
+      html += `<button class="builder-stat-item ${sel ? 'selected' : ''}" data-key="${item.key}">
+        <div class="builder-check"><span class="builder-check-mark">✓</span></div>
+        <span class="builder-stat-name">${item.label}</span>
+        <span class="builder-stat-key">${item.key}</span>
+      </button>`;
+    }
+    html += `</div>`;
+  }
+
+  if (!html) html = `<div style="padding:20px;font-family:var(--ff-mono);font-size:11px;color:var(--ink4)">No matching stats</div>`;
+  list.innerHTML = html;
+
+  list.querySelectorAll('.builder-stat-group-label').forEach(hdr => {
+    hdr.addEventListener('click', () => {
+      const g = hdr.dataset.group;
+      const el = list.querySelector(`[data-group-items="${g}"]`);
+      const open = !hdr.classList.contains('open');
+      hdr.classList.toggle('open', open);
+      el.classList.toggle('open', open);
+      if (open) OPEN_GROUPS.add(g); else OPEN_GROUPS.delete(g);
+    });
+  });
+
+  list.querySelectorAll('.group-all-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const g = btn.dataset.groupAll;
+      const keys = BUILDER_CATALOG.filter(i => i.group === g).map(i => i.key);
+      const allSel = keys.every(k => ST.builderSelected.includes(k));
+      if (allSel) ST.builderSelected = ST.builderSelected.filter(k => !keys.includes(k));
+      else keys.forEach(k => { if (!ST.builderSelected.includes(k)) ST.builderSelected.push(k); });
+      renderStatList(document.getElementById('builder-search').value.trim().toLowerCase());
+      renderChips();
+      updateSelectAllBtn();
+      document.getElementById('builder-run').disabled = ST.builderSelected.length === 0;
+    });
+  });
+
+  list.querySelectorAll('.builder-stat-item').forEach(btn => {
+    btn.addEventListener('click', () => toggleStat(btn.dataset.key));
+  });
+
+  updateSelectAllBtn();
+}
+
+function toggleStat(key) {
+  if (ST.builderSelected.includes(key)) ST.builderSelected = ST.builderSelected.filter(k => k !== key);
+  else ST.builderSelected.push(key);
+  renderStatList(document.getElementById('builder-search').value.trim().toLowerCase());
+  renderChips();
+  updateSelectAllBtn();
+  document.getElementById('builder-run').disabled = ST.builderSelected.length === 0;
+}
+
+function renderChips() {
+  const chips = document.getElementById('builder-chips');
+  chips.innerHTML = ST.builderSelected.map(key => {
+    const item = BUILDER_CATALOG.find(i => i.key === key);
+    return `<div class="builder-chip" data-key="${key}">${item ? item.label : key} <span class="builder-chip-x">×</span></div>`;
+  }).join('');
+  chips.querySelectorAll('.builder-chip').forEach(chip => {
+    chip.addEventListener('click', () => toggleStat(chip.dataset.key));
+  });
+}
+
+// ── Builder run ───────────────────────────────────────────────
+async function runBuilder() {
+  if (!ST.builderSelected.length) return;
+  const runBtn = document.getElementById('builder-run');
+  runBtn.disabled = true; runBtn.textContent = 'Running…';
+  document.getElementById('builder-spotlight').style.display = 'none';
+  document.getElementById('builder-empty').style.display = 'flex';
+  document.getElementById('builder-table-wrap').style.display = 'none';
+  document.getElementById('builder-meta').textContent = 'Computing…';
+
+  const minMin = parseInt(document.getElementById('builder-min-slider').value);
+
+  try {
+    const res = await fetch(`${API}/api/builder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ season: ST.season, season_type: ST.seasonType, selected: ST.builderSelected, min_minutes: minMin }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    ST.builderResults = data.results || [];
+    renderResults();
+    const names = ST.builderSelected.map(k => { const i = BUILDER_CATALOG.find(x => x.key===k); return i ? i.label : k; });
+    document.getElementById('builder-meta').textContent = `Top ${Math.min(data.n,50)} of ${data.n} players · ${names.join(', ')}`;
+    document.getElementById('builder-meta').classList.remove('expanded');
+    const tog = document.getElementById('builder-meta-toggle');
+    tog.style.display = names.length > 5 ? '' : 'none';
+    tog.textContent = 'show all';
+  } catch(e) {
+    document.getElementById('builder-meta').textContent = `⚠ ${e.message}`;
+  }
+  runBtn.disabled = false; runBtn.textContent = 'Run Composite →';
+}
+
+function showSpotlight(r) {
+  const card = document.getElementById('builder-spotlight');
+  const img  = document.getElementById('spotlight-img');
+  const fallback = document.getElementById('spotlight-fallback');
+  img.src = `https://cdn.nba.com/headshots/nba/latest/260x190/${r.player_id}.png`;
+  img.className = 'spotlight-headshot';
+  fallback.className = 'spotlight-headshot-fallback';
+  img.onerror = () => { img.className = 'spotlight-headshot hidden'; fallback.className = 'spotlight-headshot-fallback visible'; };
+  document.getElementById('spotlight-name').textContent = r.player_name;
+  document.getElementById('spotlight-sub').textContent = `${r.position_group||''}  ·  ${r.team_abbr||'—'}  ·  Rank #${r.rank}`;
+  document.getElementById('spotlight-score').textContent = r.score.toFixed(1);
+  const sorted = [...r.breakdown].sort((a,b) => b.pctile - a.pctile);
+  document.getElementById('spotlight-chart').innerHTML = sorted.map(b => {
+    const item = BUILDER_CATALOG.find(x => x.key===b.stat);
+    const label = item ? item.label : b.stat;
+    const cls = b.pctile >= 70 ? 'hi' : b.pctile <= 35 ? 'lo' : 'mid';
+    return `<div class="sp-bar-row">
+      <div class="sp-bar-label" title="${label}">${label}</div>
+      <div class="sp-bar-track"><div class="sp-bar-fill ${cls}" style="width:${b.pctile.toFixed(1)}%"></div></div>
+      <div class="sp-bar-pct">${b.pctile.toFixed(0)}</div>
+    </div>`;
+  }).join('');
+  card.style.display = '';
+  document.querySelectorAll('#builder-tbody tr').forEach(tr =>
+    tr.classList.toggle('spotlight-active', tr.dataset.playerId === String(r.player_id))
+  );
+}
+
+document.getElementById('spotlight-close').addEventListener('click', () => {
+  document.getElementById('builder-spotlight').style.display = 'none';
+  document.querySelectorAll('#builder-tbody tr').forEach(tr => tr.classList.remove('spotlight-active'));
+});
+
+function renderResults() {
+  const results = ST.builderResults;
+  const empty = document.getElementById('builder-empty');
+  const wrap  = document.getElementById('builder-table-wrap');
+  if (!results.length) { empty.style.display = 'flex'; wrap.style.display = 'none'; return; }
+  empty.style.display = 'none'; wrap.style.display = '';
+
+  const maxScore = results[0]?.score || 100;
+  const display  = results.slice(0, 50);
+  const tbody    = document.getElementById('builder-tbody');
+
+  tbody.innerHTML = display.map((r, i) => {
+    const rankClass = i===0 ? 'gold' : i===1 ? 'silver' : i===2 ? 'bronze' : '';
+    const barPct = (r.score / maxScore * 100).toFixed(1);
+    const pills = r.breakdown.map(b => {
+      const cls = b.pctile >= 75 ? 'hi' : b.pctile <= 30 ? 'lo' : '';
+      const item = BUILDER_CATALOG.find(x => x.key===b.stat);
+      return `<span class="b-breakdown-pill ${cls}">${item ? item.label : b.stat} ${b.pctile.toFixed(0)}p</span>`;
+    }).join('');
+    const moreBtn = r.breakdown.length > 8
+      ? `<button class="b-breakdown-more" data-more>+${r.breakdown.length-8} more</button>` : '';
+    return `<tr data-player-id="${r.player_id}" style="cursor:pointer;animation-delay:${Math.min(i*10,300)}ms">
+      <td><span class="b-rank-num ${rankClass}">${r.rank}</span></td>
+      <td><span style="font-weight:500;color:var(--ink)">${r.player_name}</span><span class="pos-badge">${r.position_group||''}</span></td>
+      <td style="font-family:var(--ff-mono);font-size:11px;color:var(--ink3)">${r.team_abbr||'—'}</td>
+      <td><div class="b-bar-wrap"><div class="b-bar-bg"><div class="b-bar-fill" style="width:${barPct}%"></div></div></div></td>
+      <td><div class="b-breakdown" data-total="${r.breakdown.length}">${pills}${moreBtn}</div></td>
+      <td><span class="b-score">${r.score.toFixed(1)}</span></td>
+    </tr>`;
+  }).join('');
+
+  const resultMap = Object.fromEntries(display.map(r => [String(r.player_id), r]));
+  tbody.querySelectorAll('tr').forEach(tr => {
+    tr.addEventListener('click', e => {
+      if (e.target.closest('[data-more]')) return;
+      const r = resultMap[tr.dataset.playerId];
+      if (r) showSpotlight(r);
+    });
+  });
+  tbody.querySelectorAll('[data-more]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const bd = btn.closest('.b-breakdown');
+      const expanded = bd.classList.toggle('expanded');
+      btn.textContent = expanded ? 'show less' : `+${parseInt(bd.dataset.total)-8} more`;
+    });
+  });
+
+  if (results.length > 0) showSpotlight(results[0]);
+}
+
+// ── Init ──────────────────────────────────────────────────────
+document.getElementById('builder-search').addEventListener('input', function() {
+  renderStatList(this.value.trim().toLowerCase());
+});
+
+document.getElementById('builder-run').addEventListener('click', runBuilder);
+
+document.getElementById('builder-min-slider').addEventListener('input', function() {
+  document.getElementById('builder-min-value').textContent = this.value;
+});
+
+document.getElementById('builder-meta-toggle').addEventListener('click', () => {
+  const meta = document.getElementById('builder-meta');
+  const btn  = document.getElementById('builder-meta-toggle');
+  const expanded = meta.classList.toggle('expanded');
+  btn.textContent = expanded ? 'hide' : 'show all';
+});
+
+document.getElementById('builder-select-all').addEventListener('click', () => {
+  const allKeys = BUILDER_CATALOG.map(i => i.key);
+  if (ST.builderSelected.length === 0) {
+    ST.builderSelected = [...allKeys];
+    for (const item of BUILDER_CATALOG) OPEN_GROUPS.add(item.group);
+  } else {
+    ST.builderSelected = [];
+  }
+  renderStatList(document.getElementById('builder-search').value.trim().toLowerCase());
+  renderChips();
+  updateSelectAllBtn();
+  document.getElementById('builder-run').disabled = ST.builderSelected.length === 0;
+});
+
+renderStatList();
+</script>
+</body>
+</html>

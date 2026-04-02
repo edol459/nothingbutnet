@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Game Preview – NothingButNet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --ink:       #0c0c0d;
+  --ink2:      #2a2a2e;
+  --ink3:      #6b6b78;
+  --ink4:      #a8a8b3;
+  --paper:     #f7f5f0;
+  --paper2:    #eeecea;
+  --paper3:    #e5e2dc;
+  --rule:      #d8d5cf;
+  --orange:    #e8530a;
+  --orange-lt: #fff0ea;
+  --green:     #1a7a4a;
+  --red:       #c0392b;
+  --away-color: #4a7eff;
+  --home-color: #e8530a;
+
+  --ff-serif: 'DM Serif Display', Georgia, serif;
+  --ff-sans:  'Instrument Sans', system-ui, sans-serif;
+  --ff-mono:  'DM Mono', 'Courier New', monospace;
+  --nav-h: 56px;
+  font-size: 15px;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--ff-sans);
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  opacity: 0.022;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── Nav ─────────────────────────────────────────────────────── */
+nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--nav-h);
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 24px;
+  z-index: 100;
+}
+
+.nav-wordmark {
+  font-family: var(--ff-serif);
+  font-size: 20px;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+.nav-links { display: flex; gap: 2px; }
+.nav-link {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  text-decoration: none;
+  padding: 6px 14px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.nav-link:hover { color: var(--ink); background: var(--paper2); }
+
+/* ── Page ────────────────────────────────────────────────────── */
+.page {
+  padding-top: var(--nav-h);
+  max-width: 760px;
+  margin: 0 auto;
+  padding-left: 20px;
+  padding-right: 20px;
+  padding-bottom: 60px;
+}
+
+/* ── Matchup hero ────────────────────────────────────────────── */
+.hero {
+  background: var(--ink2);
+  border-radius: 16px;
+  padding: 32px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 24px 0 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 25% 50%, var(--away-color) 0%, transparent 55%),
+              radial-gradient(ellipse at 75% 50%, var(--home-color) 0%, transparent 55%);
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+.hero-team {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  position: relative;
+}
+.hero-team.home { flex-direction: row-reverse; }
+
+.hero-logo {
+  width: 68px; height: 68px;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,0.4));
+}
+
+.hero-team-info { display: flex; flex-direction: column; gap: 4px; }
+.hero-team.home .hero-team-info { align-items: flex-end; }
+
+.hero-abbr {
+  font-family: var(--ff-serif);
+  font-size: 30px;
+  color: white;
+  letter-spacing: -0.02em;
+}
+.hero-record {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 0.05em;
+}
+
+.hero-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 110px;
+  position: relative;
+}
+.hero-vs {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.35);
+}
+.hero-time {
+  font-family: var(--ff-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  text-align: center;
+}
+.hero-badge {
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--orange);
+  background: rgba(232,83,10,0.15);
+  border: 1px solid rgba(232,83,10,0.3);
+  border-radius: 4px;
+  padding: 3px 8px;
+}
+
+/* ── Sections ────────────────────────────────────────────────── */
+.section {
+  background: white;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.section-label {
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink4);
+  padding: 16px 20px 0;
+}
+
+/* ── Stat bars ────────────────────────────────────────────────── */
+.stats-legend {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px 8px;
+}
+.legend-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+.legend-away { font-size: 12px; font-weight: 600; color: var(--away-color); }
+.legend-home { font-size: 12px; font-weight: 600; color: var(--home-color); }
+.legend-center {
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink4);
+}
+
+.vbars-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  align-items: end;
+  padding: 8px 20px 20px;
+  gap: 6px;
+}
+
+.vbar-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.vbar-pair {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  width: 100%;
+  justify-content: center;
+}
+.vbar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  justify-content: flex-end;
+}
+.vbar {
+  width: 18px;
+  border-radius: 3px 3px 0 0;
+  transition: height 0.5s ease;
+  min-height: 3px;
+}
+.vbar.away { background: var(--away-color); opacity: 0.55; }
+.vbar.away.better { opacity: 1; }
+.vbar.home { background: var(--home-color); opacity: 0.55; }
+.vbar.home.better { opacity: 1; }
+
+.vbar-val {
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--ink4);
+  white-space: nowrap;
+}
+.vbar-val.better-away { color: var(--away-color); }
+.vbar-val.better-home { color: var(--home-color); }
+.vbar-label {
+  font-family: var(--ff-mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+
+/* ── H2H ─────────────────────────────────────────────────────── */
+.h2h-list { padding: 12px 20px 20px; display: flex; flex-direction: column; gap: 8px; }
+
+.h2h-game {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--paper);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+  text-decoration: none;
+  color: inherit;
+}
+.h2h-game:hover { background: var(--paper2); }
+
+.h2h-date {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  color: var(--ink4);
+  width: 60px;
+  flex-shrink: 0;
+}
+.h2h-matchup {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.h2h-team { display: flex; align-items: center; gap: 6px; }
+.h2h-team img { width: 20px; height: 20px; object-fit: contain; }
+.h2h-abbr { font-size: 13px; font-weight: 700; color: var(--ink2); }
+.h2h-score { font-size: 15px; font-weight: 800; color: var(--ink3); font-family: var(--ff-mono); }
+.h2h-score.winner { color: var(--ink); }
+.h2h-sep { color: var(--ink4); font-size: 11px; }
+
+/* ── Loading / empty states ──────────────────────────────────── */
+.state-msg {
+  padding: 32px 20px;
+  text-align: center;
+  color: var(--ink4);
+  font-size: 13px;
+}
+
+.shimmer {
+  background: linear-gradient(90deg, var(--paper2) 25%, var(--paper3) 50%, var(--paper2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 6px;
+}
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+@media (max-width: 560px) {
+  .hero { padding: 22px 16px; }
+  .hero-logo { width: 48px; height: 48px; }
+  .hero-abbr { font-size: 22px; }
+  .hero-center { min-width: 70px; }
+  .vbars-grid { grid-template-columns: repeat(3, 1fr); padding-bottom: 24px; gap: 28px 6px; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="nav-wordmark" href="/">nothingbutnet</a>
+  <div class="nav-links">
+    <a class="nav-link" href="/stats.html">Stats</a>
+    <a class="nav-link" href="/builder.html">Builder</a>
+  </div>
+</nav>
+
+<div class="page">
+
+  <!-- Hero -->
+  <div class="hero" id="hero">
+    <div class="state-msg" style="color:rgba(255,255,255,0.4)">Loading…</div>
+  </div>
+
+  <!-- Season Averages -->
+  <div class="section" id="section-stats">
+    <div class="section-label">Season Averages</div>
+    <div style="padding:20px"><div class="shimmer" style="height:100px"></div></div>
+  </div>
+
+  <!-- Last Matchups -->
+  <div class="section" id="section-h2h">
+    <div class="section-label">Last Matchups</div>
+    <div style="padding:20px"><div class="shimmer" style="height:80px"></div></div>
+  </div>
+
+</div>
+
+<script>
+const API = window.location.protocol === 'file:' ? 'http://localhost:5000' : '';
+
+const params  = new URLSearchParams(window.location.search);
+const GAME_ID = params.get('gameId') || '';
+const AWAY    = (params.get('away') || '').toUpperCase();
+const HOME    = (params.get('home') || '').toUpperCase();
+const TIP     = params.get('time') || '';
+const AWAY_REC = params.get('awayRec') || '';
+const HOME_REC = params.get('homeRec') || '';
+
+// Team ID → logo
+const TEAM_IDS = {
+  ATL:1610612737,BOS:1610612738,BKN:1610612751,CHA:1610612766,
+  CHI:1610612741,CLE:1610612739,DAL:1610612742,DEN:1610612743,
+  DET:1610612765,GSW:1610612744,HOU:1610612745,IND:1610612754,
+  LAC:1610612746,LAL:1610612747,MEM:1610612763,MIA:1610612748,
+  MIL:1610612749,MIN:1610612750,NOP:1610612740,NYK:1610612752,
+  OKC:1610612760,ORL:1610612753,PHI:1610612755,PHX:1610612756,
+  POR:1610612757,SAC:1610612758,SAS:1610612759,TOR:1610612761,
+  UTA:1610612762,WAS:1610612764,
+};
+function logoUrl(abbr) {
+  const id = TEAM_IDS[abbr];
+  return id ? `https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg` : null;
+}
+function logoImg(abbr, size=52) {
+  const url = logoUrl(abbr);
+  return url
+    ? `<img src="${url}" alt="${abbr}" style="width:${size}px;height:${size}px;object-fit:contain" onerror="this.style.display='none'">`
+    : '';
+}
+
+// ── Render hero immediately with params ─────────────────────────
+function renderHero(awayRec, homeRec, tipText) {
+  document.title = `${AWAY} vs ${HOME} Preview – NothingButNet`;
+  document.getElementById('hero').innerHTML = `
+    <div class="hero-team away">
+      ${logoImg(AWAY, 68)}
+      <div class="hero-team-info">
+        <div class="hero-abbr">${AWAY}</div>
+        ${awayRec ? `<div class="hero-record">${awayRec}</div>` : ''}
+      </div>
+    </div>
+    <div class="hero-center">
+      <div class="hero-vs">vs</div>
+      ${tipText ? `<div class="hero-time">${tipText}</div>` : ''}
+      <div class="hero-badge">Preview</div>
+    </div>
+    <div class="hero-team home">
+      ${logoImg(HOME, 68)}
+      <div class="hero-team-info">
+        <div class="hero-abbr">${HOME}</div>
+        ${homeRec ? `<div class="hero-record">${homeRec}</div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+// ── Format helpers ──────────────────────────────────────────────
+function fmt1(v) { return v != null ? Number(v).toFixed(1) : '—'; }
+function fmtPct(v) { return v != null ? (Number(v) * 100).toFixed(1) + '%' : '—'; }
+
+// ── Load team stats ─────────────────────────────────────────────
+async function loadStats() {
+  const el = document.getElementById('section-stats');
+  try {
+    const [ar, hr] = await Promise.all([
+      fetch(`${API}/api/preview/team-stats/${AWAY}`),
+      fetch(`${API}/api/preview/team-stats/${HOME}`),
+    ]);
+    const [as_, hs] = await Promise.all([ar.json(), hr.json()]);
+    if (as_.error && hs.error) throw new Error('no stats');
+
+    const defs = [
+      { key: 'ppg',     label: 'PTS', fmt: fmt1,   higher: true },
+      { key: 'rpg',     label: 'REB', fmt: fmt1,   higher: true },
+      { key: 'apg',     label: 'AST', fmt: fmt1,   higher: true },
+      { key: 'fg_pct',  label: 'FG%', fmt: fmtPct, higher: true },
+      { key: 'fg3_pct', label: '3P%', fmt: fmtPct, higher: true },
+      { key: 'topg',    label: 'TOV', fmt: fmt1,   higher: false },
+    ];
+
+    const BAR_H = 72;
+    let barsHtml = '<div class="vbars-grid">';
+    defs.forEach(({ key, label, fmt, higher }) => {
+      const av = as_[key], hv = hs[key];
+      const awayBetter = av != null && hv != null && (higher ? av > hv : av < hv);
+      const homeBetter = av != null && hv != null && (higher ? hv > av : hv < av);
+      const bigger = Math.max(av || 0, hv || 0);
+      const aH = bigger > 0 ? Math.max(4, Math.round((av / bigger) * BAR_H)) : BAR_H / 2;
+      const hH = bigger > 0 ? Math.max(4, Math.round((hv / bigger) * BAR_H)) : BAR_H / 2;
+      barsHtml += `
+        <div class="vbar-group">
+          <div class="vbar-pair" style="height:${BAR_H}px">
+            <div class="vbar-col">
+              <div class="vbar-val ${awayBetter ? 'better-away' : ''}">${fmt(av)}</div>
+              <div class="vbar away ${awayBetter ? 'better' : ''}" style="height:${aH}px"></div>
+            </div>
+            <div class="vbar-col">
+              <div class="vbar-val ${homeBetter ? 'better-home' : ''}">${fmt(hv)}</div>
+              <div class="vbar home ${homeBetter ? 'better' : ''}" style="height:${hH}px"></div>
+            </div>
+          </div>
+          <div class="vbar-label">${label}</div>
+        </div>`;
+    });
+    barsHtml += '</div>';
+
+    el.innerHTML = `
+      <div class="section-label">Season Averages</div>
+      <div class="stats-legend">
+        <span class="legend-away"><span class="legend-dot" style="background:var(--away-color)"></span>${AWAY}</span>
+        <span class="legend-center">2025–26</span>
+        <span class="legend-home"><span class="legend-dot" style="background:var(--home-color)"></span>${HOME}</span>
+      </div>
+      ${barsHtml}
+    `;
+  } catch(e) {
+    el.innerHTML = `<div class="section-label">Season Averages</div><div class="state-msg">Stats unavailable.</div>`;
+  }
+}
+
+// ── Load H2H ────────────────────────────────────────────────────
+async function loadH2H() {
+  const el = document.getElementById('section-h2h');
+  try {
+    const r = await fetch(`${API}/api/preview/h2h/${AWAY}/${HOME}`);
+    const data = await r.json();
+    const games = data.games || [];
+
+    if (!games.length) {
+      el.innerHTML = `<div class="section-label">Last Matchups</div><div class="state-msg">No recent matchups found.</div>`;
+      return;
+    }
+
+    const rows = games.map(g => {
+      const date = g.date
+        ? new Date(g.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
+        : '';
+      const awayWon = g.away_pts > g.home_pts;
+      const homeWon = g.home_pts > g.away_pts;
+      const href = g.game_id ? `/game?gameId=${g.game_id}` : '#';
+      return `
+        <a class="h2h-game" href="${href}">
+          <div class="h2h-date">${date}</div>
+          <div class="h2h-matchup">
+            <div class="h2h-team">
+              ${logoImg(g.away_abbr, 20)}
+              <span class="h2h-abbr">${g.away_abbr}</span>
+              <span class="h2h-score ${awayWon ? 'winner' : ''}">${g.away_pts ?? '—'}</span>
+            </div>
+            <span class="h2h-sep">@</span>
+            <div class="h2h-team">
+              ${logoImg(g.home_abbr, 20)}
+              <span class="h2h-abbr">${g.home_abbr}</span>
+              <span class="h2h-score ${homeWon ? 'winner' : ''}">${g.home_pts ?? '—'}</span>
+            </div>
+          </div>
+        </a>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div class="section-label">Last Matchups</div>
+      <div class="h2h-list">${rows}</div>
+    `;
+  } catch(e) {
+    el.innerHTML = `<div class="section-label">Last Matchups</div><div class="state-msg">Matchup history unavailable.</div>`;
+  }
+}
+
+// ── Boot ────────────────────────────────────────────────────────
+if (!AWAY || !HOME) {
+  document.getElementById('hero').innerHTML = `<div class="state-msg" style="color:rgba(255,255,255,0.4)">No game specified.</div>`;
+} else {
+  renderHero(AWAY_REC, HOME_REC, TIP);
+  loadStats();
+  loadH2H();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>On/Off · NothingButNet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --ink:       #0c0c0d;
+  --ink2:      #2a2a2e;
+  --ink3:      #6b6b78;
+  --ink4:      #a8a8b3;
+  --paper:     #f7f5f0;
+  --paper2:    #eeecea;
+  --paper3:    #e5e2dc;
+  --rule:      #d8d5cf;
+  --orange:    #e8530a;
+  --orange-lt: #fff0ea;
+  --green:     #1a7a4a;
+  --red:       #c0392b;
+  --ff-serif: 'DM Serif Display', Georgia, serif;
+  --ff-sans:  'Instrument Sans', system-ui, sans-serif;
+  --ff-mono:  'DM Mono', 'Courier New', monospace;
+  --nav-h: 56px;
+  font-size: 15px;
+}
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--ff-sans);
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  opacity: 0.022; pointer-events: none; z-index: 9999;
+}
+nav {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: var(--nav-h); background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  display: flex; align-items: center;
+  padding: 0 24px; gap: 32px; z-index: 100;
+}
+.nav-wordmark {
+  font-family: var(--ff-serif); font-size: 20px;
+  color: var(--ink); letter-spacing: -0.01em;
+  text-decoration: none; flex-shrink: 0;
+}
+.nav-wordmark em { font-style: italic; color: var(--orange); }
+.nav-tabs { display: flex; gap: 2px; }
+.nav-tab {
+  font-family: var(--ff-mono); font-size: 11px;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink3); background: none; border: none;
+  padding: 6px 14px; cursor: pointer; border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  text-decoration: none; display: inline-block;
+}
+.nav-tab:hover  { color: var(--ink); background: var(--paper2); }
+.nav-tab.active { color: var(--ink); background: var(--paper3); }
+
+.app { padding-top: var(--nav-h); display: flex; min-height: 100vh; }
+
+/* ── Sidebar ─────────────────────────────────────────────────── */
+.sidebar {
+  width: 252px; flex-shrink: 0;
+  border-right: 1px solid var(--rule);
+  display: flex; flex-direction: column;
+  position: sticky; top: var(--nav-h);
+  height: calc(100vh - var(--nav-h));
+  overflow: hidden;
+}
+.sidebar-head {
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+.sidebar-title {
+  font-family: var(--ff-serif); font-size: 22px;
+  color: var(--ink); margin-bottom: 14px;
+}
+.ctrl-label {
+  font-family: var(--ff-mono); font-size: 9px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink4); display: block; margin-bottom: 5px;
+}
+.ctrl-select {
+  width: 100%; font-family: var(--ff-sans); font-size: 13px;
+  background: var(--paper2); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 6px;
+  padding: 7px 10px; cursor: pointer; outline: none;
+  margin-bottom: 10px; transition: border-color 0.15s;
+}
+.ctrl-select:focus { border-color: var(--orange); }
+.btn-load {
+  width: 100%; font-family: var(--ff-mono); font-size: 11px;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  background: var(--ink); color: var(--paper);
+  border: none; border-radius: 6px; padding: 10px;
+  cursor: pointer; transition: background 0.15s;
+}
+.btn-load:hover:not(:disabled) { background: var(--orange); }
+.btn-load:disabled { background: var(--rule); color: var(--ink4); cursor: not-allowed; }
+
+.players-scroll { flex: 1; overflow-y: auto; padding: 12px 10px; }
+.players-scroll-label {
+  font-family: var(--ff-mono); font-size: 9px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink4); display: block; padding: 0 8px 10px;
+}
+.player-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.player-card {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 4px; padding: 9px 4px 7px;
+  border-radius: 8px; border: 1.5px solid transparent;
+  cursor: pointer; transition: all 0.12s;
+  background: var(--paper2); position: relative; user-select: none;
+}
+.player-card:hover { border-color: var(--rule); background: var(--paper3); }
+.player-card.selected { border-color: var(--orange); background: var(--orange-lt); }
+.player-card-check {
+  position: absolute; top: 5px; right: 5px;
+  width: 13px; height: 13px; background: var(--orange);
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.12s;
+}
+.player-card.selected .player-card-check { opacity: 1; }
+.player-card-check::after {
+  content: ''; width: 6px; height: 3.5px;
+  border-left: 1.5px solid #fff; border-bottom: 1.5px solid #fff;
+  transform: rotate(-45deg) translateY(-1px);
+}
+.player-headshot {
+  width: 52px; height: 52px; border-radius: 50%;
+  object-fit: cover; background: var(--paper3);
+  border: 2px solid var(--rule); display: block; transition: border-color 0.12s;
+}
+.player-card.selected .player-headshot { border-color: var(--orange); }
+.player-headshot-fallback {
+  width: 52px; height: 52px; border-radius: 50%;
+  background: var(--paper3); border: 2px solid var(--rule);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--ff-mono); font-size: 13px; color: var(--ink3);
+}
+.player-card-name {
+  font-family: var(--ff-sans); font-size: 10px; font-weight: 600;
+  color: var(--ink2); text-align: center; line-height: 1.2;
+}
+.player-card-pos { font-family: var(--ff-mono); font-size: 9px; color: var(--ink4); }
+
+.sidebar-footer {
+  padding: 10px 18px; border-top: 1px solid var(--rule);
+  display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0;
+}
+.sel-count { font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); }
+.btn-clear {
+  font-family: var(--ff-mono); font-size: 10px;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  background: none; border: none; color: var(--ink4);
+  cursor: pointer; padding: 0; transition: color 0.12s;
+}
+.btn-clear:hover { color: var(--orange); }
+
+/* ── Main ────────────────────────────────────────────────────── */
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.state-msg {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px; padding: 80px 32px;
+  font-family: var(--ff-mono); font-size: 12px;
+  color: var(--ink3); letter-spacing: 0.04em;
+  text-align: center; line-height: 1.9;
+}
+.state-icon { font-size: 32px; opacity: 0.3; }
+.spin {
+  display: inline-block; width: 20px; height: 20px;
+  border: 2px solid var(--rule); border-top-color: var(--orange);
+  border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.results-head {
+  padding: 16px 28px 14px; border-bottom: 1px solid var(--rule);
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; flex-shrink: 0;
+}
+.results-title { font-family: var(--ff-serif); font-size: 20px; color: var(--ink); flex: 1; }
+.results-meta { font-family: var(--ff-mono); font-size: 10px; color: var(--ink4); letter-spacing: 0.04em; }
+
+.sel-strip {
+  display: flex; gap: 10px; align-items: center;
+  padding: 12px 28px; border-bottom: 1px solid var(--rule);
+  background: var(--paper2); flex-wrap: wrap; flex-shrink: 0;
+}
+.sel-strip-label {
+  font-family: var(--ff-mono); font-size: 9px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink4); white-space: nowrap;
+}
+.sel-avatar { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.sel-avatar img {
+  width: 32px; height: 32px; border-radius: 50%;
+  object-fit: cover; border: 2px solid var(--orange); background: var(--paper3);
+}
+.sel-avatar-name {
+  font-family: var(--ff-sans); font-size: 10px; font-weight: 600; color: var(--ink2);
+}
+
+/* ── WOWY table ──────────────────────────────────────────────── */
+.table-scroll { flex: 1; overflow: auto; }
+table.wt {
+  width: 100%; border-collapse: collapse;
+  font-family: var(--ff-sans); font-size: 13px; min-width: 520px;
+}
+table.wt thead { position: sticky; top: 0; z-index: 2; background: var(--paper); }
+table.wt thead th {
+  font-family: var(--ff-mono); font-size: 10px;
+  letter-spacing: 0.07em; text-transform: uppercase; font-weight: 500;
+  padding: 10px 28px 8px; text-align: right; color: var(--ink3);
+  border-bottom: 1px solid var(--rule); white-space: nowrap;
+}
+table.wt thead th.th-lineup { text-align: left; }
+
+table.wt tbody tr { border-bottom: 1px solid var(--paper3); transition: background 0.1s; }
+table.wt tbody tr:last-child { border-bottom: none; }
+table.wt tbody tr:hover { background: var(--paper2); }
+table.wt tbody tr.row-diff {
+  background: var(--paper2);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+table.wt tbody td {
+  padding: 13px 28px; text-align: right; color: var(--ink); vertical-align: middle;
+}
+table.wt tbody td.td-lineup { text-align: left; }
+
+.wowy-lineup { display: flex; gap: 12px; align-items: center; }
+.wc { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.wc img {
+  width: 44px; height: 44px; border-radius: 50%;
+  object-fit: cover; background: var(--paper3);
+}
+.wc-name {
+  font-family: var(--ff-sans); font-size: 10px;
+  font-weight: 600; text-align: center; line-height: 1.1;
+}
+.wc.on  img      { border: 2px solid var(--orange); }
+.wc.on  .wc-name { color: var(--orange); }
+.wc.off img      { border: 2px solid var(--rule); filter: grayscale(0.8) opacity(0.4); }
+.wc.off .wc-name { color: var(--ink4); text-decoration: line-through; }
+
+.td-min { font-family: var(--ff-mono); font-size: 12px; color: var(--ink3); }
+.net-pos { color: var(--green); font-weight: 700; }
+.net-neg { color: var(--red);   font-weight: 700; }
+.net-neu { color: var(--ink3); }
+
+.diff-pos { color: var(--green); font-weight: 700; }
+.diff-neg { color: var(--red);   font-weight: 700; }
+.diff-label {
+  font-family: var(--ff-mono); font-size: 10px;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink3); font-weight: 500;
+}
+
+.null-dash { color: var(--paper3); }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink4); }
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="nav-wordmark" href="/"><em>n</em>othingbutnet</a>
+  <div class="nav-tabs">
+    <a class="nav-tab" href="/stats">Stats</a>
+    <a class="nav-tab" href="/builder">Builder</a>
+    <a class="nav-tab active" href="/onoff">On/Off</a>
+  </div>
+</nav>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <div class="sidebar-title">On/Off</div>
+      <label class="ctrl-label" for="team-select">Team</label>
+      <select class="ctrl-select" id="team-select">
+        <option value="">— select team —</option>
+      </select>
+      <label class="ctrl-label" for="season-select">Season</label>
+      <select class="ctrl-select" id="season-select">
+        <option value="2025-26" selected>2025–26</option>
+        <option value="2024-25">2024–25</option>
+        <option value="2023-24">2023–24</option>
+      </select>
+      <button class="btn-load" id="btn-load" disabled>Load roster →</button>
+    </div>
+    <div class="players-scroll" id="players-scroll">
+      <div class="state-msg" style="padding:40px 16px;flex:0;">
+        <div class="state-icon">🏀</div><span>Select a team above</span>
+      </div>
+    </div>
+    <div class="sidebar-footer" id="sidebar-footer" style="display:none;">
+      <span class="sel-count" id="sel-count">0 selected</span>
+      <button class="btn-clear" id="btn-clear">Clear</button>
+    </div>
+  </aside>
+
+  <main class="main" id="main">
+    <div class="state-msg">
+      <div class="state-icon">👆</div>
+      <span>Load a team, then select 1–5 players<br>to see every on/off combination</span>
+    </div>
+  </main>
+</div>
+
+<script>
+const TEAMS = [
+  {abbr:'ATL',name:'Atlanta Hawks'},      {abbr:'BOS',name:'Boston Celtics'},
+  {abbr:'BKN',name:'Brooklyn Nets'},      {abbr:'CHA',name:'Charlotte Hornets'},
+  {abbr:'CHI',name:'Chicago Bulls'},      {abbr:'CLE',name:'Cleveland Cavaliers'},
+  {abbr:'DAL',name:'Dallas Mavericks'},   {abbr:'DEN',name:'Denver Nuggets'},
+  {abbr:'DET',name:'Detroit Pistons'},    {abbr:'GSW',name:'Golden State Warriors'},
+  {abbr:'HOU',name:'Houston Rockets'},    {abbr:'IND',name:'Indiana Pacers'},
+  {abbr:'LAC',name:'LA Clippers'},        {abbr:'LAL',name:'Los Angeles Lakers'},
+  {abbr:'MEM',name:'Memphis Grizzlies'},  {abbr:'MIA',name:'Miami Heat'},
+  {abbr:'MIL',name:'Milwaukee Bucks'},    {abbr:'MIN',name:'Minnesota Timberwolves'},
+  {abbr:'NOP',name:'New Orleans Pelicans'},{abbr:'NYK',name:'New York Knicks'},
+  {abbr:'OKC',name:'Oklahoma City Thunder'},{abbr:'ORL',name:'Orlando Magic'},
+  {abbr:'PHI',name:'Philadelphia 76ers'}, {abbr:'PHX',name:'Phoenix Suns'},
+  {abbr:'POR',name:'Portland Trail Blazers'},{abbr:'SAC',name:'Sacramento Kings'},
+  {abbr:'SAS',name:'San Antonio Spurs'},  {abbr:'TOR',name:'Toronto Raptors'},
+  {abbr:'UTA',name:'Utah Jazz'},          {abbr:'WAS',name:'Washington Wizards'},
+];
+
+let roster     = [];
+let allLineups = [];
+let selected   = new Set();
+
+const teamSel       = document.getElementById('team-select');
+const seasonSel     = document.getElementById('season-select');
+const btnLoad       = document.getElementById('btn-load');
+const playersScroll = document.getElementById('players-scroll');
+const sidebarFooter = document.getElementById('sidebar-footer');
+const selCount      = document.getElementById('sel-count');
+const btnClear      = document.getElementById('btn-clear');
+const main          = document.getElementById('main');
+
+TEAMS.forEach(t => {
+  const o = document.createElement('option');
+  o.value = t.abbr;
+  o.textContent = `${t.abbr} — ${t.name}`;
+  teamSel.appendChild(o);
+});
+teamSel.addEventListener('change', () => { btnLoad.disabled = !teamSel.value; });
+
+// ── Load ───────────────────────────────────────────────────────
+btnLoad.addEventListener('click', async () => {
+  const team   = teamSel.value;
+  const season = seasonSel.value;
+  if (!team) return;
+
+  selected.clear();
+  roster     = [];
+  allLineups = [];
+
+  btnLoad.disabled = true;
+  btnLoad.textContent = 'Loading…';
+  sidebarFooter.style.display = 'none';
+  playersScroll.innerHTML = `<div class="state-msg" style="padding:40px 16px;flex:0;"><span class="spin"></span></div>`;
+  setMain('spin', 'Fetching lineup data…');
+
+  try {
+    const res  = await fetch(`/api/onoff?team=${team}&season=${season}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    roster     = data.roster  || [];
+    allLineups = data.lineups || [];
+    // Pre-convert pids arrays to Sets once on load
+    allLineups.forEach(l => { l.pids = new Set(l.pids); });
+    renderGrid();
+    sidebarFooter.style.display = 'flex';
+    setMain('icon', '👆', 'Select 1–5 players to see every on/off combination');
+  } catch(e) {
+    playersScroll.innerHTML = `<div class="state-msg" style="padding:40px 16px;flex:0;color:var(--red)">⚠ ${e.message}</div>`;
+    setMain('icon', '⚠', e.message);
+  } finally {
+    btnLoad.disabled = !teamSel.value;
+    btnLoad.textContent = 'Load roster →';
+  }
+});
+
+// ── Player grid ────────────────────────────────────────────────
+function renderGrid() {
+  playersScroll.innerHTML = '';
+  if (!roster.length) {
+    playersScroll.innerHTML = `<div class="state-msg" style="padding:40px 16px;flex:0;">No roster data</div>`;
+    return;
+  }
+  const lbl = document.createElement('div');
+  lbl.className = 'players-scroll-label';
+  lbl.textContent = 'Select players (1–5)';
+  playersScroll.appendChild(lbl);
+
+  const grid = document.createElement('div');
+  grid.className = 'player-grid';
+  roster.forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'player-card';
+    card.dataset.pid = p.player_id;
+    const last = lastName(p.player_name);
+    const init = initials(p.player_name);
+    card.innerHTML = `
+      <div class="player-card-check"></div>
+      <img class="player-headshot"
+        src="https://cdn.nba.com/headshots/nba/latest/260x190/${p.player_id}.png"
+        alt="${last}"
+        onerror="this.outerHTML='<div class=\\'player-headshot-fallback\\'>${init}</div>'">
+      <div class="player-card-name">${last}</div>
+      <div class="player-card-pos">${p.position || ''}</div>
+    `;
+    card.addEventListener('click', () => togglePlayer(p.player_id, card));
+    grid.appendChild(card);
+  });
+  playersScroll.appendChild(grid);
+}
+
+function togglePlayer(pid, card) {
+  if (selected.has(pid)) {
+    selected.delete(pid);
+    card.classList.remove('selected');
+  } else {
+    if (selected.size >= 5) return;
+    selected.add(pid);
+    card.classList.add('selected');
+  }
+  selCount.textContent = `${selected.size} selected`;
+  buildWOWY();
+}
+
+btnClear.addEventListener('click', () => {
+  selected.clear();
+  document.querySelectorAll('.player-card.selected').forEach(c => c.classList.remove('selected'));
+  selCount.textContent = '0 selected';
+  setMain('icon', '👆', 'Select 1–5 players to see every on/off combination');
+});
+
+// ── WOWY computation ───────────────────────────────────────────
+function buildWOWY() {
+  if (!selected.size) {
+    setMain('icon', '👆', 'Select 1–5 players to see every on/off combination');
+    return;
+  }
+
+  const selArr = [...selected];
+  const subsets = allSubsets(selArr);
+
+  const rows = subsets.map(onSet => {
+    const offSet = new Set(selArr.filter(p => !onSet.has(p)));
+
+    const matching = allLineups.filter(l => {
+      for (const p of onSet)  if (!l.pids.has(p)) return false;
+      for (const p of offSet) if (l.pids.has(p))  return false;
+      return true;
+    });
+
+    if (!matching.length) return null;
+
+    const totalMin = matching.reduce((s, l) => s + (l.min || 0), 0);
+    const wavg = key => {
+      const coveredMin = matching.reduce((s, l) => l[key] != null ? s + (l.min || 0) : s, 0);
+      if (!coveredMin) return null;
+      const val = matching.reduce((s, l) => l[key] != null ? s + l[key] * (l.min || 0) : s, 0);
+      return Math.round((val / coveredMin) * 10) / 10;
+    };
+
+    return {
+      onSet,
+      min:  Math.round(totalMin),
+      ortg: wavg('ortg'),
+      drtg: wavg('drtg'),
+      net:  wavg('net'),
+    };
+  }).filter(Boolean);
+
+  if (!rows.length) {
+    setMain('icon', '🔍', 'No data found for this combination.<br>Try different players or season.');
+    return;
+  }
+
+  rows.sort((a, b) => b.onSet.size - a.onSet.size || b.min - a.min);
+  renderResults(rows);
+}
+
+// ── Render ─────────────────────────────────────────────────────
+function renderResults(rows) {
+  const rosterMap  = {};
+  roster.forEach(p => { rosterMap[p.player_id] = p; });
+  const selArr     = [...selected];
+  const selPlayers = selArr.map(pid => rosterMap[pid]).filter(Boolean);
+  const season     = seasonSel.value;
+
+  const fmt = v => v == null ? '<span class="null-dash">—</span>' : v.toFixed(1);
+  const nc  = v => v == null ? '' : v > 0 ? 'net-pos' : v < 0 ? 'net-neg' : 'net-neu';
+
+  const allOnRow  = rows.find(r => r.onSet.size === selArr.length);
+  const allOffRow = rows.find(r => r.onSet.size === 0);
+  let diffHtml = '';
+  if (allOnRow && allOffRow && selArr.length > 1) {
+    const dOrtg = allOnRow.ortg != null && allOffRow.ortg != null ? +(allOnRow.ortg - allOffRow.ortg).toFixed(1) : null;
+    const dDrtg = allOnRow.drtg != null && allOffRow.drtg != null ? +(allOnRow.drtg - allOffRow.drtg).toFixed(1) : null;
+    const dNet  = allOnRow.net  != null && allOffRow.net  != null ? +(allOnRow.net  - allOffRow.net ).toFixed(1) : null;
+    const dc   = v => v == null ? '' : v > 0 ? 'diff-pos' : v < 0 ? 'diff-neg' : '';
+    const dfmt = v => v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(1);
+    diffHtml = `<tr class="row-diff">
+      <td class="td-lineup"><span class="diff-label">On − Off</span></td>
+      <td></td>
+      <td class="${dc(dOrtg)}">${dfmt(dOrtg)}</td>
+      <td class="${dc(dDrtg)}">${dfmt(dDrtg)}</td>
+      <td class="${dc(dNet)}">${dfmt(dNet)}</td>
+    </tr>`;
+  }
+
+  main.innerHTML = `
+    <div class="results-head">
+      <div class="results-title">On/Off Combinations</div>
+      <div class="results-meta">Min-weighted · ${season} · Reg Season · ${rows.length} combination${rows.length!==1?'s':''}</div>
+    </div>
+    <div class="sel-strip">
+      <span class="sel-strip-label">Selected</span>
+      ${selPlayers.map(p => `
+        <div class="sel-avatar">
+          <img src="https://cdn.nba.com/headshots/nba/latest/260x190/${p.player_id}.png"
+               alt="${lastName(p.player_name)}" onerror="this.style.display='none'">
+          <span class="sel-avatar-name">${lastName(p.player_name)}</span>
+        </div>`).join('')}
+    </div>
+    <div class="table-scroll">
+      <table class="wt">
+        <thead>
+          <tr>
+            <th class="th-lineup">Lineup</th>
+            <th>MIN</th>
+            <th>ORtg</th>
+            <th>DRtg</th>
+            <th>Net</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => {
+            const chips = selArr.map(pid => {
+              const isOn = r.onSet.has(pid);
+              const p    = rosterMap[pid];
+              if (!p) return '';
+              const last = lastName(p.player_name);
+              return `<div class="wc ${isOn?'on':'off'}">
+                <img src="https://cdn.nba.com/headshots/nba/latest/260x190/${pid}.png"
+                     alt="${last}" onerror="this.style.display='none'">
+                <span class="wc-name">${last}</span>
+              </div>`;
+            }).join('');
+            return `<tr>
+              <td class="td-lineup"><div class="wowy-lineup">${chips}</div></td>
+              <td class="td-min">${r.min || '—'}</td>
+              <td>${fmt(r.ortg)}</td>
+              <td>${fmt(r.drtg)}</td>
+              <td class="${nc(r.net)}">${fmt(r.net)}</td>
+            </tr>`;
+          }).join('')}
+          ${diffHtml}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ── Generate all 2^N subsets ───────────────────────────────────
+function allSubsets(arr) {
+  const result = [];
+  const n = arr.length;
+  for (let mask = 0; mask < (1 << n); mask++) {
+    const subset = new Set();
+    for (let i = 0; i < n; i++) {
+      if (mask & (1 << i)) subset.add(arr[i]);
+    }
+    result.push(subset);
+  }
+  return result;
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+function setMain(type, a, b) {
+  if (type === 'spin') {
+    main.innerHTML = `<div class="state-msg"><span class="spin"></span><span>${a}</span></div>`;
+  } else {
+    main.innerHTML = `<div class="state-msg"><div class="state-icon">${a}</div><span>${b||a}</span></div>`;
+  }
+}
+function lastName(full) {
+  if (!full) return '';
+  const p = full.trim().split(' ');
+  return p.length > 1 ? p.slice(1).join(' ') : full;
+}
+function initials(full) {
+  return (full||'').split(' ').map(w=>w[0]||'').join('').slice(0,2).toUpperCase();
+}
+</script>
+</body>
+</html>
