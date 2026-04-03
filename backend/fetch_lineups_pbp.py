@@ -1,5 +1,5 @@
 """
-NothingButNet — Leverage-Filtered Lineup Stats via Play-by-Play
+ydkball — Leverage-Filtered Lineup Stats via Play-by-Play
 ================================================================
 python backend/fetch_lineups_pbp.py [--season 2025-26] [--team BOS]
 

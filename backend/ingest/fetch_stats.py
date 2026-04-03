@@ -1,5 +1,5 @@
 """
-NothingButNet — NBA Stats Fetcher
+ydkball — NBA Stats Fetcher
 ===================================
 python backend/ingest/fetch_stats.py
 
@@ -283,7 +283,7 @@ def upsert_seasons(conn, rows):
 # ── Run ───────────────────────────────────────────────────────
 
 def run():
-    print(f"\n🏀 NothingButNet — Fetching {SEASON} {SEASON_TYPE}")
+    print(f"\n🏀 ydkball — Fetching {SEASON} {SEASON_TYPE}")
     print("=" * 60)
     print("\n[1/9] Bio + Base + Totals")
     bio_df, base_df, totals_df = fetch_bio_and_base(SEASON, SEASON_TYPE)

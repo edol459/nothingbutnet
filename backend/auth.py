@@ -1,5 +1,5 @@
 """
-NothingButNet — Google OAuth
+ydkball — Google OAuth
 ==============================
 Registers a Flask Blueprint at /auth/* that handles:
   GET /auth/google/login     → redirect to Google consent screen

@@ -1,5 +1,5 @@
 """
-NothingButNet — Game Fetcher
+ydkball — Game Fetcher
 ==============================
 python backend/fetch_games.py
 

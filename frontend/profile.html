@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Profile — NothingButNet</title>
+<title>Profile — ydkball</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -251,7 +251,7 @@ function renderProfile() {
   const u = PROFILE.user;
   const s = PROFILE.stats;
   const isOwn = PROFILE.is_own;
-  document.title = `${u.display_name} — NothingButNet`;
+  document.title = `${u.display_name} — ydkball`;
 
   const avatarContent = u.avatar_url
     ? `<img src="${u.avatar_url}" alt="${u.display_name}">`
@@ -632,7 +632,7 @@ async function saveName() {
     // Update locally
     if (PROFILE) PROFILE.user.display_name = name;
     document.querySelector('.profile-name').textContent = name;
-    document.title = `${name} — NothingButNet`;
+    document.title = `${name} — ydkball`;
     // Update nav
     const navName = document.querySelector('.nav-auth-name');
     if (navName) navName.textContent = name;

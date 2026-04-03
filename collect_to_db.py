@@ -1,5 +1,5 @@
 """
-NothingButNet — Possession Data Collector (PostgreSQL)
+ydkball — Possession Data Collector (PostgreSQL)
 =======================================================
 Fetches play-by-play for every game in a season, runs the possession
 pipeline, and writes results directly to your Railway PostgreSQL database.

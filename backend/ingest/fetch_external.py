@@ -1,5 +1,5 @@
 """
-NothingButNet — External Metrics Fetcher
+ydkball — External Metrics Fetcher
 ==========================================
 python backend/ingest/fetch_external.py
 
@@ -303,7 +303,7 @@ def write_net_pts(all_players, season, season_type):
 # ── Main ──────────────────────────────────────────────────────
 
 def run():
-    print(f"\n🌐 NothingButNet — Fetching External Metrics")
+    print(f"\n🌐 ydkball — Fetching External Metrics")
     print(f"   Season: {SEASON} {SEASON_TYPE}")
     print("=" * 50)
 

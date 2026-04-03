@@ -1,5 +1,5 @@
 """
-NothingButNet — Training Data Collector
+ydkball — Training Data Collector
 ========================================
 Fetches game IDs for one or more seasons, runs the possession pipeline
 on each game, and saves results as JSONL files for model training.

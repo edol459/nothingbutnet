@@ -1,5 +1,5 @@
 """
-NothingButNet — Daily Update Pipeline
+ydkball — Daily Update Pipeline
 ==========================================
 python backend/ingest/daily_update.py
 
@@ -74,7 +74,7 @@ def main():
     season, season_type = get_current_season()
 
     print(f"\n{'='*60}")
-    print(f"NOTHINGBUTNET — Daily Update")
+    print(f"YDKBALL — Daily Update")
     print(f"Season: {season} | {season_type}")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}")

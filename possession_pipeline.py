@@ -1,5 +1,5 @@
 """
-NothingButNet — Possession Stitching Pipeline
+ydkball — Possession Stitching Pipeline
 ==============================================
 Converts raw PlayByPlayV3 events + GameRotation data into structured
 possession objects, each with:

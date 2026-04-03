@@ -1,4 +1,4 @@
-ADDING A NEW SEASON TO NOTHINGBUTNET
+ADDING A NEW SEASON TO YDKBALL
 ======================================
 
 Run the following scripts in order from the project root.
@@ -20,7 +20,7 @@ Regular season:
 Playoffs (optional, run after regular season):
   python backend/ingest/fetch_season.py --season 2024-25 --season-type Playoffs
 
-  → YES, this is still needed for NothingButNet. The stats page
+  → YES, this is still needed for ydkball. The stats page
     (/api/players) and Builder (/api/builder) both query player_seasons
     and players directly. This is the primary data source for the whole
     app — do not skip it.
@@ -75,7 +75,7 @@ have current-season data.
   Derived metrics (gravity, shot quality, leverage):
     Writes to: player_metrics
     python backend/ingest/compute_metrics.py --season 2024-25
-    Note: player_metrics is NOT queried by NothingButNet's server.
+    Note: player_metrics is NOT queried by ydkball's server.
     This script is left over from TheImpactBoard. Skip it entirely.
 
   If you ran any optional steps that update player_seasons, re-run
@@ -98,7 +98,7 @@ TABLE REFERENCE
   games              — completed game records (populated automatically
                        by the live scoreboard system, not by ingest scripts)
   game_reviews       — user ratings/reviews, tied to games table
-  player_metrics     — TheImpactBoard leftover, not used by NothingButNet
+  player_metrics     — TheImpactBoard leftover, not used by ydkball
 
 
 NOTES

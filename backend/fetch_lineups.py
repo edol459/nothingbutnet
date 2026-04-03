@@ -1,5 +1,5 @@
 """
-NothingButNet — Fetch Lineup & Roster Data
+ydkball — Fetch Lineup & Roster Data
 ============================================
 python backend/fetch_lineups.py [--season 2025-26] [--team BOS]
 

@@ -1,5 +1,5 @@
 """
-NothingButNet — Schema v4: Lineup & Roster Tables
+ydkball — Schema v4: Lineup & Roster Tables
 ====================================================
 python backend/schema_v4.py
 

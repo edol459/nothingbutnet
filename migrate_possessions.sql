@@ -1,4 +1,4 @@
--- NothingButNet — Possession Tables Migration
+-- ydkball — Possession Tables Migration
 -- Run with: psql $DATABASE_URL -f migrate_possessions.sql
 
 -- ============================================================

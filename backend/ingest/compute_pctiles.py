@@ -1,5 +1,5 @@
 """
-NothingButNet — Percentile Computation
+ydkball — Percentile Computation
 ========================================
 python backend/ingest/compute_pctiles.py
 
@@ -92,7 +92,7 @@ def compute_pctiles(values: list[tuple[int, float]]) -> dict[int, float]:
 
 
 def run():
-    print(f"\n📊 NothingButNet — Computing Percentiles")
+    print(f"\n📊 ydkball — Computing Percentiles")
     print(f"   Season: {SEASON} {SEASON_TYPE}")
     print(f"   Min minutes: {MIN_MINUTES}")
     print("=" * 50)

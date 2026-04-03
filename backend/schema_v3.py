@@ -1,5 +1,5 @@
 """
-NothingButNet — Schema v3: Friendships
+ydkball — Schema v3: Friendships
 =========================================
 python backend/schema_v3.py
 
