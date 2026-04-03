@@ -17,7 +17,6 @@ import json
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
-from werkzeug.middleware.proxy_fix import ProxyFix
 import psycopg2
 import psycopg2.extras
 
@@ -26,8 +25,6 @@ load_dotenv()
 # Serve frontend/index.html at / so `python backend/server.py` is the only command needed
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend')
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
-# Trust Railway's reverse proxy so url_for() generates correct https:// URLs
-app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 CORS(app)
 
 @app.route('/')
