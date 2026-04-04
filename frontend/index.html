@@ -100,7 +100,7 @@ nav {
 .nav-link.active { color: var(--ink); background: var(--paper3); }
 
 /* ── Page layout ────────────────────────────────────────────── */
-.page { padding-top: 40px; }
+.page { padding-top: var(--nav-h); }
 
 /* ── Scoreboard section ─────────────────────────────────────── */
 .scoreboard-section {
@@ -643,7 +643,7 @@ nav {
 /* ── Mobile ──────────────────────────────────────────────────── */
 @media (max-width: 640px) {
   :root { --nav-h: 88px; }
-  nav { height: auto; padding: 0 16px; flex-wrap: wrap; gap: 0; align-items: center; }
+  nav { position: fixed; top: 0; left: 0; right: 0; height: auto; padding: 0 16px; flex-wrap: wrap; gap: 0; align-items: center; }
   .nav-wordmark { padding: 13px 0; }
   .nav-auth { padding: 13px 0; }
   .nav-auth-name { display: none; }
@@ -654,8 +654,6 @@ nav {
   }
   .nav-links::-webkit-scrollbar { display: none; }
   .nav-link { white-space: nowrap; padding: 5px 12px; }
-
-  .page { padding-top: 88px; }
   .scoreboard-section { padding: 0 16px 0; }
   .cal-strip-wrap { margin: 0 -16px 14px; }
   .cal-strip { padding: 0 16px; }

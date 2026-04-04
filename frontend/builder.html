@@ -459,7 +459,7 @@ tbody tr { animation: rowIn 0.2s ease both; }
   /* Stack sidebar above main content */
   .app { flex-direction: column; }
   .builder-layout { grid-template-columns: 1fr; overflow: visible; }
-  .builder-panel { border-right: none; border-bottom: 1px solid var(--rule); max-height: 280px; overflow: hidden; }
+  .builder-panel { border-right: none; border-bottom: 1px solid var(--rule); max-height: 340px; overflow-y: auto; }
   .builder-results { overflow: visible; }
   .builder-results-head { padding: 14px 16px; }
   .builder-min-wrap { flex-wrap: wrap; }
@@ -484,12 +484,6 @@ tbody tr { animation: rowIn 0.2s ease both; }
     <a class="nav-tab" href="/onoff">On/Off</a>
     <a class="nav-tab" href="/reviews.html">BasketBoxd</a>
   </div>
-  <div class="nav-right">
-    <select class="season-select" id="season-select">
-      <option value="2025-26" selected>2025–26</option>
-      <option value="2024-25">2024–25</option>
-      <option value="2023-24">2023–24</option>
-    </select>
   </div>
   <div class="nav-auth" id="nav-auth-slot">    <a class="nav-tab" href="/reviews">Game Reviews</a>
   </div>
@@ -500,7 +494,12 @@ tbody tr { animation: rowIn 0.2s ease both; }
 
     <div class="page-header">
       <div class="page-title">Builder</div>
-      <div class="page-subtitle">Select stats · Find who excels across all of them</div>
+      <select class="season-select" id="season-select">
+        <option value="2025-26" selected>2025–26</option>
+        <option value="2024-25">2024–25</option>
+        <option value="2023-24">2023–24</option>
+      </select>
+      <div class="page-subtitle">Select stats · Find who's in the highest average percentile in all of them</div>
     </div>
 
     <div class="builder-layout">
@@ -509,7 +508,7 @@ tbody tr { animation: rowIn 0.2s ease both; }
       <div class="builder-panel">
         <div class="builder-panel-head">
           <div class="builder-panel-title">Pick Stats</div>
-          <div class="builder-panel-sub">Each contributes its league percentile</div>
+          <div class="builder-panel-sub"></div>
         </div>
 
         <div class="builder-run-wrap">
