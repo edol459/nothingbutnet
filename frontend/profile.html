@@ -19,7 +19,8 @@
   --nav-h: 56px;
 }
 
-body { background: var(--paper); color: var(--ink); min-height: 100vh; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+html { overflow-x: clip; }
+body { background: var(--paper); color: var(--ink); min-height: 100vh; -webkit-font-smoothing: antialiased; overflow-x: clip; }
 
 /* ── Nav ── */
 nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); background: var(--paper); border-bottom: 1px solid var(--rule); display: flex; align-items: center; padding: 0 24px; gap: 24px; z-index: 100; }
