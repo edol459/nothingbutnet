@@ -49,6 +49,25 @@ app.permanent_session_lifetime = timedelta(days=60)
 init_oauth(app)
 app.register_blueprint(auth_bp)
 
+def _ensure_tables():
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS review_likes (
+                user_id    INTEGER REFERENCES users(id)        ON DELETE CASCADE,
+                review_id  INTEGER REFERENCES game_reviews(id) ON DELETE CASCADE,
+                created_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (user_id, review_id)
+            )
+        """)
+        conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        print(f"[startup] _ensure_tables warning: {e}")
+
+_ensure_tables()
+
 # ── /api/seasons ─────────────────────────────────────────────
 
 @app.route("/api/seasons")

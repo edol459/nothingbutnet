@@ -20,14 +20,14 @@
   --nav-h:56px;
   font-size:15px;
 }
-html{scroll-behavior:smooth;overflow-x:hidden}
+html{scroll-behavior:smooth}
 body{font-family:var(--ff-sans);background:var(--paper);color:var(--ink);min-height:100vh;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
 body::before{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");opacity:.022;pointer-events:none;z-index:9999;}
 
 /* ── Nav ─────────────────────────────────────────────────────── */
 nav{position:fixed;top:0;left:0;right:0;height:var(--nav-h);background:var(--paper);border-bottom:1px solid var(--rule);display:flex;align-items:center;padding:0 24px;gap:32px;z-index:100;}
 .nav-wordmark{font-family:var(--ff-serif);font-size:20px;color:var(--ink);letter-spacing:-.01em;text-decoration:none;flex-shrink:0;}
-.nav-wordmark em{font-style:italic;color:var(--orange);}
+.nav-wordmark span { color: var(--orange); }
 .nav-tabs{display:flex;gap:2px;flex:1 1 0;min-width:0;overflow:hidden;}
 .nav-tab{font-family:var(--ff-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);text-decoration:none;padding:6px 14px;border-radius:4px;transition:color .15s,background .15s;display:inline-block;}
 .nav-tab:hover{color:var(--ink);background:var(--paper2);}
@@ -325,7 +325,7 @@ table.box-table tfoot td:first-child{text-align:left;}
 </head>
 <body>
 <nav>
-  <a class="nav-wordmark" href="/">ydkball</a>
+  <a class="nav-wordmark" href="/">ydk<span>ball</span></a>
   <div class="nav-tabs">
     <a class="nav-tab" href="/stats.html">Stats</a>
     <a class="nav-tab" href="/builder.html">Builder</a>
