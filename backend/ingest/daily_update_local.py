@@ -1,19 +1,23 @@
 """
-ydkball — Cloud Daily Update (Railway)
+ydkball — Local Daily Update (Windows PC)
 ==========================================
-python backend/ingest/daily_update.py
+python backend/ingest/daily_update_local.py
 
-Runs only the steps that work from cloud IPs (stats.nba.com is blocked
-on Railway — those steps run locally via daily_update_local.py instead).
+Runs all steps that require a residential IP (stats.nba.com blocks
+Railway and other cloud datacenter IPs). Run this on your local
+Windows machine via Task Scheduler — it writes directly to the
+Railway Postgres DB using DATABASE_URL from your .env file.
 
 Steps:
-  1. fetch_players.py   — sync players table (CDN-friendly, works from cloud)
-  2. fetch_darko.py     — DARKO DPM (darko.app)
-  3. fetch_lebron.py    — LEBRON + O/D-LEBRON + WAR (fanspo.com)
-  4. fetch_net_pts.py   — Net Points per 100 (ESPN via S3)
+  1.  fetch_season.py          — re-fetch all season aggregate stats
+  2.  fetch_new_pbp_stats.py   — incremental PBP (bad pass + lost ball TOV)
+  3.  fetch_closest_defender.py — closest defender shot data
+  4.  fetch_matchups.py        — opponent-adjusted matchup defensive metric
+  5.  fetch_nba_stats.py       — gravity, shot quality, leverage
+  6.  fetch_lineups.py         — 5-man lineup data for On/Off tool
+  7.  compute_pctiles.py       — recompute percentiles for Builder
 
-compute_pctiles runs at the end of daily_update_local.py after NBA stats
-are refreshed, so percentiles always reflect the latest data.
+Scheduled via: run_daily_local.bat (Windows Task Scheduler)
 """
 
 import os
@@ -71,39 +75,56 @@ def main():
     season, season_type = get_current_season()
 
     print(f"\n{'='*60}")
-    print(f"YDKBALL — Daily Update")
+    print(f"YDKBALL — Local Daily Update")
     print(f"Season: {season} | {season_type}")
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}")
 
-    base = os.path.join(
+    base         = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         'ingest'
     )
+    base_backend = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     season_args = ['--season', season, '--season-type', season_type]
 
     steps = [
-        # ── Players (CDN-friendly, works from cloud) ───────────
+        # ── NBA API stats (require residential IP) ────────────
         (
-            'fetch_players.py',
-            'Players sync',
+            'fetch_season.py',
+            'Season aggregate stats',
+            season_args,
+        ),
+        (
+            'fetch_new_pbp_stats.py',
+            'Incremental PBP stats (bad pass + lost ball TOV)',
+            season_args,
+        ),
+        (
+            'fetch_closest_defender.py',
+            'Closest defender shots',
+            season_args,
+        ),
+        (
+            'fetch_matchups.py',
+            'Matchup defense',
+            season_args + ['--min-poss', '20', '--min-def-poss', '300'],
+        ),
+        (
+            'fetch_nba_stats.py',
+            'NBA Stats (gravity, shot quality, leverage)',
+            season_args,
+        ),
+        # ── On/Off (nba_api, requires residential IP) ─────────
+        (
+            os.path.join(base_backend, 'fetch_lineups.py'),
+            'Lineup & roster data (On/Off)',
             ['--season', season],
         ),
-        # ── External metrics (non-NBA endpoints) ──────────────
+        # ── Compute (runs last, after all stats are fresh) ────
         (
-            'fetch_darko.py',
-            'DARKO DPM',
-            season_args,
-        ),
-        (
-            'fetch_lebron.py',
-            'LEBRON',
-            season_args,
-        ),
-        (
-            'fetch_net_pts.py',
-            'Net Points per 100',
+            'compute_pctiles.py',
+            'Percentiles (Builder)',
             season_args,
         ),
     ]
@@ -116,16 +137,19 @@ def main():
             continue
         if not run(path, label, args):
             failed_steps.append(label)
-            # All failures are non-fatal — log and continue
+            # compute_pctiles is a hard dependency — stop if it fails
+            if script_name == 'compute_pctiles.py':
+                print(f"\n❌ Pipeline stopped at: {label}")
+                sys.exit(1)
             print(f"   ⚠️  Continuing despite failure…")
 
     print(f"\n{'='*60}")
     if failed_steps:
-        print(f"⚠️  Daily update finished with {len(failed_steps)} failure(s):")
+        print(f"⚠️  Local update finished with {len(failed_steps)} failure(s):")
         for s in failed_steps:
             print(f"   - {s}")
     else:
-        print(f"✅ Daily update complete — all steps passed")
+        print(f"✅ Local update complete — all steps passed")
     print(f"Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}\n")
 
