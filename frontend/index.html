@@ -7,7 +7,7 @@
 <!-- Kick off scoreboard fetch before any JS parses -->
 <script>window._sbPreload = fetch('/api/scoreboard');</script>
 <link rel="icon" type="image/png" href="/logo.png">
-<link rel="apple-touch-icon" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -671,7 +671,109 @@ nav {
   .news-aside { padding: 20px 16px 40px; overflow-x: auto; }
   .news-list { min-width: 320px; }
   .section-title { font-size: 20px; }
+  .install-btn { display: flex; }
 }
+
+/* ── Install button (mobile only) ───────────────────────────── */
+.install-btn {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.install-btn:hover { color: var(--ink); border-color: var(--ink3); background: var(--paper2); }
+.install-btn svg { flex-shrink: 0; }
+
+/* ── Install modal ───────────────────────────────────────────── */
+.install-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(12,12,13,0.55);
+  z-index: 9000;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.install-overlay.open { display: flex; }
+
+.install-sheet {
+  background: var(--paper);
+  border-radius: 16px 16px 0 0;
+  padding: 24px 24px 36px;
+  width: 100%;
+  max-width: 480px;
+  border-top: 1px solid var(--rule);
+  animation: sheetUp 0.22s ease;
+}
+@keyframes sheetUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.install-sheet-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.install-sheet-title {
+  font-family: var(--ff-serif);
+  font-size: 20px;
+  color: var(--ink);
+}
+.install-sheet-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink3);
+  padding: 4px;
+  line-height: 1;
+  font-size: 20px;
+}
+
+.install-steps {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.install-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.install-step-num {
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: var(--orange);
+  color: #fff;
+  font-family: var(--ff-mono);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.install-step-text {
+  font-size: 14px;
+  color: var(--ink2);
+  line-height: 1.5;
+  padding-top: 3px;
+}
+.install-step-text strong { color: var(--ink); }
 
 </style>
 </head>
@@ -686,8 +788,25 @@ nav {
     <a class="nav-link" href="/onoff">On/Off</a>
     <a class="nav-link" href="/reviews.html">BasketBoxd</a>
   </div>
+  <button class="install-btn" id="install-btn" onclick="openInstallModal()">
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6.5 1v7M3.5 5.5l3 3 3-3"/><rect x="1" y="9" width="11" height="3" rx="1"/>
+    </svg>
+    Add to Home
+  </button>
   <div class="nav-auth" id="nav-auth-slot"></div>
 </nav>
+
+<!-- ── Install modal ─────────────────────────────────────────── -->
+<div class="install-overlay" id="install-overlay" onclick="closeInstallModal(event)">
+  <div class="install-sheet">
+    <div class="install-sheet-header">
+      <div class="install-sheet-title">Add to Home Screen</div>
+      <button class="install-sheet-close" onclick="closeInstallModal()">✕</button>
+    </div>
+    <ol class="install-steps" id="install-steps"></ol>
+  </div>
+</div>
 
 <!-- ── Page ────────────────────────────────────────────────── -->
 <div class="page">
@@ -1171,6 +1290,40 @@ async function navSignOut() {
 }
 initNavAuth();
 
+</script>
+<script>
+// ── Install modal ─────────────────────────────────────────────
+const isIOS     = /iphone|ipad|ipod/i.test(navigator.userAgent);
+const isAndroid = /android/i.test(navigator.userAgent);
+const isMobile  = isIOS || isAndroid;
+const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+
+if (isMobile && !isStandalone) {
+  document.getElementById('install-btn').style.display = 'flex';
+}
+
+function openInstallModal() {
+  const steps = document.getElementById('install-steps');
+  if (isIOS) {
+    steps.innerHTML = `
+      <li class="install-step"><div class="install-step-num">1</div><div class="install-step-text">Tap the <strong>Share</strong> button (the box with an arrow) at the bottom of Safari.</div></li>
+      <li class="install-step"><div class="install-step-num">2</div><div class="install-step-text">Scroll down and tap <strong>Add to Home Screen</strong>.</div></li>
+      <li class="install-step"><div class="install-step-num">3</div><div class="install-step-text">Tap <strong>Add</strong> in the top right — done!</div></li>
+    `;
+  } else {
+    steps.innerHTML = `
+      <li class="install-step"><div class="install-step-num">1</div><div class="install-step-text">Tap the <strong>menu</strong> button (three dots) in the top right of Chrome.</div></li>
+      <li class="install-step"><div class="install-step-num">2</div><div class="install-step-text">Tap <strong>Add to Home screen</strong>.</div></li>
+      <li class="install-step"><div class="install-step-num">3</div><div class="install-step-text">Tap <strong>Add</strong> to confirm — done!</div></li>
+    `;
+  }
+  document.getElementById('install-overlay').classList.add('open');
+}
+
+function closeInstallModal(e) {
+  if (e && e.target !== document.getElementById('install-overlay')) return;
+  document.getElementById('install-overlay').classList.remove('open');
+}
 </script>
 </body>
 </html>

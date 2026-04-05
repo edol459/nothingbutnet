@@ -1194,8 +1194,8 @@ async function loadTopRated() {
         </div>
       </div>
       <div class="tgc-rating">
-        ${starsHTML(Math.round(g.bayesian_rating), 'sm')}
-        <div class="tgc-stars-val">${(g.bayesian_rating / 2).toFixed(2)}</div>
+        ${starsHTML(Math.round(g.avg_stars * 2), 'sm')}
+        <div class="tgc-stars-val">${g.avg_stars.toFixed(2)}</div>
       </div>
     `;
     feed.appendChild(div);
@@ -1260,7 +1260,7 @@ async function loadBrowse(append = false) {
 
     const ratingPart = g.avg_stars
       ? `<div class="tgc-rating">
-           ${starsHTML(Math.round(g.bayesian_rating), 'sm')}
+           ${starsHTML(Math.round(g.avg_stars * 2), 'sm')}
            <div class="tgc-stars-val">${g.avg_stars.toFixed(2)}</div>
          </div>`
       : `<div class="tgc-rating"><span style="font-size:0.72rem;color:var(--ink-3)">unrated</span></div>`;
