@@ -152,6 +152,10 @@ nav {
   overflow: hidden;
 }
 
+@media (max-width: 768px) {
+  .builder-layout { flex: 0; }
+}
+
 /* Left panel */
 .builder-panel {
   border-right: 1px solid var(--rule);
@@ -514,6 +518,7 @@ tbody tr { animation: rowIn 0.2s ease both; }
     border: 1.5px solid var(--rule);
     border-radius: 10px;
     cursor: pointer;
+    max-height: 100px;
     color: var(--ink2);
     text-align: left;
     transition: border-color 0.15s, background 0.15s;
@@ -559,7 +564,7 @@ tbody tr { animation: rowIn 0.2s ease both; }
     bottom: 0;
     left: 0;
     right: 0;
-    max-height: 82vh;
+    height: 82vh;
     transform: translateY(100%);
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 210;
@@ -624,13 +629,12 @@ tbody tr { animation: rowIn 0.2s ease both; }
   <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
   <div class="nav-tabs">
     <a class="nav-tab" href="/stats.html">Stats</a>
+    <a class="nav-tab" href="/reviews.html">BasketBoxd</a>
     <a class="nav-tab active" href="/builder.html">Builder</a>
     <a class="nav-tab" href="/onoff">On/Off</a>
-    <a class="nav-tab" href="/reviews.html">BasketBoxd</a>
+    <a class="nav-tab" href="/compare.html">Compare</a>
   </div>
-  </div>
-  <div class="nav-auth" id="nav-auth-slot">    <a class="nav-tab" href="/reviews">Game Reviews</a>
-  </div>
+  <div class="nav-auth" id="nav-auth-slot"></div>
 </nav>
 
 <div class="app">
@@ -638,11 +642,7 @@ tbody tr { animation: rowIn 0.2s ease both; }
 
     <div class="page-header">
       <div class="page-title">Builder</div>
-      <select class="season-select" id="season-select">
-        <option value="2025-26" selected>2025–26</option>
-        <option value="2024-25">2024–25</option>
-        <option value="2023-24">2023–24</option>
-      </select>
+      <select class="season-select" id="season-select"></select>
       <div class="page-subtitle">Select stats · Find who's in the highest average percentile in all of them</div>
     </div>
 
@@ -662,7 +662,7 @@ tbody tr { animation: rowIn 0.2s ease both; }
         <div class="builder-run-wrap">
           <div class="builder-chips" id="builder-chips"></div>
           <div class="builder-run-row">
-            <button class="btn-run" id="builder-run" disabled>Run Composite →</button>
+            <button class="btn-run" id="builder-run" disabled>Run Build →</button>
             <button class="btn-select-all" id="builder-select-all" title="Select / deselect all stats">All</button>
           </div>
         </div>
@@ -681,7 +681,6 @@ tbody tr { animation: rowIn 0.2s ease both; }
       <!-- Mobile stat drawer trigger (hidden on desktop via CSS) -->
       <button class="mobile-stats-btn" id="mobile-stats-btn" aria-label="Open stat selector">
         <span class="stats-btn-label">
-          <span class="stats-btn-icon">⚗️</span>
           Select Stats
           <span class="stats-btn-count" id="stats-btn-count">0</span>
         </span>
@@ -712,7 +711,7 @@ tbody tr { animation: rowIn 0.2s ease both; }
         <div class="builder-empty" id="builder-empty">
           <div class="builder-empty-icon">⚗️</div>
           <div class="builder-empty-text">No results yet</div>
-          <div class="builder-empty-sub">Pick stats on the left, then run</div>
+          <div class="builder-empty-sub">Choose your build's stats, then run</div>
         </div>
 
         <div class="builder-spotlight" id="builder-spotlight" style="display:none">
@@ -757,12 +756,13 @@ tbody tr { animation: rowIn 0.2s ease both; }
   </div>
 </div>
 
+<script src="/season-config.js"></script>
 <script>
 const API = window.location.protocol === 'file:' ? 'http://localhost:5000' : '';
 
 const ST = {
-  season:     document.getElementById('season-select').value,
-  seasonType: 'Regular Season',
+  season:     computeCurrentSeason(),
+  seasonType: computeCurrentSeasonType(),
   builderSelected: [],
   builderResults:  [],
   impactMode: false,
@@ -1195,6 +1195,7 @@ async function navSignOut() {
   window.location.reload();
 }
 initNavAuth();
+populateSeasonDropdown(document.getElementById('season-select'), ST.season);
 
 // ── Mobile stats drawer ───────────────────────────────────────────
 const mobileStatsBtn = document.getElementById('mobile-stats-btn');

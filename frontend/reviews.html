@@ -803,9 +803,10 @@
   <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
   <div class="nav-tabs">
     <a class="nav-tab" href="/stats.html">Stats</a>
+    <a class="nav-tab active" href="/reviews.html">BasketBoxd</a>
     <a class="nav-tab" href="/builder.html">Builder</a>
     <a class="nav-tab" href="/onoff">On/Off</a>
-    <a class="nav-tab active" href="/reviews">BasketBoxd</a>
+    <a class="nav-tab" href="/compare.html">Compare</a>
   </div>
   <div class="nav-auth" id="nav-auth-slot"></div>
 </nav>
@@ -993,11 +994,14 @@ function scoreline(g) {
   </div>`;
 }
 
-function avatarEl(displayName, avatarUrl, size = 40) {
-  if (avatarUrl) {
-    return `<div class="reviewer-avatar" style="width:${size}px;height:${size}px"><img src="${avatarUrl}" alt="${displayName}"></div>`;
+function avatarEl(displayName, avatarUrl, size = 40, userId = null) {
+  const inner = avatarUrl
+    ? `<img src="${avatarUrl}" alt="${displayName}">`
+    : displayName.charAt(0).toUpperCase();
+  if (userId) {
+    return `<a href="/profile/${userId}" class="reviewer-avatar" onclick="event.stopPropagation()" style="width:${size}px;height:${size}px;text-decoration:none;color:inherit">${inner}</a>`;
   }
-  return `<div class="reviewer-avatar" style="width:${size}px;height:${size}px">${displayName.charAt(0).toUpperCase()}</div>`;
+  return `<div class="reviewer-avatar" style="width:${size}px;height:${size}px">${inner}</div>`;
 }
 
 function showToast(msg) {
@@ -1129,10 +1133,10 @@ async function loadRecent(append = false) {
       div.style.cursor = 'pointer';
       div.addEventListener('click', () => goToGame(r.game_id));
       div.innerHTML = `
-        ${avatarEl(r.display_name, r.avatar_url)}
+        ${avatarEl(r.display_name, r.avatar_url, 40, r.user_id)}
         <div class="review-body">
           <div class="review-meta">
-            <span class="reviewer-name">${r.display_name}</span>
+            <a href="/profile/${r.user_id}" class="reviewer-name" onclick="event.stopPropagation()" style="text-decoration:none;color:inherit">${r.display_name}</a>
             <span class="review-action">reviewed</span>
             <span class="review-game-link" onclick="goToGame('${r.game_id}')">${r.away_team_abbr} @ ${r.home_team_abbr}</span>
           </div>

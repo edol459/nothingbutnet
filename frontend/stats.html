@@ -1274,9 +1274,10 @@ tbody tr {
 
   <div class="nav-tabs">
     <a class="nav-tab active" href="/stats.html">Stats</a>
+    <a class="nav-tab" href="/reviews.html">BasketBoxd</a>
     <a class="nav-tab" href="/builder.html">Builder</a>
     <a class="nav-tab" href="/onoff">On/Off</a>
-    <a class="nav-tab" href="/reviews.html">BasketBoxd</a>
+    <a class="nav-tab" href="/compare.html">Compare</a>
   </div>
 
   <div class="nav-auth" id="nav-auth-slot">    <a class="nav-tab" href="/reviews">Game Reviews</a>
@@ -1291,12 +1292,8 @@ tbody tr {
 
     <div class="page-header">
       <div class="page-title">Player Stats</div>
-      <div class="page-subtitle" id="page-subtitle">2025–26 · Regular Season</div>
-      <select class="season-select" id="season-select">
-        <option value="2025-26" selected>2025–26</option>
-        <option value="2024-25">2024–25</option>
-        <option value="2023-24">2023–24</option>
-      </select>
+      <div class="page-subtitle" id="page-subtitle"></div>
+      <select class="season-select" id="season-select"></select>
     </div>
 
     <!-- Toolbar -->
@@ -1482,6 +1479,7 @@ tbody tr {
 <!-- ════════════════════════════════════════════════════════════
   JavaScript
 ════════════════════════════════════════════════════════════ -->
+<script src="/season-config.js"></script>
 <script>
 // ── Config ───────────────────────────────────────────────────
 // When served via Flask (python backend/server.py → localhost:5000),
@@ -1493,8 +1491,8 @@ const API = window.location.protocol === 'file:'
 
 // ── State ────────────────────────────────────────────────────
 const ST = {
-  season:      '2025-26',
-  seasonType:  'Regular Season',
+  season:      computeCurrentSeason(),
+  seasonType:  computeCurrentSeasonType(),
   view:        'stats',
 
   // Stats table
@@ -1711,7 +1709,6 @@ const STAT_CATS = {
           { key: 'bad_pass_tov',    label: 'Bad Pass TOV',      fmt: '1f' },
           { key: 'lost_ball_tov',   label: 'Lost Ball TOV',     fmt: '1f' },
           { key: '_pot_ast_per_bp', label: 'Pot AST / Bad Pass',fmt: '2f', computed: true },
-          { key: 'pts_paint',       label: 'Paint PTS',         fmt: '1f' },
           { key: 'pct_uast_fgm',    label: 'Unasstd FG%',      fmt: 'pct' },
           { key: 'pct_pts_paint',   label: '% Pts Paint',      fmt: 'pct' },
           { key: 'pct_pts_3pt',     label: '% Pts 3PT',        fmt: 'pct' },
@@ -1976,8 +1973,6 @@ const STAT_CATS = {
           { key: 'def_rim_fgm',     label: 'Rim FGM Def', fmt: '1f'  },
           { key: 'def_rim_fg_pct',  label: 'Rim FG% Def', fmt: 'pct' },
           { key: 'contested_shots', label: 'Cont. Shots', fmt: '1f'  },
-          { key: 'contested_2pt',   label: 'Cont. 2PT',   fmt: '1f'  },
-          { key: 'contested_3pt',   label: 'Cont. 3PT',   fmt: '1f'  },
           { key: 'deflections',     label: 'Deflections', fmt: '1f'  },
           { key: 'charges_drawn',   label: 'Charges',     fmt: '1f'  },
         ]
@@ -1993,8 +1988,6 @@ const STAT_CATS = {
         cols: [
           ...BASE_COLS,
           { key: 'contested_shots', label: 'Cont. Shots',  fmt: '1f' },
-          { key: 'contested_2pt',   label: 'Cont. 2PT',    fmt: '1f' },
-          { key: 'contested_3pt',   label: 'Cont. 3PT',    fmt: '1f' },
           { key: 'deflections',     label: 'Deflections',  fmt: '1f' },
           { key: 'charges_drawn',   label: 'Charges',      fmt: '1f' },
           { key: 'screen_assists',  label: 'Screen AST',   fmt: '1f' },
@@ -2085,7 +2078,6 @@ const CONTEXT_FILTERS = {
       { id: 'mpg', key: 'min_per_game', label: 'Min MPG', scale: 'raw' },
       { id: 'pts_pg', key: 'pts', label: 'Min PTS/G', scale: 'per_game' },
       { id: 'tov_pg', key: 'tov', label: 'Min TOV/G', scale: 'per_game' },
-      { id: 'pts_paint', key: 'pts_paint', label: 'Min paint PTS/G', scale: 'per_game' },
     ],
     scoring: [
       { id: 'gp', key: 'gp', label: 'Min GP', scale: 'raw' },
@@ -2458,7 +2450,7 @@ const BUILDER_CATALOG = [
 ];
 
 // ── Season availability ───────────────────────────────────────
-const CURRENT_SEASON = '2025-26';
+const CURRENT_SEASON = computeCurrentSeason();
 function isPastSeason() { return ST.season !== CURRENT_SEASON; }
 
 // Impact sub-tabs only available in 2025-26 (can't be backfilled)
@@ -2513,7 +2505,7 @@ document.querySelectorAll('.nav-tab').forEach(btn => {
 document.getElementById('season-select').addEventListener('change', function() {
   ST.season = this.value;
   const display = this.value.replace('-', '–');
-  document.getElementById('page-subtitle').textContent = `${display} · Regular Season`;
+  document.getElementById('page-subtitle').textContent = `${display} · ${ST.seasonType}`;
   // Re-render impact sub-tabs to reflect which metrics are available for this season
   if (ST.statCat === 'impact') renderSubTabs(ST.statCat);
   // Strip unavailable keys from builder selection when switching to a past season
@@ -3194,6 +3186,13 @@ function setStatus(html) {
 
 // ── Init ──────────────────────────────────────────────────────
 renderSubTabs(ST.statCat);  // populates sub-tabs, contextual filters, clears filter vals
+
+// Populate season dropdown from API, then set subtitle to match
+populateSeasonDropdown(document.getElementById('season-select'), ST.season).then(() => {
+  const display = ST.season.replace('-', '–');
+  document.getElementById('page-subtitle').textContent = `${display} · ${ST.seasonType}`;
+});
+
 loadStats();
 </script>
 <script>

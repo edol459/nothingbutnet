@@ -331,9 +331,10 @@ table.box-table tfoot td:first-child{text-align:left;}
   <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
   <div class="nav-tabs">
     <a class="nav-tab" href="/stats.html">Stats</a>
+    <a class="nav-tab" href="/reviews.html">BasketBoxd</a>
     <a class="nav-tab" href="/builder.html">Builder</a>
     <a class="nav-tab" href="/onoff">On/Off</a>
-    <a class="nav-tab" href="/reviews">BasketBoxd</a>
+    <a class="nav-tab" href="/compare.html">Compare</a>
   </div>
   <div class="nav-auth" id="nav-auth-slot"></div>
 </nav>
@@ -712,10 +713,13 @@ function starsText(r10, size = 13) {
   return `<span style="font-size:${size}px;letter-spacing:-1px">${s}</span>`;
 }
 
-function avatarEl(name, url) {
+function avatarEl(name, url, userId = null) {
   const inner = url
     ? `<img src="${url}" alt="${name}" style="width:36px;height:36px;border-radius:50%;object-fit:cover">`
     : name.charAt(0).toUpperCase();
+  if (userId) {
+    return `<a href="/profile/${userId}" class="review-avatar" onclick="event.stopPropagation()" style="text-decoration:none;color:inherit">${inner}</a>`;
+  }
   return `<div class="review-avatar">${inner}</div>`;
 }
 
@@ -826,10 +830,10 @@ function reviewItemHTML(r) {
   </svg>`;
   const likeLabel = r.like_count > 0 ? r.like_count : '';
   return `<div class="review-item" data-review-id="${r.id}">
-    ${avatarEl(r.display_name, r.avatar_url)}
+    ${avatarEl(r.display_name, r.avatar_url, r.user_id)}
     <div class="review-body">
       <div class="review-top">
-        <span class="review-name">${r.display_name}</span>
+        <a href="/profile/${r.user_id}" class="review-name" onclick="event.stopPropagation()" style="text-decoration:none;color:inherit">${r.display_name}</a>
         ${starsText(r.rating)}
         <span class="review-date">${fmtShortDate(r.created_at)}</span>
       </div>

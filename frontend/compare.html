@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compare — ydkball</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --ink:       #0c0c0d;
+  --ink2:      #2a2a2e;
+  --ink3:      #6b6b78;
+  --ink4:      #a8a8b3;
+  --paper:     #F5F0E8;
+  --paper2:    #eeecea;
+  --paper3:    #e5e2dc;
+  --rule:      #d8d5cf;
+  --orange:    #e8530a;
+  --orange-lt: #fff0ea;
+  --green:     #1a7a4a;
+  --green-lt:  #e8f5ee;
+  --red:       #c0392b;
+
+  --ff-serif: 'DM Serif Display', Georgia, serif;
+  --ff-sans:  'Instrument Sans', system-ui, sans-serif;
+  --ff-mono:  'DM Mono', 'Courier New', monospace;
+  --nav-h: 56px;
+  font-size: 15px;
+}
+
+html { scroll-behavior: smooth; overflow-x: clip; }
+body {
+  font-family: var(--ff-sans);
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Nav ── */
+nav {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: var(--nav-h); background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  display: flex; align-items: center;
+  padding: 0 24px; gap: 32px; z-index: 100;
+}
+.nav-wordmark {
+  font-family: var(--ff-serif); font-size: 20px;
+  color: var(--ink); letter-spacing: -0.01em;
+  text-decoration: none; flex-shrink: 0;
+  display: flex; align-items: center; gap: 0;
+}
+.nav-logo { height: 26px; width: auto; margin-right: 8px; }
+.nav-wordmark span { color: var(--orange); }
+.nav-tabs { display: flex; gap: 2px; flex: 1 1 0; min-width: 0; overflow: hidden; }
+.nav-tab {
+  font-family: var(--ff-mono); font-size: 11px; font-weight: 400;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink3);
+  background: none; border: none; padding: 6px 14px; cursor: pointer;
+  border-radius: 4px; transition: color 0.15s, background 0.15s;
+  text-decoration: none; display: inline-block;
+}
+.nav-tab:hover { color: var(--ink); background: var(--paper2); }
+.nav-tab.active { color: var(--ink); background: var(--paper3); }
+.nav-auth { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.nav-auth-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--rule); }
+.nav-auth-name { font-family: var(--ff-mono); font-size: 11px; color: var(--ink3); }
+.nav-signin-btn { font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 12px; background: var(--orange); color: #fff; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; transition: opacity 0.15s; }
+.nav-signin-btn:hover { opacity: 0.85; }
+.nav-signout-btn { font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); background: none; border: none; cursor: pointer; padding: 4px 6px; }
+
+/* ── Page ── */
+.page {
+  padding-top: calc(var(--nav-h) + 40px);
+  max-width: 860px; margin: 0 auto;
+  padding-left: 24px; padding-right: 24px;
+  padding-bottom: 80px;
+}
+
+.page-header {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px; margin-bottom: 32px; text-align: center;
+}
+.page-title { font-family: var(--ff-serif); font-size: 32px; letter-spacing: -0.02em; }
+.page-subtitle { font-family: var(--ff-mono); font-size: 11px; color: var(--ink3); letter-spacing: 0.04em; }
+
+/* ── Controls bar ── */
+.controls-bar {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 28px; flex-wrap: wrap; justify-content: center;
+}
+.season-select {
+  font-family: var(--ff-mono); font-size: 11px; color: var(--ink2);
+  background: var(--paper2); border: 1px solid var(--rule);
+  border-radius: 4px; padding: 6px 10px; cursor: pointer; outline: none;
+}
+.season-select:focus { border-color: var(--orange); }
+
+/* ── Player pickers ── */
+.pickers {
+  display: grid; grid-template-columns: 1fr auto 1fr;
+  gap: 16px; align-items: start; margin-bottom: 28px;
+}
+.vs-divider {
+  font-family: var(--ff-serif); font-size: 22px; color: var(--ink4);
+  display: flex; align-items: center; padding-top: 8px;
+}
+
+.picker-wrap { position: relative; }
+.picker-label {
+  font-family: var(--ff-mono); font-size: 9px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink4); margin-bottom: 6px;
+}
+.picker-search {
+  width: 100%; font-family: var(--ff-sans); font-size: 13px;
+  background: var(--paper2); border: 1px solid var(--rule);
+  border-radius: 6px; padding: 9px 12px; color: var(--ink);
+  outline: none; transition: border-color 0.15s;
+}
+.picker-search:focus { border-color: var(--orange); }
+.picker-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--paper); border: 1px solid var(--rule);
+  border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.10);
+  max-height: 260px; overflow-y: auto; z-index: 50; display: none;
+}
+.picker-dropdown.open { display: block; }
+.picker-option {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; cursor: pointer; transition: background 0.1s;
+}
+.picker-option:hover, .picker-option.focused { background: var(--paper2); }
+.picker-headshot {
+  width: 32px; height: 32px; border-radius: 50%; object-fit: cover;
+  object-position: top; background: var(--paper3); flex-shrink: 0;
+  border: 1px solid var(--rule);
+}
+.picker-option-name { font-family: var(--ff-sans); font-size: 13px; color: var(--ink); flex: 1; }
+.picker-option-meta { font-family: var(--ff-mono); font-size: 10px; color: var(--ink4); }
+
+/* Selected player card */
+.player-card {
+  display: none; align-items: center; gap: 14px;
+  padding: 14px; background: var(--paper2);
+  border: 1px solid var(--rule); border-radius: 8px; margin-top: 8px;
+}
+.player-card.visible { display: flex; }
+.player-card-headshot {
+  width: 56px; height: 56px; border-radius: 50%; object-fit: cover;
+  object-position: top; background: var(--paper3); flex-shrink: 0;
+  border: 2px solid var(--rule);
+}
+.player-card-name { font-family: var(--ff-serif); font-size: 16px; color: var(--ink); line-height: 1.2; }
+.player-card-meta { font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); margin-top: 3px; letter-spacing: 0.04em; }
+.player-card-clear {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  font-size: 18px; color: var(--ink4); padding: 4px 6px;
+  border-radius: 4px; line-height: 1; transition: color 0.1s, background 0.1s;
+}
+.player-card-clear:hover { color: var(--ink); background: var(--paper3); }
+
+/* ── Stat group tabs ── */
+.group-tabs {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  margin-bottom: 4px; justify-content: center;
+}
+.group-tab {
+  font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink3);
+  background: none; border: 1px solid transparent;
+  border-radius: 4px; padding: 5px 12px; cursor: pointer;
+  transition: all 0.15s;
+}
+.group-tab:hover { color: var(--ink); background: var(--paper2); }
+.group-tab.active { color: var(--ink); background: var(--paper3); border-color: var(--rule); }
+
+/* ── Custom stat picker ── */
+.custom-panel {
+  display: none; background: var(--paper2); border: 1px solid var(--rule);
+  border-radius: 8px; padding: 16px; margin-bottom: 16px;
+}
+.custom-panel.visible { display: block; }
+.custom-search-input {
+  width: 100%; font-family: var(--ff-sans); font-size: 12px;
+  background: var(--paper); border: 1px solid var(--rule);
+  border-radius: 4px; padding: 7px 10px; color: var(--ink);
+  outline: none; margin-bottom: 10px;
+}
+.custom-search-input:focus { border-color: var(--orange); }
+.custom-chips { display: flex; flex-wrap: wrap; gap: 4px; min-height: 24px; margin-bottom: 10px; }
+.custom-chip {
+  font-family: var(--ff-mono); font-size: 10px; background: var(--ink); color: var(--paper);
+  padding: 3px 8px 3px 10px; border-radius: 12px; display: flex; align-items: center;
+  gap: 4px; cursor: pointer;
+}
+.custom-chip:hover { background: var(--orange); }
+.custom-chip-x { opacity: 0.6; font-size: 11px; }
+.custom-stat-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 2px;
+  max-height: 200px; overflow-y: auto;
+}
+.custom-stat-item {
+  font-family: var(--ff-sans); font-size: 12px; color: var(--ink2);
+  padding: 5px 8px; border-radius: 4px; cursor: pointer;
+  transition: background 0.1s;
+}
+.custom-stat-item:hover { background: var(--paper3); }
+.custom-stat-item.selected { background: var(--orange-lt); color: var(--orange); }
+
+/* ── Comparison table ── */
+.compare-empty {
+  text-align: center; padding: 64px 24px;
+  font-family: var(--ff-mono); font-size: 12px; color: var(--ink4);
+}
+.compare-empty-icon { font-size: 40px; opacity: 0.3; margin-bottom: 12px; }
+
+.compare-table-wrap { margin-top: 16px; }
+.compare-header {
+  display: grid; grid-template-columns: 1fr 160px 1fr;
+  gap: 0; align-items: center;
+  padding: 12px 0 12px; border-bottom: 2px solid var(--rule);
+  margin-bottom: 4px;
+}
+.compare-header-player {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--ff-serif); font-size: 18px;
+}
+.compare-header-player.right { justify-content: flex-end; flex-direction: row-reverse; }
+.compare-header-headshot {
+  width: 44px; height: 44px; border-radius: 50%; object-fit: cover;
+  object-position: top; background: var(--paper3);
+  border: 2px solid var(--rule); flex-shrink: 0;
+}
+.compare-header-name { line-height: 1.2; }
+.compare-header-meta { font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); margin-top: 2px; letter-spacing: 0.04em; }
+.compare-header-center {
+  text-align: center; font-family: var(--ff-mono); font-size: 9px;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink4);
+}
+
+.compare-row {
+  display: grid; grid-template-columns: 1fr 160px 1fr;
+  align-items: center; border-bottom: 1px solid var(--paper3);
+  min-height: 44px;
+}
+.compare-row:last-child { border-bottom: none; }
+.compare-row:hover { background: var(--paper2); }
+
+.compare-cell {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 0;
+}
+.compare-cell.right { justify-content: flex-end; flex-direction: row-reverse; }
+
+.compare-val {
+  font-family: var(--ff-mono); font-size: 15px; color: var(--ink2);
+  min-width: 50px; text-align: center;
+}
+.compare-cell.right .compare-val { text-align: center; }
+
+.compare-badge {
+  font-family: var(--ff-mono); font-size: 11px; font-weight: 500;
+  padding: 3px 8px; border-radius: 12px; white-space: nowrap;
+  opacity: 0; transition: opacity 0.2s;
+}
+.compare-badge.win { background: var(--green-lt); color: var(--green); opacity: 1; }
+.compare-badge.big-win { background: var(--green); color: #fff; opacity: 1; }
+
+.compare-stat-label {
+  text-align: center; padding: 8px 4px;
+  font-family: var(--ff-mono); font-size: 11px;
+  color: var(--ink3); letter-spacing: 0.04em;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink4); }
+
+@media (max-width: 600px) {
+  .pickers { grid-template-columns: 1fr; }
+  .vs-divider { display: none; }
+  .compare-header, .compare-row { grid-template-columns: 1fr 120px 1fr; }
+  .compare-val { font-size: 13px; min-width: 36px; }
+  .compare-badge { font-size: 10px; padding: 2px 6px; }
+  .nav-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .nav-tabs::-webkit-scrollbar { display: none; }
+  .nav-tab { white-space: nowrap; padding: 5px 12px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── Nav ── -->
+<nav>
+  <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
+  <div class="nav-tabs">
+    <a class="nav-tab" href="/stats.html">Stats</a>
+    <a class="nav-tab" href="/reviews.html">BasketBoxd</a>
+    <a class="nav-tab" href="/builder.html">Builder</a>
+    <a class="nav-tab" href="/onoff">On/Off</a>
+    <a class="nav-tab active" href="/compare.html">Compare</a>
+  </div>
+  <div class="nav-auth" id="nav-auth-slot"></div>
+</nav>
+
+<div class="page">
+
+  <div class="page-header">
+    <div class="page-title">Player Comparison</div>
+    <div class="page-subtitle">Compare stats between any two NBA players</div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls-bar">
+    <select class="season-select" id="season-select"></select>
+    <select class="season-select" id="season-type-select">
+      <option value="Regular Season">Regular Season</option>
+      <option value="Playoffs">Playoffs</option>
+    </select>
+  </div>
+
+  <!-- Player pickers -->
+  <div class="pickers">
+    <div class="picker-wrap" id="picker-a-wrap">
+      <div class="picker-label">Player 1</div>
+      <input class="picker-search" id="picker-a-input" type="text" placeholder="Search player…" autocomplete="off">
+      <div class="picker-dropdown" id="picker-a-dropdown"></div>
+      <div class="player-card" id="card-a">
+        <img class="player-card-headshot" id="card-a-img" src="" alt="">
+        <div>
+          <div class="player-card-name" id="card-a-name"></div>
+          <div class="player-card-meta" id="card-a-meta"></div>
+        </div>
+        <button class="player-card-clear" id="card-a-clear" title="Clear">×</button>
+      </div>
+    </div>
+
+    <div class="vs-divider">vs</div>
+
+    <div class="picker-wrap" id="picker-b-wrap">
+      <div class="picker-label">Player 2</div>
+      <input class="picker-search" id="picker-b-input" type="text" placeholder="Search player…" autocomplete="off">
+      <div class="picker-dropdown" id="picker-b-dropdown"></div>
+      <div class="player-card" id="card-b">
+        <img class="player-card-headshot" id="card-b-img" src="" alt="">
+        <div>
+          <div class="player-card-name" id="card-b-name"></div>
+          <div class="player-card-meta" id="card-b-meta"></div>
+        </div>
+        <button class="player-card-clear" id="card-b-clear" title="Clear">×</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stat group tabs -->
+  <div class="group-tabs" id="group-tabs"></div>
+
+  <!-- Custom stat picker panel -->
+  <div class="custom-panel" id="custom-panel">
+    <div class="custom-chips" id="custom-chips"></div>
+    <input class="custom-search-input" id="custom-search" type="text" placeholder="Search stats to add…">
+    <div class="custom-stat-grid" id="custom-stat-grid"></div>
+  </div>
+
+  <!-- Comparison output -->
+  <div id="compare-output">
+    <div class="compare-empty">
+      <div class="compare-empty-icon">⇄</div>
+      Select two players to compare their stats
+    </div>
+  </div>
+
+</div>
+
+<script src="/season-config.js"></script>
+<script>
+const API = window.location.protocol === 'file:' ? 'http://localhost:5000' : '';
+
+// ── Stat definitions ────────────────────────────────────────────
+// fmt: '1f'=1 decimal, '2f'=2 decimal, 'pct'=percent, 'pm'=+/-, 'int'=integer
+// invert: true means lower is better
+
+const STAT_GROUPS = [
+  {
+    id: 'overall',
+    label: 'Overall',
+    stats: [
+      { key: 'darko_dpm',   label: 'DARKO DPM',  fmt: '2f' },
+      { key: 'pts',         label: 'PTS',         fmt: '1f' },
+      { key: 'reb',         label: 'REB',         fmt: '1f' },
+      { key: 'ast',         label: 'AST',         fmt: '1f' },
+      { key: 'stl',         label: 'STL',         fmt: '1f' },
+      { key: 'blk',         label: 'BLK',         fmt: '1f' },
+      { key: 'tov',         label: 'TOV',         fmt: '1f', invert: true },
+      { key: 'ts_pct',      label: 'TS%',         fmt: 'pct' },
+      { key: 'fg_pct',      label: 'FG%',         fmt: 'pct' },
+      { key: 'fg3_pct',     label: '3P%',         fmt: 'pct' },
+      { key: 'ft_pct',      label: 'FT%',         fmt: 'pct' },
+      { key: 'net_rating',  label: 'Net Rtg',     fmt: '1f' },
+      { key: 'off_rating',  label: 'Off Rtg',     fmt: '1f' },
+      { key: 'def_rating',  label: 'Def Rtg',     fmt: '1f', invert: true },
+      { key: 'usg_pct',     label: 'USG%',        fmt: 'pct' },
+      { key: 'gp',          label: 'GP',          fmt: 'int' },
+      { key: 'min_per_game',label: 'MPG',         fmt: '1f' },
+    ]
+  },
+  {
+    id: 'scoring',
+    label: 'Scoring',
+    stats: [
+      { key: 'pts',            label: 'PTS',         fmt: '1f' },
+      { key: 'fgm',            label: 'FGM',         fmt: '1f' },
+      { key: 'fga',            label: 'FGA',         fmt: '1f' },
+      { key: 'fg_pct',         label: 'FG%',         fmt: 'pct' },
+      { key: 'fg3m',           label: '3PM',         fmt: '1f' },
+      { key: 'fg3a',           label: '3PA',         fmt: '1f' },
+      { key: 'fg3_pct',        label: '3P%',         fmt: 'pct' },
+      { key: 'ftm',            label: 'FTM',         fmt: '1f' },
+      { key: 'fta',            label: 'FTA',         fmt: '1f' },
+      { key: 'ft_pct',         label: 'FT%',         fmt: 'pct' },
+      { key: 'ts_pct',         label: 'TS%',         fmt: 'pct' },
+      { key: 'efg_pct',        label: 'eFG%',        fmt: 'pct' },
+      { key: 'pull_up_efg_pct',label: 'Pull-Up eFG%',fmt: 'pct' },
+      { key: 'cs_efg_pct',     label: 'C&S eFG%',   fmt: 'pct' },
+      { key: 'pct_pts_paint',  label: '% Pts Paint', fmt: 'pct' },
+      { key: 'pct_pts_3pt',    label: '% Pts 3PT',   fmt: 'pct' },
+      { key: 'pct_pts_ft',     label: '% Pts FT',    fmt: 'pct' },
+    ]
+  },
+  {
+    id: 'playmaking',
+    label: 'Playmaking',
+    stats: [
+      { key: 'ast',             label: 'AST',             fmt: '1f' },
+      { key: 'tov',             label: 'TOV',             fmt: '1f', invert: true },
+      { key: 'ast_to',          label: 'AST/TOV',         fmt: '2f' },
+      { key: 'ast_pct',         label: 'AST%',            fmt: 'pct' },
+      { key: 'passes_made',     label: 'Passes',          fmt: '1f' },
+      { key: 'ast_pts_created', label: 'AST Pts Created', fmt: '1f' },
+      { key: 'potential_ast',   label: 'Potential AST',   fmt: '1f' },
+      { key: 'secondary_ast',   label: 'Secondary AST',   fmt: '1f' },
+      { key: 'ft_ast',          label: 'FT AST',          fmt: '1f' },
+      { key: 'bad_pass_tov',    label: 'Bad Pass TOV',    fmt: '1f', invert: true },
+      { key: 'drives',          label: 'Drives',          fmt: '1f' },
+      { key: 'drive_ast',       label: 'Drive AST',       fmt: '1f' },
+    ]
+  },
+  {
+    id: 'defense',
+    label: 'Defense',
+    stats: [
+      { key: 'darko_ddpm',      label: 'DARKO DDPM',      fmt: '2f' },
+      { key: 'def_rating',      label: 'Def Rtg',         fmt: '1f', invert: true },
+      { key: 'def_ws',          label: 'Def Win Shares',  fmt: '2f' },
+      { key: 'stl',             label: 'STL',             fmt: '1f' },
+      { key: 'blk',             label: 'BLK',             fmt: '1f' },
+      { key: 'dreb',            label: 'DREB',            fmt: '1f' },
+      { key: 'dreb_pct',        label: 'DREB%',           fmt: 'pct' },
+      { key: 'def_rim_fga',     label: 'Rim FGA Def',     fmt: '1f' },
+      { key: 'def_rim_fg_pct',  label: 'Rim FG% Def',     fmt: 'pct', invert: true },
+      { key: 'contested_shots', label: 'Cont. Shots',     fmt: '1f' },
+      { key: 'deflections',     label: 'Deflections',     fmt: '1f' },
+      { key: 'charges_drawn',   label: 'Charges Drawn',   fmt: '1f' },
+    ]
+  },
+  {
+    id: 'rebounding',
+    label: 'Rebounding',
+    stats: [
+      { key: 'reb',      label: 'REB',    fmt: '1f' },
+      { key: 'oreb',     label: 'OREB',   fmt: '1f' },
+      { key: 'dreb',     label: 'DREB',   fmt: '1f' },
+      { key: 'oreb_pct', label: 'OREB%',  fmt: 'pct' },
+      { key: 'dreb_pct', label: 'DREB%',  fmt: 'pct' },
+      { key: 'reb_pct',  label: 'REB%',   fmt: 'pct' },
+      { key: 'box_outs', label: 'Box Outs',fmt: '1f' },
+      { key: 'off_box_outs', label: 'Off Box Outs', fmt: '1f' },
+      { key: 'def_box_outs', label: 'Def Box Outs', fmt: '1f' },
+    ]
+  },
+  {
+    id: 'hustle',
+    label: 'Hustle',
+    stats: [
+      { key: 'contested_shots', label: 'Cont. Shots',    fmt: '1f' },
+      { key: 'deflections',     label: 'Deflections',    fmt: '1f' },
+      { key: 'charges_drawn',   label: 'Charges Drawn',  fmt: '1f' },
+      { key: 'screen_assists',  label: 'Screen AST',     fmt: '1f' },
+      { key: 'screen_ast_pts',  label: 'Screen AST Pts', fmt: '1f' },
+      { key: 'loose_balls',     label: 'Loose Balls',    fmt: '1f' },
+      { key: 'box_outs',        label: 'Box Outs',       fmt: '1f' },
+      { key: 'drives',          label: 'Drives',         fmt: '1f' },
+      { key: 'dist_miles',      label: 'Distance (mi)',  fmt: '2f' },
+      { key: 'avg_speed',       label: 'Avg Speed',      fmt: '2f' },
+    ]
+  },
+  {
+    id: 'impact',
+    label: 'Impact',
+    stats: [
+      { key: 'darko_dpm',    label: 'DARKO DPM',   fmt: '2f' },
+      { key: 'darko_odpm',   label: 'DARKO ODPM',  fmt: '2f' },
+      { key: 'darko_ddpm',   label: 'DARKO DDPM',  fmt: '2f' },
+      { key: 'darko_box',    label: 'DARKO Box',   fmt: '2f' },
+      { key: 'lebron',       label: 'LeBron',      fmt: '2f' },
+      { key: 'o_lebron',     label: 'O-LeBron',    fmt: '2f' },
+      { key: 'd_lebron',     label: 'D-LeBron',    fmt: '2f' },
+      { key: 'war',          label: 'WAR',         fmt: '2f' },
+      { key: 'net_rating',   label: 'Net Rtg',     fmt: '1f' },
+      { key: 'off_rating',   label: 'Off Rtg',     fmt: '1f' },
+      { key: 'def_rating',   label: 'Def Rtg',     fmt: '1f', invert: true },
+      { key: 'pie',          label: 'PIE',         fmt: 'pct' },
+      { key: 'plus_minus',   label: '+/-',         fmt: 'pm' },
+    ]
+  },
+  {
+    id: 'custom',
+    label: 'Custom',
+    stats: [] // populated dynamically
+  }
+];
+
+// All available stats for custom mode
+const ALL_STATS = [
+  { key: 'pts',              label: 'Points (PTS)',           fmt: '1f' },
+  { key: 'ast',              label: 'Assists (AST)',          fmt: '1f' },
+  { key: 'reb',              label: 'Rebounds (REB)',         fmt: '1f' },
+  { key: 'oreb',             label: 'Off Rebounds',          fmt: '1f' },
+  { key: 'dreb',             label: 'Def Rebounds',          fmt: '1f' },
+  { key: 'stl',              label: 'Steals (STL)',           fmt: '1f' },
+  { key: 'blk',              label: 'Blocks (BLK)',           fmt: '1f' },
+  { key: 'tov',              label: 'Turnovers (TOV)',        fmt: '1f', invert: true },
+  { key: 'pf',               label: 'Fouls (PF)',             fmt: '1f', invert: true },
+  { key: 'pfd',              label: 'Fouls Drawn (PFD)',      fmt: '1f' },
+  { key: 'fgm',              label: 'FGM',                   fmt: '1f' },
+  { key: 'fga',              label: 'FGA',                   fmt: '1f' },
+  { key: 'fg_pct',           label: 'FG%',                   fmt: 'pct' },
+  { key: 'fg3m',             label: '3PM',                   fmt: '1f' },
+  { key: 'fg3a',             label: '3PA',                   fmt: '1f' },
+  { key: 'fg3_pct',          label: '3P%',                   fmt: 'pct' },
+  { key: 'ftm',              label: 'FTM',                   fmt: '1f' },
+  { key: 'fta',              label: 'FTA',                   fmt: '1f' },
+  { key: 'ft_pct',           label: 'FT%',                   fmt: 'pct' },
+  { key: 'ts_pct',           label: 'True Shooting (TS%)',   fmt: 'pct' },
+  { key: 'efg_pct',          label: 'eFG%',                  fmt: 'pct' },
+  { key: 'usg_pct',          label: 'Usage (USG%)',          fmt: 'pct' },
+  { key: 'ast_pct',          label: 'AST%',                  fmt: 'pct' },
+  { key: 'oreb_pct',         label: 'OREB%',                 fmt: 'pct' },
+  { key: 'dreb_pct',         label: 'DREB%',                 fmt: 'pct' },
+  { key: 'reb_pct',          label: 'REB%',                  fmt: 'pct' },
+  { key: 'ast_to',           label: 'AST/TOV',               fmt: '2f' },
+  { key: 'pie',              label: 'PIE',                   fmt: 'pct' },
+  { key: 'plus_minus',       label: '+/-',                   fmt: 'pm' },
+  { key: 'net_rating',       label: 'Net Rating',            fmt: '1f' },
+  { key: 'off_rating',       label: 'Off Rating',            fmt: '1f' },
+  { key: 'def_rating',       label: 'Def Rating',            fmt: '1f', invert: true },
+  { key: 'min_per_game',     label: 'MPG',                   fmt: '1f' },
+  { key: 'gp',               label: 'Games Played (GP)',     fmt: 'int' },
+  { key: 'pct_pts_paint',    label: '% Pts Paint',           fmt: 'pct' },
+  { key: 'pct_pts_3pt',      label: '% Pts 3PT',             fmt: 'pct' },
+  { key: 'pct_pts_ft',       label: '% Pts FT',              fmt: 'pct' },
+  { key: 'pct_uast_fgm',     label: 'Unasstd FG%',          fmt: 'pct' },
+  { key: 'def_ws',           label: 'Def Win Shares',        fmt: '2f' },
+  { key: 'def_rim_fga',      label: 'Rim FGA Def',           fmt: '1f' },
+  { key: 'def_rim_fgm',      label: 'Rim FGM Def',           fmt: '1f' },
+  { key: 'def_rim_fg_pct',   label: 'Rim FG% Def',           fmt: 'pct', invert: true },
+  { key: 'contested_shots',  label: 'Contested Shots',       fmt: '1f' },
+  { key: 'deflections',      label: 'Deflections',           fmt: '1f' },
+  { key: 'charges_drawn',    label: 'Charges Drawn',         fmt: '1f' },
+  { key: 'screen_assists',   label: 'Screen Assists',        fmt: '1f' },
+  { key: 'screen_ast_pts',   label: 'Screen Ast Pts',        fmt: '1f' },
+  { key: 'loose_balls',      label: 'Loose Balls',           fmt: '1f' },
+  { key: 'box_outs',         label: 'Box Outs',              fmt: '1f' },
+  { key: 'off_box_outs',     label: 'Off Box Outs',          fmt: '1f' },
+  { key: 'def_box_outs',     label: 'Def Box Outs',          fmt: '1f' },
+  { key: 'passes_made',      label: 'Passes Made',           fmt: '1f' },
+  { key: 'passes_received',  label: 'Passes Received',       fmt: '1f' },
+  { key: 'ast_pts_created',  label: 'AST Pts Created',       fmt: '1f' },
+  { key: 'potential_ast',    label: 'Potential AST',         fmt: '1f' },
+  { key: 'secondary_ast',    label: 'Secondary AST',         fmt: '1f' },
+  { key: 'ft_ast',           label: 'FT AST',                fmt: '1f' },
+  { key: 'bad_pass_tov',     label: 'Bad Pass TOV',          fmt: '1f', invert: true },
+  { key: 'lost_ball_tov',    label: 'Lost Ball TOV',         fmt: '1f', invert: true },
+  { key: 'touches',          label: 'Touches',               fmt: '1f' },
+  { key: 'time_of_poss',     label: 'Time of Poss (min)',    fmt: '1f' },
+  { key: 'elbow_touches',    label: 'Elbow Touches',         fmt: '1f' },
+  { key: 'post_touches',     label: 'Post Touches',          fmt: '1f' },
+  { key: 'paint_touches',    label: 'Paint Touches',         fmt: '1f' },
+  { key: 'drives',           label: 'Drives',                fmt: '1f' },
+  { key: 'drive_fga',        label: 'Drive FGA',             fmt: '1f' },
+  { key: 'drive_fg_pct',     label: 'Drive FG%',             fmt: 'pct' },
+  { key: 'drive_pts',        label: 'Drive PTS',             fmt: '1f' },
+  { key: 'drive_ast',        label: 'Drive AST',             fmt: '1f' },
+  { key: 'pull_up_fga',      label: 'Pull-Up FGA',           fmt: '1f' },
+  { key: 'pull_up_fg_pct',   label: 'Pull-Up FG%',           fmt: 'pct' },
+  { key: 'pull_up_efg_pct',  label: 'Pull-Up eFG%',          fmt: 'pct' },
+  { key: 'cs_fga',           label: 'C&S FGA',               fmt: '1f' },
+  { key: 'cs_fg_pct',        label: 'C&S FG%',               fmt: 'pct' },
+  { key: 'cs_efg_pct',       label: 'C&S eFG%',              fmt: 'pct' },
+  { key: 'dist_miles',       label: 'Distance (mi)',          fmt: '2f' },
+  { key: 'avg_speed',        label: 'Avg Speed',              fmt: '2f' },
+  { key: 'darko_dpm',        label: 'DARKO DPM',             fmt: '2f' },
+  { key: 'darko_odpm',       label: 'DARKO ODPM',            fmt: '2f' },
+  { key: 'darko_ddpm',       label: 'DARKO DDPM',            fmt: '2f' },
+  { key: 'darko_box',        label: 'DARKO Box',             fmt: '2f' },
+  { key: 'lebron',           label: 'LeBron',                fmt: '2f' },
+  { key: 'o_lebron',         label: 'O-LeBron',              fmt: '2f' },
+  { key: 'd_lebron',         label: 'D-LeBron',              fmt: '2f' },
+  { key: 'war',              label: 'WAR',                   fmt: '2f' },
+  { key: 'net_pts100',       label: 'Net Pts/100',           fmt: '2f' },
+  { key: 'o_net_pts100',     label: 'Off Pts/100',           fmt: '2f' },
+  { key: 'd_net_pts100',     label: 'Def Pts/100',           fmt: '2f' },
+  { key: 'iso_ppp',          label: 'ISO PPP',               fmt: '2f' },
+  { key: 'iso_efg_pct',      label: 'ISO eFG%',              fmt: 'pct' },
+  { key: 'pnr_bh_ppp',       label: 'PnR BH PPP',            fmt: '2f' },
+  { key: 'pnr_roll_ppp',     label: 'PnR Roll PPP',          fmt: '2f' },
+  { key: 'post_ppp',         label: 'Post PPP',              fmt: '2f' },
+  { key: 'spotup_ppp',       label: 'Spot-Up PPP',           fmt: '2f' },
+  { key: 'spotup_efg_pct',   label: 'Spot-Up eFG%',          fmt: 'pct' },
+  { key: 'transition_ppp',   label: 'Transition PPP',        fmt: '2f' },
+  { key: 'def_iso_ppp',      label: 'Def ISO PPP',           fmt: '2f', invert: true },
+  { key: 'def_pnr_bh_ppp',   label: 'Def PnR BH PPP',        fmt: '2f', invert: true },
+  { key: 'def_post_ppp',     label: 'Def Post PPP',          fmt: '2f', invert: true },
+  { key: 'def_spotup_ppp',   label: 'Def Spot-Up PPP',       fmt: '2f', invert: true },
+  { key: 'gravity_score',    label: 'Gravity',               fmt: '2f' },
+  { key: 'leverage_full',    label: 'Leverage (Full)',        fmt: '2f' },
+  { key: 'leverage_offense', label: 'Leverage (Off)',         fmt: '2f' },
+  { key: 'leverage_defense', label: 'Leverage (Def)',         fmt: '2f' },
+  { key: 'clutch_net_rating',label: 'Clutch Net Rtg',        fmt: '1f' },
+  { key: 'clutch_ts_pct',    label: 'Clutch TS%',            fmt: 'pct' },
+];
+
+// ── State ────────────────────────────────────────────────────────
+const ST = {
+  season: computeCurrentSeason(),
+  seasonType: computeCurrentSeasonType(),
+  playerA: null,  // { player_id, player_name, team_abbr, position_group, stats:{} }
+  playerB: null,
+  activeGroup: 'overall',
+  customStats: [],  // array of stat keys for custom mode
+};
+
+// ── Format helpers ───────────────────────────────────────────────
+function fmt(val, format) {
+  if (val === null || val === undefined) return '—';
+  switch (format) {
+    case '1f':  return (+val).toFixed(1);
+    case '2f':  return (+val).toFixed(2);
+    case 'pct': return ((+val) * 100).toFixed(1) + '%';
+    case 'pm':  return (val >= 0 ? '+' : '') + (+val).toFixed(1);
+    case 'int': return Math.round(val).toString();
+    default:    return String(val);
+  }
+}
+
+function fmtDiff(diff, format, invert) {
+  const better = invert ? diff < 0 : diff > 0;
+  if (!better) return '';
+  const abs = Math.abs(diff);
+  let str;
+  switch (format) {
+    case 'pct': str = '+' + (abs * 100).toFixed(1) + '%'; break;
+    case '2f':  str = '+' + abs.toFixed(2); break;
+    case 'int': str = '+' + Math.round(abs); break;
+    case 'pm':  str = '+' + abs.toFixed(1); break;
+    default:    str = '+' + abs.toFixed(1);
+  }
+  return str;
+}
+
+// ── Render group tabs ────────────────────────────────────────────
+function renderGroupTabs() {
+  const container = document.getElementById('group-tabs');
+  container.innerHTML = STAT_GROUPS.map(g => `
+    <button class="group-tab ${g.id === ST.activeGroup ? 'active' : ''}" data-group="${g.id}">${g.label}</button>
+  `).join('');
+  container.querySelectorAll('.group-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      ST.activeGroup = btn.dataset.group;
+      renderGroupTabs();
+      document.getElementById('custom-panel').classList.toggle('visible', ST.activeGroup === 'custom');
+      renderComparison();
+    });
+  });
+}
+
+// ── Custom stat panel ────────────────────────────────────────────
+function renderCustomPanel() {
+  renderCustomChips();
+  renderCustomStatGrid('');
+  document.getElementById('custom-search').addEventListener('input', function() {
+    renderCustomStatGrid(this.value.toLowerCase().trim());
+  });
+}
+
+function renderCustomChips() {
+  const container = document.getElementById('custom-chips');
+  if (ST.customStats.length === 0) {
+    container.innerHTML = '<span style="font-family:var(--ff-mono);font-size:10px;color:var(--ink4)">No stats selected — pick from the list below</span>';
+    return;
+  }
+  container.innerHTML = ST.customStats.map(key => {
+    const s = ALL_STATS.find(x => x.key === key);
+    const label = s ? s.label : key;
+    return `<span class="custom-chip" data-key="${key}">${label} <span class="custom-chip-x">×</span></span>`;
+  }).join('');
+  container.querySelectorAll('.custom-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      ST.customStats = ST.customStats.filter(k => k !== chip.dataset.key);
+      renderCustomChips();
+      renderCustomStatGrid(document.getElementById('custom-search').value.toLowerCase().trim());
+      renderComparison();
+    });
+  });
+}
+
+function renderCustomStatGrid(q) {
+  const container = document.getElementById('custom-stat-grid');
+  const filtered = q ? ALL_STATS.filter(s => s.label.toLowerCase().includes(q) || s.key.includes(q)) : ALL_STATS;
+  container.innerHTML = filtered.map(s => `
+    <div class="custom-stat-item ${ST.customStats.includes(s.key) ? 'selected' : ''}" data-key="${s.key}">${s.label}</div>
+  `).join('');
+  container.querySelectorAll('.custom-stat-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const key = item.dataset.key;
+      if (ST.customStats.includes(key)) {
+        ST.customStats = ST.customStats.filter(k => k !== key);
+      } else {
+        ST.customStats.push(key);
+      }
+      renderCustomChips();
+      renderCustomStatGrid(document.getElementById('custom-search').value.toLowerCase().trim());
+      renderComparison();
+    });
+  });
+}
+
+// ── Comparison render ────────────────────────────────────────────
+function getActiveStats() {
+  if (ST.activeGroup === 'custom') {
+    return ST.customStats.map(key => ALL_STATS.find(s => s.key === key)).filter(Boolean);
+  }
+  return STAT_GROUPS.find(g => g.id === ST.activeGroup)?.stats || [];
+}
+
+function renderComparison() {
+  const output = document.getElementById('compare-output');
+  const a = ST.playerA, b = ST.playerB;
+
+  if (!a || !b) {
+    output.innerHTML = `
+      <div class="compare-empty">
+        <div class="compare-empty-icon">⇄</div>
+        Select two players to compare their stats
+      </div>`;
+    return;
+  }
+
+  const stats = getActiveStats();
+  if (stats.length === 0) {
+    output.innerHTML = `<div class="compare-empty"><div class="compare-empty-icon">+</div>Add stats using the panel above</div>`;
+    return;
+  }
+
+  const aImg = `https://cdn.nba.com/headshots/nba/latest/260x190/${a.player_id}.png`;
+  const bImg = `https://cdn.nba.com/headshots/nba/latest/260x190/${b.player_id}.png`;
+
+  const rows = stats.map(stat => {
+    const va = a.stats[stat.key];
+    const vb = b.stats[stat.key];
+    const hasA = va !== null && va !== undefined;
+    const hasB = vb !== null && vb !== undefined;
+
+    let aBadge = '', bBadge = '';
+    if (hasA && hasB) {
+      const diff = (+va) - (+vb);
+      const aWins = stat.invert ? diff < 0 : diff > 0;
+      const bWins = stat.invert ? diff > 0 : diff < 0;
+      const absDiff = Math.abs(diff);
+      // Big win threshold: >5% of absolute value of larger number (or fixed thresholds)
+      const bigThreshold = Math.max(Math.abs(+va), Math.abs(+vb)) * 0.05 + 0.01;
+      const isBig = absDiff > bigThreshold;
+      if (aWins) {
+        const str = fmtDiff(diff, stat.fmt, stat.invert);
+        aBadge = `<span class="compare-badge ${isBig ? 'big-win' : 'win'}">${str}</span>`;
+      } else if (bWins) {
+        const str = fmtDiff(-diff, stat.fmt, stat.invert);
+        bBadge = `<span class="compare-badge ${isBig ? 'big-win' : 'win'}">${str}</span>`;
+      }
+    }
+
+    return `
+      <div class="compare-row">
+        <div class="compare-cell">
+          <span class="compare-val">${fmt(va, stat.fmt)}</span>
+          ${aBadge}
+        </div>
+        <div class="compare-stat-label">${stat.label}</div>
+        <div class="compare-cell right">
+          ${bBadge}
+          <span class="compare-val">${fmt(vb, stat.fmt)}</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  output.innerHTML = `
+    <div class="compare-table-wrap">
+      <div class="compare-header">
+        <div class="compare-header-player">
+          <img class="compare-header-headshot" src="${aImg}" alt="" onerror="this.style.display='none'">
+          <div>
+            <div class="compare-header-name">${a.player_name}</div>
+            <div class="compare-header-meta">${a.team_abbr || ''} · ${a.position_group || ''}</div>
+          </div>
+        </div>
+        <div class="compare-header-center">${ST.season}</div>
+        <div class="compare-header-player right">
+          <img class="compare-header-headshot" src="${bImg}" alt="" onerror="this.style.display='none'">
+          <div style="text-align:right">
+            <div class="compare-header-name">${b.player_name}</div>
+            <div class="compare-header-meta">${b.team_abbr || ''} · ${b.position_group || ''}</div>
+          </div>
+        </div>
+      </div>
+      ${rows}
+    </div>`;
+}
+
+// ── Player picker logic ──────────────────────────────────────────
+let pickerTimers = {};
+
+async function searchPlayers(q) {
+  if (!q || q.length < 2) return [];
+  try {
+    const params = new URLSearchParams({ season: ST.season, season_type: ST.seasonType, q, limit: 12 });
+    const res = await fetch(`${API}/api/players?${params}`);
+    const data = await res.json();
+    return data.players || [];
+  } catch { return []; }
+}
+
+function setupPicker(side) {
+  const input    = document.getElementById(`picker-${side}-input`);
+  const dropdown = document.getElementById(`picker-${side}-dropdown`);
+  const card     = document.getElementById(`card-${side}`);
+  const cardImg  = document.getElementById(`card-${side}-img`);
+  const cardName = document.getElementById(`card-${side}-name`);
+  const cardMeta = document.getElementById(`card-${side}-meta`);
+  const clearBtn = document.getElementById(`card-${side}-clear`);
+  let focused = -1;
+
+  input.addEventListener('input', () => {
+    clearTimeout(pickerTimers[side]);
+    const q = input.value.trim();
+    if (!q) { dropdown.classList.remove('open'); dropdown.innerHTML = ''; return; }
+    pickerTimers[side] = setTimeout(async () => {
+      const players = await searchPlayers(q);
+      focused = -1;
+      if (!players.length) {
+        dropdown.innerHTML = '<div style="padding:12px;font-family:var(--ff-mono);font-size:11px;color:var(--ink4)">No players found</div>';
+        dropdown.classList.add('open');
+        return;
+      }
+      dropdown.innerHTML = players.map((p, i) => `
+        <div class="picker-option" data-idx="${i}" data-id="${p.player_id}">
+          <img class="picker-headshot" src="https://cdn.nba.com/headshots/nba/latest/260x190/${p.player_id}.png" alt="" onerror="this.style.display='none'">
+          <span class="picker-option-name">${p.player_name}</span>
+          <span class="picker-option-meta">${p.team_abbr || ''} · ${p.position_group || ''}</span>
+        </div>
+      `).join('');
+      dropdown.classList.add('open');
+      dropdown.querySelectorAll('.picker-option').forEach(opt => {
+        opt.addEventListener('mousedown', e => {
+          e.preventDefault();
+          const idx = +opt.dataset.idx;
+          selectPlayer(side, players[idx]);
+        });
+      });
+    }, 200);
+  });
+
+  input.addEventListener('keydown', e => {
+    const opts = dropdown.querySelectorAll('.picker-option');
+    if (!opts.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      focused = Math.min(focused + 1, opts.length - 1);
+      opts.forEach((o, i) => o.classList.toggle('focused', i === focused));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      focused = Math.max(focused - 1, 0);
+      opts.forEach((o, i) => o.classList.toggle('focused', i === focused));
+    } else if (e.key === 'Enter' && focused >= 0) {
+      opts[focused].dispatchEvent(new MouseEvent('mousedown'));
+    } else if (e.key === 'Escape') {
+      dropdown.classList.remove('open');
+    }
+  });
+
+  input.addEventListener('blur', () => {
+    setTimeout(() => dropdown.classList.remove('open'), 150);
+  });
+
+  clearBtn.addEventListener('click', () => {
+    ST[side === 'a' ? 'playerA' : 'playerB'] = null;
+    card.classList.remove('visible');
+    input.value = '';
+    renderComparison();
+  });
+
+  async function selectPlayer(side, p) {
+    dropdown.classList.remove('open');
+    input.value = p.player_name;
+
+    // Fetch full stats
+    try {
+      const params = new URLSearchParams({ player_id: p.player_id, season: ST.season, season_type: ST.seasonType });
+      const res = await fetch(`${API}/api/stats?${params}`);
+      const data = await res.json();
+      const stats = data.stats || {};
+      const player = { ...p, stats };
+      ST[side === 'a' ? 'playerA' : 'playerB'] = player;
+
+      cardImg.src = `https://cdn.nba.com/headshots/nba/latest/260x190/${p.player_id}.png`;
+      cardName.textContent = p.player_name;
+      cardMeta.textContent = `${p.team_abbr || ''} · ${p.position_group || ''} · ${ST.season}`;
+      card.classList.add('visible');
+      renderComparison();
+    } catch(e) {
+      console.error(e);
+    }
+  }
+}
+
+// ── Season change ────────────────────────────────────────────────
+document.getElementById('season-select').addEventListener('change', async function() {
+  ST.season = this.value;
+  await reloadBothPlayers();
+});
+document.getElementById('season-type-select').addEventListener('change', async function() {
+  ST.seasonType = this.value;
+  await reloadBothPlayers();
+});
+
+async function reloadBothPlayers() {
+  const reloads = [];
+  if (ST.playerA) reloads.push(reloadPlayer('a'));
+  if (ST.playerB) reloads.push(reloadPlayer('b'));
+  await Promise.all(reloads);
+  renderComparison();
+}
+
+async function reloadPlayer(side) {
+  const player = side === 'a' ? ST.playerA : ST.playerB;
+  if (!player) return;
+  try {
+    const params = new URLSearchParams({ player_id: player.player_id, season: ST.season, season_type: ST.seasonType });
+    const res = await fetch(`${API}/api/stats?${params}`);
+    const data = await res.json();
+    if (data.stats) {
+      player.stats = data.stats;
+      const meta = document.getElementById(`card-${side}-meta`);
+      if (meta) meta.textContent = `${player.team_abbr || ''} · ${player.position_group || ''} · ${ST.season}`;
+    }
+  } catch(e) { console.error(e); }
+}
+
+// ── Load seasons from API ────────────────────────────────────────
+async function loadSeasons() {
+  await populateSeasonDropdown(document.getElementById('season-select'), ST.season);
+  ST.season = document.getElementById('season-select').value;
+  // Sync season-type dropdown to computed default
+  const stSel = document.getElementById('season-type-select');
+  stSel.value = ST.seasonType;
+}
+
+// ── Nav auth ─────────────────────────────────────────────────────
+async function initNavAuth() {
+  const slot = document.getElementById('nav-auth-slot');
+  try {
+    const res = await fetch('/auth/me');
+    const data = await res.json();
+    const user = data.user;
+    if (user) {
+      slot.innerHTML = `
+        <a href="/profile" style="text-decoration:none;cursor:pointer">${user.avatar_url ? `<img class="nav-auth-avatar" src="${user.avatar_url}" alt="">` : ''}</a>
+        <button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>
+      `;
+    } else {
+      slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login?next=${encodeURIComponent(window.location.pathname)}">Sign in</a>`;
+    }
+  } catch {
+    slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login">Sign in</a>`;
+  }
+}
+async function navSignOut() {
+  await fetch('/auth/logout', { method: 'POST' });
+  window.location.reload();
+}
+
+// ── Init ─────────────────────────────────────────────────────────
+loadSeasons();
+renderGroupTabs();
+renderCustomPanel();
+setupPicker('a');
+setupPicker('b');
+initNavAuth();
+renderComparison();
+</script>
+</body>
+</html>

@@ -146,6 +146,90 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .dist-bar { height: 100%; background: var(--green); border-radius: 3px; transition: width 0.4s ease; }
 .dist-count { font-family: var(--ff-mono); font-size: 10px; color: var(--ink4); width: 24px; }
 
+/* ── Favorites ── */
+.fav-section { margin-bottom: 32px; }
+.fav-heading {
+  font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink4); margin-bottom: 14px;
+  display: flex; align-items: center; gap: 12px;
+}
+.fav-edit-btn {
+  font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink4); background: none;
+  border: 1px solid var(--rule); border-radius: 3px;
+  padding: 2px 8px; cursor: pointer; transition: color 0.15s, border-color 0.15s;
+}
+.fav-edit-btn:hover { color: var(--orange); border-color: var(--orange); }
+.fav-edit-btn.active { color: var(--orange); border-color: var(--orange); }
+.fav-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+}
+.fav-card {
+  aspect-ratio: 2/3; border-radius: 6px; overflow: hidden;
+  background: var(--ink2); position: relative;
+  cursor: pointer; transition: transform 0.15s, box-shadow 0.15s;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.fav-card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,0.18); }
+.fav-card-inner {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; padding: 12px 8px; width: 100%; height: 100%;
+  background: linear-gradient(160deg, #1a1a20 0%, #0c0c12 100%);
+}
+.fav-logos {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  flex: 1; width: 100%;
+}
+.fav-logo { width: 42px; height: 42px; object-fit: contain; flex-shrink: 0; }
+.fav-logo-fallback { width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+.fav-vs { font-family: var(--ff-mono); font-size: 9px; color: #555; }
+.fav-info {
+  width: 100%; text-align: center; padding: 0 6px 10px;
+}
+.fav-teams { font-family: var(--ff-mono); font-size: 9px; color: #aaa; letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fav-score { font-family: var(--ff-serif); font-size: 13px; color: #fff; margin-top: 2px; }
+.fav-date { font-family: var(--ff-mono); font-size: 8px; color: #666; margin-top: 2px; }
+/* Remove overlay */
+.fav-remove {
+  position: absolute; top: 5px; right: 5px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(0,0,0,0.7); border: 1px solid #555;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; opacity: 0; transition: opacity 0.15s;
+  font-size: 11px; color: #fff; line-height: 1;
+  z-index: 2;
+}
+.fav-card:hover .fav-remove.visible { opacity: 1; }
+/* Empty slot */
+.fav-slot {
+  aspect-ratio: 2/3; border-radius: 6px;
+  border: 1.5px dashed var(--rule);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: border-color 0.15s, background 0.15s;
+  color: var(--ink4);
+}
+.fav-slot:hover { border-color: var(--orange); color: var(--orange); background: var(--orange-lt); }
+.fav-slot-plus { font-size: 22px; line-height: 1; }
+
+/* Favorites picker modal */
+.fav-picker-list { max-height: 320px; overflow-y: auto; margin-top: 12px; }
+.fav-picker-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid var(--paper3);
+  cursor: pointer; transition: background 0.1s;
+}
+.fav-picker-item:last-child { border-bottom: none; }
+.fav-picker-item:hover { background: var(--paper2); margin: 0 -4px; padding-left: 4px; padding-right: 4px; }
+.fav-picker-game { flex: 1; font-size: 13px; font-weight: 600; color: var(--ink); }
+.fav-picker-meta { font-family: var(--ff-mono); font-size: 10px; color: var(--ink4); }
+.fav-picker-stars { font-size: 12px; color: var(--green); }
+
+@media (max-width: 640px) {
+  .fav-grid { gap: 8px; }
+  .fav-logo { width: 32px; height: 32px; }
+  .fav-score { font-size: 11px; }
+}
+
 /* ── Toast ── */
 .toast { position: fixed; bottom: 24px; right: 24px; background: var(--ink); color: #fff; font-size: 13px; padding: 9px 16px; border-radius: 4px; z-index: 999; font-family: var(--ff-sans); animation: toastIn 0.2s ease; }
 @keyframes toastIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
@@ -180,15 +264,28 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
   <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
   <div class="nav-tabs">
     <a class="nav-tab" href="/stats.html">Stats</a>
+    <a class="nav-tab" href="/reviews.html">BasketBoxd</a>
     <a class="nav-tab" href="/builder.html">Builder</a>
     <a class="nav-tab" href="/onoff">On/Off</a>
-    <a class="nav-tab" href="/reviews">BasketBoxd</a>
+    <a class="nav-tab" href="/compare.html">Compare</a>
   </div>
   <div class="nav-auth" id="nav-auth-slot"></div>
 </nav>
 
 <div class="page" id="page">
   <div class="loading-state">Loading…</div>
+</div>
+
+<!-- Favorites picker modal -->
+<div class="modal-overlay" id="fav-picker-modal" style="display:none" onclick="closeFavPicker(event)">
+  <div class="modal" style="max-width:480px" onclick="event.stopPropagation()">
+    <h2 style="margin-bottom:6px">Pick a favorite game</h2>
+    <p style="font-size:13px;color:var(--ink3);margin-bottom:0">Choose from games you've reviewed.</p>
+    <div class="fav-picker-list" id="fav-picker-list"><div class="loading-state">Loading…</div></div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn" onclick="document.getElementById('fav-picker-modal').style.display='none'">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <!-- Edit name modal -->
@@ -327,6 +424,8 @@ function renderProfile() {
     </div>`;
   }).join('');
 
+  const favHtml = buildFavoritesHtml(PROFILE.favorites || [], isOwn);
+
   document.getElementById('page').innerHTML = `
     <div class="profile-header">
       <div class="profile-avatar">${avatarContent}</div>
@@ -355,6 +454,8 @@ function renderProfile() {
         <div class="stat-lbl" style="margin-top:6px">Distribution</div>
       </div>
     </div>
+
+    ${favHtml}
 
     <div class="profile-tabs">
       <button class="profile-tab active" data-tab="reviews">Reviews</button>
@@ -468,7 +569,7 @@ function renderFriendsOwn(data) {
     html += `<div class="section-label">Friend Requests (${data.requests_received.length})</div>`;
     html += data.requests_received.map(u => `
       <div class="friend-item">
-        ${avatarEl(u.display_name, u.avatar_url)}
+        ${avatarEl(u.display_name, u.avatar_url, 38, u.id)}
         <span class="friend-name" onclick="goProfile(${u.id})">${u.display_name}</span>
         <div class="friend-actions">
           <button class="btn btn-primary" onclick="acceptFriend(${u.id})">Accept</button>
@@ -481,7 +582,7 @@ function renderFriendsOwn(data) {
     html += `<div class="section-label">Friends (${data.friends.length})</div>`;
     html += data.friends.map(u => `
       <div class="friend-item">
-        ${avatarEl(u.display_name, u.avatar_url)}
+        ${avatarEl(u.display_name, u.avatar_url, 38, u.id)}
         <span class="friend-name" onclick="goProfile(${u.id})">${u.display_name}</span>
         <div class="friend-actions">
           <button class="btn btn-unfriend" onclick="removeFriend(${u.id})">Remove</button>
@@ -493,7 +594,7 @@ function renderFriendsOwn(data) {
     html += `<div class="section-label">Sent Requests</div>`;
     html += data.requests_sent.map(u => `
       <div class="friend-item">
-        ${avatarEl(u.display_name, u.avatar_url)}
+        ${avatarEl(u.display_name, u.avatar_url, 38, u.id)}
         <span class="friend-name" onclick="goProfile(${u.id})">${u.display_name}</span>
         <div class="friend-actions">
           <button class="btn" onclick="removeFriend(${u.id})">Cancel</button>
@@ -550,7 +651,7 @@ async function searchUsers(q) {
         actionHtml = `<button class="btn btn-primary" onclick="addFriend(${u.id}, this)">Add friend</button>`;
       }
       return `<div class="search-result-item">
-        ${avatarEl(u.display_name, u.avatar_url, 34)}
+        ${avatarEl(u.display_name, u.avatar_url, 34, u.id)}
         <span class="friend-name" onclick="goProfile(${u.id})" style="cursor:pointer">${u.display_name}</span>
         ${actionHtml}
       </div>`;
@@ -674,6 +775,214 @@ async function saveName() {
   }
 }
 
+// ── Favorites ─────────────────────────────────────────────────
+const TEAM_IDS = {
+  ATL:1610612737,BOS:1610612738,BKN:1610612751,CHA:1610612766,CHI:1610612741,
+  CLE:1610612739,DAL:1610612742,DEN:1610612743,DET:1610612765,GSW:1610612744,
+  HOU:1610612745,IND:1610612754,LAC:1610612746,LAL:1610612747,MEM:1610612763,
+  MIA:1610612748,MIL:1610612749,MIN:1610612750,NOP:1610612740,NYK:1610612752,
+  OKC:1610612760,ORL:1610612753,PHI:1610612755,PHX:1610612756,POR:1610612757,
+  SAC:1610612758,SAS:1610612759,TOR:1610612761,UTA:1610612762,WAS:1610612764,
+};
+function favLogoUrl(abbr) {
+  const id = TEAM_IDS[abbr];
+  return id ? `https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg` : null;
+}
+function favLogoEl(abbr) {
+  const url = favLogoUrl(abbr);
+  return url
+    ? `<img class="fav-logo" src="${url}" alt="${abbr}" onerror="this.outerHTML='<div class=\\'fav-logo-fallback\\'>🏀</div>'">`
+    : `<div class="fav-logo-fallback">🏀</div>`;
+}
+
+let _favEditMode = false;
+let _favPickingSlot = null;
+
+function buildFavoritesHtml(favorites, isOwn) {
+  // For non-own profiles: hide section entirely if no favorites
+  if (!isOwn && favorites.length === 0) return '';
+
+  // Build slot map: position → game data
+  const slots = {};
+  favorites.forEach(f => { slots[f.position] = f; });
+
+  const editBtnHtml = isOwn
+    ? `<button class="fav-edit-btn${_favEditMode ? ' active' : ''}" id="fav-edit-btn" onclick="toggleFavEdit()">Edit</button>`
+    : '';
+
+  let cardsHtml = '';
+  for (let pos = 1; pos <= 4; pos++) {
+    const g = slots[pos];
+    if (g) {
+      const awayWin = (g.away_score ?? 0) > (g.home_score ?? 0);
+      const score   = (g.home_score != null)
+        ? `${awayWin ? g.away_score : g.home_score}–${awayWin ? g.home_score : g.away_score}`
+        : '';
+      const dateStr = g.game_date ? fmtShortDate(g.game_date) : '';
+      const removeBtn = (isOwn && _favEditMode)
+        ? `<div class="fav-remove visible" onclick="removeFavGame(event,'${g.game_id}')">×</div>`
+        : (isOwn ? `<div class="fav-remove" onclick="removeFavGame(event,'${g.game_id}')">×</div>` : '');
+      cardsHtml += `
+        <div class="fav-card" onclick="goToGame('${g.game_id}')">
+          ${removeBtn}
+          <div class="fav-card-inner">
+            <div class="fav-logos">
+              ${favLogoEl(g.away_team_abbr)}
+              <span class="fav-vs">@</span>
+              ${favLogoEl(g.home_team_abbr)}
+            </div>
+            <div class="fav-info">
+              <div class="fav-teams">${g.away_team_abbr} @ ${g.home_team_abbr}</div>
+              ${score ? `<div class="fav-score">${score}</div>` : ''}
+              ${dateStr ? `<div class="fav-date">${dateStr}</div>` : ''}
+            </div>
+          </div>
+        </div>`;
+    } else if (isOwn) {
+      cardsHtml += `
+        <div class="fav-slot" onclick="openFavPicker(${pos})">
+          <span class="fav-slot-plus">+</span>
+        </div>`;
+    }
+  }
+
+  return `
+    <div class="fav-section" id="fav-section">
+      <div class="fav-heading">
+        Favorites
+        ${editBtnHtml}
+      </div>
+      <div class="fav-grid" id="fav-grid">${cardsHtml}</div>
+    </div>`;
+}
+
+function toggleFavEdit() {
+  _favEditMode = !_favEditMode;
+  const btn = document.getElementById('fav-edit-btn');
+  if (btn) btn.classList.toggle('active', _favEditMode);
+  // Re-render just the grid
+  const grid = document.getElementById('fav-grid');
+  if (!grid) return;
+  const slots = {};
+  (PROFILE.favorites || []).forEach(f => { slots[f.position] = f; });
+  let html = '';
+  for (let pos = 1; pos <= 4; pos++) {
+    const g = slots[pos];
+    if (g) {
+      const awayWin = (g.away_score ?? 0) > (g.home_score ?? 0);
+      const score   = (g.home_score != null)
+        ? `${awayWin ? g.away_score : g.home_score}–${awayWin ? g.home_score : g.away_score}`
+        : '';
+      const dateStr = g.game_date ? fmtShortDate(g.game_date) : '';
+      const removeBtn = _favEditMode
+        ? `<div class="fav-remove visible" onclick="removeFavGame(event,'${g.game_id}')">×</div>`
+        : `<div class="fav-remove" onclick="removeFavGame(event,'${g.game_id}')">×</div>`;
+      html += `
+        <div class="fav-card" onclick="goToGame('${g.game_id}')">
+          ${removeBtn}
+          <div class="fav-card-inner">
+            <div class="fav-logos">
+              ${favLogoEl(g.away_team_abbr)}
+              <span class="fav-vs">@</span>
+              ${favLogoEl(g.home_team_abbr)}
+            </div>
+            <div class="fav-info">
+              <div class="fav-teams">${g.away_team_abbr} @ ${g.home_team_abbr}</div>
+              ${score ? `<div class="fav-score">${score}</div>` : ''}
+              ${dateStr ? `<div class="fav-date">${dateStr}</div>` : ''}
+            </div>
+          </div>
+        </div>`;
+    } else {
+      html += `<div class="fav-slot" onclick="openFavPicker(${pos})"><span class="fav-slot-plus">+</span></div>`;
+    }
+  }
+  grid.innerHTML = html;
+}
+
+function goToGame(gameId) {
+  window.location.href = `/game?gameId=${gameId}&tab=reviews`;
+}
+
+async function openFavPicker(slot) {
+  _favPickingSlot = slot;
+  const modal = document.getElementById('fav-picker-modal');
+  const list  = document.getElementById('fav-picker-list');
+  modal.style.display = 'flex';
+  list.innerHTML = '<div class="loading-state">Loading your reviews…</div>';
+
+  try {
+    const res  = await fetch(`/api/users/${PROFILE_ID}/reviews?limit=100&offset=0`);
+    const data = await res.json();
+    const reviews = data.reviews || [];
+
+    // Games already in favorites
+    const favGameIds = new Set((PROFILE.favorites || []).map(f => f.game_id));
+
+    if (!reviews.length) {
+      list.innerHTML = '<div class="empty-state">No reviewed games yet.</div>';
+      return;
+    }
+
+    list.innerHTML = reviews.map(r => {
+      const awayWin = r.away_score > r.home_score;
+      const disabled = favGameIds.has(r.game_id);
+      return `<div class="fav-picker-item${disabled ? '" style="opacity:0.4;cursor:not-allowed' : ''}" ${disabled ? '' : `onclick="pickFavGame('${r.game_id}')"` }>
+        <div style="flex:1">
+          <div class="fav-picker-game">${r.away_team_abbr} @ ${r.home_team_abbr}</div>
+          <div class="fav-picker-meta">
+            <b>${awayWin ? r.away_score : r.home_score}</b>–${awayWin ? r.home_score : r.away_score}
+            · ${fmtShortDate(r.game_date)}
+            ${disabled ? ' · already a favorite' : ''}
+          </div>
+        </div>
+        <div class="fav-picker-stars">${starsText(r.rating)}</div>
+      </div>`;
+    }).join('');
+  } catch {
+    list.innerHTML = '<div class="empty-state">Could not load reviews.</div>';
+  }
+}
+
+function closeFavPicker(e) {
+  if (e.target === document.getElementById('fav-picker-modal')) {
+    document.getElementById('fav-picker-modal').style.display = 'none';
+  }
+}
+
+async function pickFavGame(gameId) {
+  document.getElementById('fav-picker-modal').style.display = 'none';
+  try {
+    const res = await fetch('/api/me/favorites', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ game_id: gameId, position: _favPickingSlot }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error);
+    // Refresh profile to get updated favorites
+    await loadProfile();
+    toast('Favorite saved!');
+  } catch(e) {
+    toast('Error: ' + e.message);
+  }
+}
+
+async function removeFavGame(event, gameId) {
+  event.stopPropagation();
+  try {
+    const res = await fetch(`/api/me/favorites/${gameId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error((await res.json()).error);
+    // Update local state and re-render grid
+    PROFILE.favorites = (PROFILE.favorites || []).filter(f => f.game_id !== gameId);
+    const grid = document.getElementById('fav-grid');
+    if (grid) toggleFavEdit(); // re-renders in current edit mode
+    // Hide section if no more favorites (and not own profile — but own always shows)
+    toast('Removed from favorites.');
+  } catch(e) {
+    toast('Error: ' + e.message);
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────
 function goProfile(userId) {
   window.location.href = `/profile/${userId}`;
@@ -692,10 +1001,13 @@ function fmtShortDate(str) {
 function starsText(r10) {
   return '★'.repeat(Math.round(r10 / 2));
 }
-function avatarEl(name, url, size = 38) {
+function avatarEl(name, url, size = 38, userId = null) {
   const inner = url
     ? `<img src="${url}" alt="${name}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover">`
     : name.charAt(0).toUpperCase();
+  if (userId) {
+    return `<a href="/profile/${userId}" class="friend-avatar" style="width:${size}px;height:${size}px;text-decoration:none;color:inherit;cursor:pointer">${inner}</a>`;
+  }
   return `<div class="friend-avatar" style="width:${size}px;height:${size}px">${inner}</div>`;
 }
 function toast(msg) {

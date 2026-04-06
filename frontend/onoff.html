@@ -341,6 +341,19 @@ table.wt tbody td.td-lineup { text-align: left; }
   }
   .nav-tabs::-webkit-scrollbar { display: none; }
   .nav-tab { white-space: nowrap; padding: 5px 12px; }
+
+  /* Compact table so all columns fit in one screenshot */
+  table.wt { min-width: 0; font-size: 12px; }
+  table.wt thead th { padding: 8px 6px 7px; font-size: 9px; letter-spacing: 0.04em; }
+  table.wt thead th:last-child { padding-right: 16px; }
+  table.wt tbody td { padding: 10px 6px; }
+  table.wt tbody td:last-child { padding-right: 16px; }
+  table.wt thead th.th-lineup,
+  table.wt tbody td.td-lineup { width: 1px; white-space: nowrap; }
+  .wowy-lineup { gap: 6px; }
+  .wc img { width: 32px; height: 32px; }
+  .wc-name { font-size: 9px; }
+  .td-min { font-size: 11px; }
 }
 
 @media (max-width: 768px) {
@@ -368,13 +381,13 @@ table.wt tbody td.td-lineup { text-align: left; }
 <nav>
   <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
   <div class="nav-tabs">
-    <a class="nav-tab" href="/stats">Stats</a>
-    <a class="nav-tab" href="/builder">Builder</a>
+    <a class="nav-tab" href="/stats.html">Stats</a>
+    <a class="nav-tab" href="/reviews.html">BasketBoxd</a>
+    <a class="nav-tab" href="/builder.html">Builder</a>
     <a class="nav-tab active" href="/onoff">On/Off</a>
-    <a class="nav-tab" href="/reviews.html">basketboxd</a>
+    <a class="nav-tab" href="/compare.html">Compare</a>
   </div>
-  <div class="nav-auth" id="nav-auth-slot">    <a class="nav-tab" href="/reviews">BasketBoxd</a>
-  </div>
+  <div class="nav-auth" id="nav-auth-slot"></div>
 </nav>
 
 <div class="app">
@@ -386,11 +399,7 @@ table.wt tbody td.td-lineup { text-align: left; }
         <option value="">— select team —</option>
       </select>
       <label class="ctrl-label" for="season-select">Season</label>
-      <select class="ctrl-select" id="season-select">
-        <option value="2025-26" selected>2025–26</option>
-        <option value="2024-25">2024–25</option>
-        <option value="2023-24">2023–24</option>
-      </select>
+      <select class="ctrl-select" id="season-select"></select>
     </div>
     <div class="players-scroll" id="players-scroll">
       <div class="state-msg" style="padding:40px 16px;flex:0;">
@@ -411,6 +420,7 @@ table.wt tbody td.td-lineup { text-align: left; }
   </main>
 </div>
 
+<script src="/season-config.js"></script>
 <script>
 const TEAMS = [
   {abbr:'ATL',name:'Atlanta Hawks'},      {abbr:'BOS',name:'Boston Celtics'},
@@ -481,6 +491,7 @@ async function loadRoster() {
 
 teamSel.addEventListener('change', loadRoster);
 seasonSel.addEventListener('change', () => { if (teamSel.value) loadRoster(); });
+populateSeasonDropdown(seasonSel, computeCurrentSeason());
 
 // ── Player grid ────────────────────────────────────────────────
 function renderGrid() {

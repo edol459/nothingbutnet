@@ -14,6 +14,7 @@ Endpoints:
 
 import os
 import json
+from datetime import date
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -31,9 +32,32 @@ CORS(app)
 def index():
     return app.send_static_file('index.html')
 
-DATABASE_URL       = os.getenv("DATABASE_URL")
-DEFAULT_SEASON     = os.getenv("NBA_SEASON",      "2024-25")
-DEFAULT_SEASON_TYPE = os.getenv("NBA_SEASON_TYPE", "Regular Season")
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+
+def get_current_season() -> str:
+    """Returns the active NBA season string, e.g. '2025-26'.
+    October–December → the season that just started.
+    January–September → the season that started last October.
+    """
+    today = date.today()
+    y, m = today.year, today.month
+    if m >= 10:
+        return f"{y}-{str(y + 1)[2:]}"
+    return f"{y - 1}-{str(y)[2:]}"
+
+
+def get_current_season_type() -> str:
+    """Returns 'Playoffs' during late April–June, else 'Regular Season'."""
+    today = date.today()
+    m, d = today.month, today.day
+    if (m == 4 and d >= 20) or m in (5, 6):
+        return "Playoffs"
+    return "Regular Season"
+
+
+DEFAULT_SEASON      = os.getenv("NBA_SEASON",      get_current_season())
+DEFAULT_SEASON_TYPE = os.getenv("NBA_SEASON_TYPE", get_current_season_type())
 
 
 def get_conn():
@@ -61,6 +85,16 @@ def _ensure_tables():
                 PRIMARY KEY (user_id, review_id)
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS favorite_games (
+                user_id    INTEGER  REFERENCES users(id) ON DELETE CASCADE,
+                game_id    TEXT     NOT NULL,
+                position   SMALLINT NOT NULL CHECK (position BETWEEN 1 AND 4),
+                created_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (user_id, game_id),
+                UNIQUE (user_id, position)
+            )
+        """)
         conn.commit()
         cur.close(); conn.close()
     except Exception as e:
@@ -85,6 +119,17 @@ def get_seasons():
         return jsonify({"seasons": rows})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── /api/current-season ───────────────────────────────────────
+
+@app.route("/api/current-season")
+def current_season():
+    """Returns the active season and season type derived from today's date."""
+    return jsonify({
+        "season":      get_current_season(),
+        "season_type": get_current_season_type(),
+    })
 
 
 # ── /api/players ─────────────────────────────────────────────
@@ -847,10 +892,10 @@ def preview_team_stats(abbr):
             FROM player_seasons ps
             JOIN players p ON ps.player_id = p.player_id
             WHERE ps.team_abbr = %s          -- ← was p.team_abbreviation
-              AND ps.season = '2025-26'
-              AND ps.season_type = 'Regular Season'
+              AND ps.season = %s
+              AND ps.season_type = %s
               AND ps.gp >= 5
-        """, (abbr,))
+        """, (abbr, get_current_season(), get_current_season_type()))
         row = cur.fetchone()
         cur.close()
         conn.close()   # ← also close the connection
@@ -905,7 +950,9 @@ def preview_h2h(away, home):
 
         # Pull last 2 seasons to get enough H2H games
         games_out = []
-        for season in ["2025-26", "2024-25"]:
+        cur_s = get_current_season()
+        prev_s = f"{int(cur_s[:4]) - 1}-{cur_s[:4][2:]}"
+        for season in [cur_s, prev_s]:
             if len(games_out) >= 5:
                 break
             try:
@@ -1085,7 +1132,7 @@ def stats_page():
 @app.route("/api/onoff")
 def get_onoff():
     team_abbr = request.args.get("team", "").upper()
-    season    = request.args.get("season", "2025-26")
+    season    = request.args.get("season", get_current_season())
 
     if not team_abbr:
         return jsonify({"error": "team param required"}), 400
@@ -1279,8 +1326,8 @@ def _format_game(g: dict) -> dict:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/games")
 def get_games():
-    season      = request.args.get("season",      "2025-26")
-    season_type = request.args.get("season_type", "Regular Season")
+    season      = request.args.get("season",      get_current_season())
+    season_type = request.args.get("season_type", get_current_season_type())
     team        = request.args.get("team",        "").upper().strip()
     sort        = request.args.get("sort",        "date")
     direction   = "ASC" if request.args.get("dir", "desc").lower() == "asc" else "DESC"
@@ -1618,8 +1665,8 @@ def admin_list_reviews():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/reviews/top-games")
 def get_top_rated_games():
-    season      = request.args.get("season",      "2025-26")
-    season_type = request.args.get("season_type", "Regular Season")
+    season      = request.args.get("season",      get_current_season())
+    season_type = request.args.get("season_type", get_current_season_type())
     min_reviews = int(request.args.get("min_reviews", 1))
     limit       = min(int(request.args.get("limit", 25)), 100)
 
@@ -1798,6 +1845,69 @@ def update_display_name():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PUT /api/me/favorites  — set a game at a position (1–4)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/me/favorites", methods=["PUT"])
+@login_required
+def set_favorite():
+    me   = current_user()
+    body = request.get_json() or {}
+    game_id  = body.get("game_id", "").strip()
+    position = body.get("position")
+
+    if not game_id:
+        return jsonify({"error": "game_id is required"}), 400
+    if position not in (1, 2, 3, 4):
+        return jsonify({"error": "position must be 1–4"}), 400
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+
+        # Verify game exists
+        cur.execute("SELECT game_id FROM games WHERE game_id = %s", (game_id,))
+        if not cur.fetchone():
+            cur.close(); conn.close()
+            return jsonify({"error": "Game not found"}), 404
+
+        # Remove any existing entry for this game (in case it was in another slot)
+        cur.execute("DELETE FROM favorite_games WHERE user_id = %s AND game_id = %s",
+                    (me["id"], game_id))
+        # Remove whatever was at this position
+        cur.execute("DELETE FROM favorite_games WHERE user_id = %s AND position = %s",
+                    (me["id"], position))
+        # Insert new
+        cur.execute("""
+            INSERT INTO favorite_games (user_id, game_id, position)
+            VALUES (%s, %s, %s)
+        """, (me["id"], game_id, position))
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# DELETE /api/me/favorites/<game_id>  — remove a favorite
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/me/favorites/<game_id>", methods=["DELETE"])
+@login_required
+def remove_favorite(game_id):
+    me = current_user()
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("DELETE FROM favorite_games WHERE user_id = %s AND game_id = %s",
+                    (me["id"], game_id))
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # GET /api/users/<user_id>/profile  (public)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/users/<int:user_id>/profile")
@@ -1859,6 +1969,18 @@ def get_user_profile(user_id):
         """, (user_id, user_id))
         friend_count = cur.fetchone()["count"]
 
+        # Favorite games (up to 4, ordered by position)
+        cur.execute("""
+            SELECT fg.position, fg.game_id,
+                   g.home_team_abbr, g.away_team_abbr,
+                   g.home_score, g.away_score, g.game_date
+            FROM favorite_games fg
+            LEFT JOIN games g ON g.game_id = fg.game_id
+            WHERE fg.user_id = %s
+            ORDER BY fg.position
+        """, (user_id,))
+        favorites = [dict(r) for r in cur.fetchall()]
+
         cur.close(); conn.close()
 
         return jsonify({
@@ -1876,6 +1998,7 @@ def get_user_profile(user_id):
                 "half_star_count": int(stats["half_star_count"] or 0),
                 "distribution":    dist,
             },
+            "favorites":     favorites,
             "friend_count":  friend_count,
             "friend_status": friend_status,  # null if viewing own profile or not logged in
             "is_own":        viewer and viewer["id"] == user_id,
