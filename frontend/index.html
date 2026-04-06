@@ -126,7 +126,6 @@ nav {
 
 /* ── Calendar date strip ─────────────────────────────────────── */
 .cal-strip-wrap {
-  border-top: 1px solid var(--paper3);
   border-bottom: 1px solid var(--paper3);
   margin: 0 -32px 16px;
   overflow: hidden;
@@ -647,7 +646,7 @@ nav {
 
 /* ── Mobile ──────────────────────────────────────────────────── */
 @media (max-width: 640px) {
-  :root { --nav-h: 88px; }
+  :root { --nav-h: 100px; }
   nav { position: fixed; top: 0; left: 0; right: 0; height: auto; padding: 0 16px; flex-wrap: wrap; gap: 0; align-items: center; }
   .nav-wordmark { padding: 13px 0; }
   .nav-auth { padding: 13px 0; }
@@ -811,8 +810,6 @@ nav {
 
   <!-- Scoreboard -->
   <div class="scoreboard-section">
-    <div class="scoreboard-top">
-    </div>
     <!-- Calendar date strip -->
     <div class="cal-strip-wrap">
       <div class="cal-strip" id="cal-strip"></div>
