@@ -311,6 +311,30 @@ nav {
 }
 .impact-toggle.on::after { transform: translateX(14px); }
 
+.impact-tooltip-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 1px solid var(--ink4); color: var(--ink4);
+  font-size: 8px; font-family: var(--ff-mono); font-weight: 700;
+  cursor: default; flex-shrink: 0; line-height: 1;
+  position: relative;
+}
+.impact-tooltip-icon .impact-tooltip-text {
+  display: none;
+  position: absolute; bottom: calc(100% + 6px); right: 0;
+  background: var(--paper2); border: 1px solid var(--rule);
+  color: var(--ink2); font-size: 10px; font-family: var(--ff-sans);
+  letter-spacing: 0; white-space: nowrap;
+  padding: 5px 8px; border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.15);
+  pointer-events: none; z-index: 99;
+}
+.impact-tooltip-icon .impact-tooltip-text::after {
+  content: ''; position: absolute; top: 100%; right: 4px;
+  border: 5px solid transparent; border-top-color: var(--rule);
+}
+.impact-tooltip-icon:hover .impact-tooltip-text { display: block; }
+
 .builder-empty {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 10px; color: var(--ink4);
@@ -487,7 +511,7 @@ tbody tr { animation: rowIn 0.2s ease both; }
 .drawer-handle-bar { display: none; }
 
 @media (max-width: 768px) {
-  .page-header { padding: 14px 16px 12px; flex-wrap: wrap; gap: 10px; }
+  .page-header { padding: 34px 16px 12px; flex-wrap: wrap; gap: 10px; }
   .page-title { font-size: 22px; }
 
   .app { flex-direction: column; }
@@ -628,11 +652,11 @@ tbody tr { animation: rowIn 0.2s ease both; }
 <nav>
   <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
   <div class="nav-tabs">
-    <a class="nav-tab" href="/stats.html">Stats</a>
-    <a class="nav-tab" href="/reviews.html">BasketBoxd</a>
-    <a class="nav-tab active" href="/builder.html">Builder</a>
+    <a class="nav-tab" href="/stats">Stats</a>
+    <a class="nav-tab" href="/reviews">BasketBoxd</a>
+    <a class="nav-tab active" href="/builder">Builder</a>
     <a class="nav-tab" href="/onoff">On/Off</a>
-    <a class="nav-tab" href="/compare.html">Compare</a>
+    <a class="nav-tab" href="/compare">Compare</a>
   </div>
   <div class="nav-auth" id="nav-auth-slot"></div>
 </nav>
@@ -700,6 +724,7 @@ tbody tr { animation: rowIn 0.2s ease both; }
             <div class="impact-toggle-wrap" title="Weight stats by their correlation to winning">
               <span class="impact-toggle-label">Impact Mode</span>
               <div class="impact-toggle" id="impact-toggle" role="switch" aria-checked="false"></div>
+              <span class="impact-tooltip-icon">?<span class="impact-tooltip-text">Weights each stat by its correlation to winning</span></span>
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;min-width:0;">

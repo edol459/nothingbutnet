@@ -1463,7 +1463,7 @@ def submit_review(game_id):
     if rating is None or not isinstance(rating, int) or not (1 <= rating <= 10):
         return jsonify({"error": "rating must be an integer 1–10"}), 400
 
-    review_text = body.get("review_text", "").strip() or None
+    review_text = (body.get("review_text") or "").strip() or None
 
     # ── Profanity filter ──────────────────────────────────────────
     if review_text and _contains_slur(review_text):
@@ -2194,6 +2194,11 @@ def own_profile():
 @app.route("/profile/<int:user_id>")
 def user_profile(user_id):
     return app.send_static_file("profile.html")
+
+@app.route("/compare")
+@app.route("/compare.html")
+def compare_page():
+    return app.send_static_file("compare.html")
 
 
 if __name__ == "__main__":

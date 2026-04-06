@@ -366,6 +366,7 @@ nav {
 
 .stat-group-tabs {
   display: flex;
+  align-items: center;
   gap: 2px;
   border-bottom: 1px solid var(--rule);
   padding: 0 32px;
@@ -396,6 +397,33 @@ nav {
   color: var(--ink4);
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+/* ── Source tooltip ─────────────────────────────────────────── */
+.src-info {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--ink4); color: var(--paper);
+  font-size: 8px; font-weight: 700; font-family: var(--ff-sans);
+  cursor: default; flex-shrink: 0;
+  margin-left: 3px;
+  transition: background 0.15s;
+}
+.src-info:hover { background: var(--orange); }
+#src-tooltip {
+  display: none;
+  position: fixed;
+  background: var(--ink); color: #fff;
+  font-family: var(--ff-sans); font-size: 11px; font-weight: 400;
+  white-space: nowrap; padding: 7px 11px; border-radius: 5px;
+  pointer-events: none; z-index: 9999;
+  line-height: 1.5;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+#src-tooltip::before {
+  content: '';
+  position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-bottom-color: var(--ink);
 }
 .stat-group-tab.unavailable:hover { color: var(--ink4); }
 
@@ -1234,7 +1262,7 @@ tbody tr {
 }
 
 @media (max-width: 768px) {
-  .page-header { padding: 14px 16px 12px; flex-wrap: wrap; gap: 10px; }
+  .page-header { padding: 34px 16px 12px; flex-wrap: wrap; gap: 10px; }
   .page-title { font-size: 22px; }
 
   .stats-toolbar { padding: 10px 16px; }
@@ -1267,17 +1295,18 @@ tbody tr {
 </style>
 </head>
 <body>
+<div id="src-tooltip"></div>
 
 <!-- ── Navigation ───────────────────────────────────────────── -->
 <nav>
   <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
 
   <div class="nav-tabs">
-    <a class="nav-tab active" href="/stats.html">Stats</a>
-    <a class="nav-tab" href="/reviews.html">BasketBoxd</a>
-    <a class="nav-tab" href="/builder.html">Builder</a>
+    <a class="nav-tab active" href="/stats">Stats</a>
+    <a class="nav-tab" href="/reviews">BasketBoxd</a>
+    <a class="nav-tab" href="/builder">Builder</a>
     <a class="nav-tab" href="/onoff">On/Off</a>
-    <a class="nav-tab" href="/compare.html">Compare</a>
+    <a class="nav-tab" href="/compare">Compare</a>
   </div>
 
   <div class="nav-auth" id="nav-auth-slot">    <a class="nav-tab" href="/reviews">Game Reviews</a>
@@ -2533,11 +2562,34 @@ function renderSubTabs(cat) {
     ST.sortCol = sub?.defaultSort || 'pts';
   }
 
+  const SOURCE_TIPS = {
+    darko:   'Daily Adjusted and Regressed Kalman Optimized projections · from darko.app',
+    lebron:  'Luck-adjusted player wins · from bball-index.com',
+    net_pts: 'Points added per 100 possessions · from Dean Oliver / ESPN Analytics',
+  };
+
   tabBar.innerHTML = Object.entries(subs).map(([key, sub]) => {
     const unavailable = cat === 'impact' && isPastSeason() && PAST_UNAVAILABLE_IMPACT_TABS.has(key);
     const isActive = key === ST.statGroup && !unavailable;
-    return `<button class="stat-group-tab${isActive ? ' active' : ''}${unavailable ? ' unavailable' : ''}" data-group="${key}"${unavailable ? ' disabled title="Not available for past seasons"' : ''}>${sub.label}</button>`;
+    const badge = SOURCE_TIPS[key]
+      ? `<span class="src-info" data-tip="${SOURCE_TIPS[key]}">i</span>`
+      : '';
+    return `<button class="stat-group-tab${isActive ? ' active' : ''}${unavailable ? ' unavailable' : ''}" data-group="${key}"${unavailable ? ' disabled title="Not available for past seasons"' : ''}>${sub.label}</button>${badge}`;
   }).join('');
+
+  // Wire fixed tooltip for src-info badges
+  const tip = document.getElementById('src-tooltip');
+  tabBar.querySelectorAll('.src-info').forEach(el => {
+    el.addEventListener('mouseenter', e => {
+      tip.textContent = el.dataset.tip;
+      tip.style.display = 'block';
+      const r = el.getBoundingClientRect();
+      const rawLeft = r.left + r.width / 2 - tip.offsetWidth / 2;
+      tip.style.left = Math.round(Math.max(8, Math.min(rawLeft, window.innerWidth - tip.offsetWidth - 8))) + 'px';
+      tip.style.top  = Math.round(r.bottom + 8) + 'px';
+    });
+    el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+  });
 
   ST.statFilterVals = {};
   renderFilterPanel();
