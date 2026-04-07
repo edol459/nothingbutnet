@@ -841,6 +841,9 @@ def get_top_performers():
         home_abbr = home.get("teamTricode", "")
         matchup   = f"{away_abbr} @ {home_abbr}"
 
+        game_status = box.get("gameStatus", 1)
+        is_live     = game_status == 2
+
         for team, abbr in [(away, away_abbr), (home, home_abbr)]:
             for p in team.get("players", []):
                 s       = p.get("statistics", {})
@@ -861,6 +864,7 @@ def get_top_performers():
                     "team":      abbr,
                     "matchup":   matchup,
                     "game_id":   gid,
+                    "is_live":   is_live,
                     "pts":       pts,
                     "reb":       reb,
                     "ast":       ast,

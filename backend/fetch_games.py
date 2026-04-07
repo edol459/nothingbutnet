@@ -46,16 +46,27 @@ def get_conn():
     return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 
 
+def normalize_season(s: str) -> str:
+    """Convert '2020-2021' → '2020-21', leave '2020-21' unchanged."""
+    if "-" in s:
+        left, right = s.split("-", 1)
+        if len(right) == 4:
+            right = right[2:]
+        return f"{left}-{right}"
+    return s
+
+
 def fetch_season_type(season_type_label: str, season_type_api: str):
     """Fetch all completed games for one season type."""
     import requests
     from nba_api.stats.endpoints import leaguegamefinder
 
-    print(f"\n📅 Fetching {SEASON} {season_type_label}...")
+    season_api = normalize_season(SEASON)
+    print(f"\n📅 Fetching {season_api} {season_type_label}...")
 
     try:
         finder = leaguegamefinder.LeagueGameFinder(
-            season_nullable=SEASON,
+            season_nullable=season_api,
             league_id_nullable="00",
             season_type_nullable=season_type_api,
         )
@@ -138,7 +149,7 @@ def fetch_season_type(season_type_label: str, season_type_api: str):
                     status         = EXCLUDED.status,
                     updated_at     = NOW()
             """, (
-                str(gid), SEASON, season_type_label, game_date,
+                str(gid), season_api, season_type_label, game_date,
                 str(home["TEAM_ABBREVIATION"]),
                 str(away["TEAM_ABBREVIATION"]),
                 home_score, away_score,

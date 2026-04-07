@@ -406,6 +406,16 @@ nav {
   color: var(--ink4);
   margin-top: 2px;
   letter-spacing: 0.03em;
+  display: flex; align-items: center; gap: 5px;
+}
+.performer-live-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--red); flex-shrink: 0;
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
 }
 
 .performer-stats {
@@ -1161,7 +1171,9 @@ async function loadPerformers() {
           ${headshot}
           <div class="performer-info">
             <div class="performer-name">${p.name}</div>
-            <div class="performer-meta">${p.team} · ${p.matchup}</div>
+            <div class="performer-meta">
+              ${p.is_live ? '<span class="performer-live-dot"></span>' : ''}${p.team} · ${p.matchup}
+            </div>
           </div>
           <div class="performer-stats">
             <div class="performer-stat">
