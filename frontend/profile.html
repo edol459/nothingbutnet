@@ -1048,7 +1048,9 @@ function fmtShortDate(str) {
   return d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
 }
 function starsText(r10) {
-  return '★'.repeat(Math.round(r10 / 2));
+  const full = Math.floor(r10 / 2);
+  const half = r10 % 2 === 1 ? 1 : 0;
+  return '★'.repeat(full) + (half ? '½' : '');
 }
 function avatarEl(name, url, size = 38, userId = null) {
   const inner = url

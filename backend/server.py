@@ -112,6 +112,9 @@ def get_seasons():
         cur.execute("""
             SELECT DISTINCT season, season_type
             FROM player_seasons
+            UNION
+            SELECT DISTINCT season, season_type
+            FROM games
             ORDER BY season DESC, season_type
         """)
         rows = [dict(r) for r in cur.fetchall()]
