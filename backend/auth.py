@@ -54,7 +54,6 @@ def upsert_user(google_id: str, email: str, display_name: str, avatar_url: str) 
         VALUES (%s, %s, %s, %s)
         ON CONFLICT (google_id) DO UPDATE SET
             email        = EXCLUDED.email,
-            display_name = EXCLUDED.display_name,
             avatar_url   = EXCLUDED.avatar_url,
             updated_at   = NOW()
         RETURNING id, google_id, email, display_name, avatar_url, created_at
