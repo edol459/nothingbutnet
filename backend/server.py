@@ -1424,7 +1424,7 @@ def get_wowy_lineups():
             SELECT group_id, player_ids, player_names, min, ortg, drtg, net
             FROM wowy_lineups
             WHERE team_abbr = %s AND season = %s
-            ORDER BY min DESC
+            ORDER BY "min" DESC
         """, (team_abbr, season))
         rows = cur.fetchall()
         cur.close()
@@ -1435,7 +1435,7 @@ def get_wowy_lineups():
                 "pids":   list(r["player_ids"]),
                 "_ids":   list(r["player_ids"]),
                 "_names": list(r["player_names"]),
-                "min":    r["min"],
+                "min":    float(r["min"]) if r["min"] is not None else None,
                 "ortg":   float(r["ortg"]) if r["ortg"] is not None else None,
                 "drtg":   float(r["drtg"]) if r["drtg"] is not None else None,
                 "net":    float(r["net"])  if r["net"]  is not None else None,
