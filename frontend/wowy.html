@@ -340,6 +340,9 @@ table.wt tbody td.td-lineup { text-align: left; }
 }
 .nav-signout-btn:hover { color: var(--ink); }
 
+/* Hide drawer chrome on desktop */
+.drawer-handle { display: none; }
+
 /* ── Mobile ──────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   :root { --nav-h: 88px; }
@@ -354,21 +357,13 @@ table.wt tbody td.td-lineup { text-align: left; }
   .nav-tabs::-webkit-scrollbar { display: none; }
   .nav-tab { white-space: nowrap; padding: 5px 12px; }
 
-  /* Stack sidebar above main */
+  /* Main (chart) fills the screen above the drawer */
   .app { flex-direction: column; }
-  .sidebar {
-    width: 100%; height: auto; position: static;
-    border-right: none; border-bottom: 1px solid var(--rule);
-  }
-  .players-scroll { max-height: 260px; }
-  .player-grid { grid-template-columns: repeat(3, 1fr); }
-
-  .main { min-width: 0; overflow: visible; }
+  .main { min-width: 0; overflow: visible; flex: 1; }
   .results-head { padding: 12px 16px 10px; }
-  .sidebar-head { padding-top: 28px; }
   .sel-strip { padding: 10px 16px; }
 
-  /* Compact table — applies whenever sidebar stacks */
+  /* Compact table */
   table.wt { min-width: 0; font-size: 12px; }
   table.wt thead th { padding: 8px 6px 7px; font-size: 9px; letter-spacing: 0.04em; }
   table.wt thead th:first-child { padding-left: 16px; }
@@ -382,9 +377,55 @@ table.wt tbody td.td-lineup { text-align: left; }
   .wc img { width: 32px; height: 32px; }
   .wc-name { font-size: 9px; }
   .td-min { font-size: 11px; }
-
-  /* Table: ensure horizontal scroll */
   .table-scroll { overflow-x: auto; }
+
+  .drawer-handle { display: flex; }
+
+  /* ── Bottom drawer ── */
+  .sidebar {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    width: 100%; height: auto;
+    border-right: none; border-top: 1px solid var(--rule);
+    border-radius: 16px 16px 0 0;
+    background: var(--paper);
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.10);
+    z-index: 90;
+    transform: translateY(calc(100% - 52px));
+    transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
+    overflow: hidden;
+  }
+  .sidebar.drawer-open {
+    transform: translateY(0);
+  }
+  /* Drag handle / toggle strip */
+  .drawer-handle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 18px; height: 52px; cursor: pointer; flex-shrink: 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .drawer-handle-pill {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    width: 36px; height: 4px; border-radius: 2px; background: var(--rule);
+    top: 10px;
+  }
+  .drawer-handle-label {
+    font-family: var(--ff-mono); font-size: 11px;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink3);
+  }
+  .drawer-handle-caret {
+    font-size: 14px; color: var(--ink4);
+    transition: transform 0.3s;
+  }
+  .sidebar.drawer-open .drawer-handle-caret { transform: rotate(180deg); }
+
+  /* Constrain scrollable player area inside drawer */
+  .sidebar-head { padding: 14px 18px 12px; }
+  .players-scroll { max-height: 44vh; overflow-y: auto; }
+  .player-grid { grid-template-columns: repeat(3, 1fr); }
+
+  /* Space at bottom of main so content isn't hidden behind the closed drawer */
+  .main { padding-bottom: 52px; }
 }
 
 </style>
@@ -394,10 +435,10 @@ table.wt tbody td.td-lineup { text-align: left; }
 <nav>
   <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
   <div class="nav-tabs">
-    <a class="nav-tab" href="/stats">Stats</a>
     <a class="nav-tab" href="/reviews">BasketBoxd</a>
-    <a class="nav-tab" href="/builder">Builder</a>
+    <a class="nav-tab" href="/stats">Stats Hub</a>
     <a class="nav-tab active" href="/wowy">WoWY</a>
+    <a class="nav-tab" href="/builder">Builder</a>
     <a class="nav-tab" href="/compare">Compare</a>
     <a class="nav-tab" href="/matchups">Matchups</a>
     <a class="nav-tab" href="/trends">Trends</a>
@@ -406,7 +447,18 @@ table.wt tbody td.td-lineup { text-align: left; }
 </nav>
 
 <div class="app">
-  <aside class="sidebar">
+  <main class="main" id="main">
+    <div class="state-msg">
+      <div class="state-icon">👆</div>
+      <span>Load a team, then select 1–5 players<br>to see every WoWY combination</span>
+    </div>
+  </main>
+  <aside class="sidebar" id="sidebar">
+    <div class="drawer-handle" id="drawer-handle" onclick="toggleDrawer()">
+      <div class="drawer-handle-pill"></div>
+      <span class="drawer-handle-label" id="drawer-label">Players</span>
+      <span class="drawer-handle-caret">▲</span>
+    </div>
     <div class="sidebar-head">
       <div class="sidebar-title">WoWY</div>
       <label class="ctrl-label" for="team-select">Team</label>
@@ -426,13 +478,6 @@ table.wt tbody td.td-lineup { text-align: left; }
       <button class="btn-clear" id="btn-clear">Clear</button>
     </div>
   </aside>
-
-  <main class="main" id="main">
-    <div class="state-msg">
-      <div class="state-icon">👆</div>
-      <span>Load a team, then select 1–5 players<br>to see every WoWY combination</span>
-    </div>
-  </main>
 </div>
 
 <script src="/season-config.js"></script>
@@ -806,6 +851,24 @@ async function navSignOut() {
 }
 initNavAuth();
 
+// ── Mobile drawer ─────────────────────────────────────────────
+function toggleDrawer() {
+  if (window.innerWidth > 768) return;
+  const sidebar = document.getElementById('sidebar');
+  sidebar.classList.toggle('drawer-open');
+}
+
+// Close drawer when a player card is tapped on mobile
+document.getElementById('players-scroll').addEventListener('click', function(e) {
+  if (window.innerWidth > 768) return;
+  const card = e.target.closest('.player-card');
+  if (card) {
+    // slight delay so selection renders before closing
+    setTimeout(() => {
+      document.getElementById('sidebar').classList.remove('drawer-open');
+    }, 180);
+  }
+});
 </script>
 </body>
 </html>
