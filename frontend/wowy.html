@@ -393,13 +393,12 @@ table.wt tbody td.td-lineup { text-align: left; }
     background: var(--paper);
     box-shadow: 0 -4px 24px rgba(0,0,0,0.10);
     z-index: 90;
-    max-height: 70vh;
-    transform: translateY(calc(100% - 52px));
+    transform: translateY(calc(100% - 50px));
     transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
     overflow: hidden;
   }
   .sidebar.drawer-open {
-    transform: translateY(calc(100% - 70vh));
+    transform: translateY(0);
   }
   /* Drag handle / toggle strip */
   .drawer-handle {
@@ -425,7 +424,7 @@ table.wt tbody td.td-lineup { text-align: left; }
 
   /* Constrain scrollable player area inside drawer */
   .sidebar-head { padding: 14px 18px 12px; }
-  .players-scroll { max-height: calc(70vh - 52px - 120px); overflow-y: auto; }
+  .players-scroll { max-height: 44vh; overflow-y: auto; }
   .player-grid { grid-template-columns: repeat(3, 1fr); }
 
   /* Space at bottom of main so content isn't hidden behind the closed drawer */
@@ -460,7 +459,7 @@ table.wt tbody td.td-lineup { text-align: left; }
   <aside class="sidebar" id="sidebar">
     <div class="drawer-handle" id="drawer-handle" onclick="toggleDrawer()">
       <div class="drawer-handle-pill"></div>
-      <span class="drawer-handle-label" id="drawer-label">Players</span>
+      <span class="drawer-handle-label" id="drawer-label">Choose Players</span>
       <span class="drawer-handle-caret">▲</span>
     </div>
     <div class="sidebar-head">
