@@ -86,6 +86,12 @@ nav {
 }
 .nav-link:hover { color: var(--ink); background: var(--paper2); }
 .nav-link.active { color: var(--ink); background: var(--paper3); }
+.nav-auth { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.nav-auth-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--rule); }
+.nav-signin-btn { font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 12px; background: var(--orange); color: #fff; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; transition: opacity 0.15s; }
+.nav-signin-btn:hover { opacity: 0.85; }
+.nav-signout-btn { font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); background: none; border: none; cursor: pointer; padding: 4px 6px; }
+.nav-signout-btn:hover { color: var(--ink); }
 
 /* ── Layout ──────────────────────────────────────────────────── */
 .app { padding-top: var(--nav-h); display: flex; flex-direction: column; min-height: 100vh; }
@@ -322,6 +328,7 @@ table.mt tbody td.td-dim  { color: var(--ink3); }
     <a class="nav-link active" href="/matchups">Matchups</a>
     <a class="nav-link" href="/trends">Trends</a>
   </div>
+  <div class="nav-auth" id="nav-auth-slot"></div>
 </nav>
 
 <div class="app">
@@ -872,11 +879,36 @@ function escHtml(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── Nav auth ─────────────────────────────────────────────────────
+async function initNavAuth() {
+  const slot = document.getElementById('nav-auth-slot');
+  try {
+    const res = await fetch('/auth/me');
+    const data = await res.json();
+    const user = data.user;
+    if (user) {
+      slot.innerHTML = `
+        <a href="/profile" style="text-decoration:none;cursor:pointer">${user.avatar_url ? `<img class="nav-auth-avatar" src="${user.avatar_url}" alt="">` : ''}</a>
+        <button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>
+      `;
+    } else {
+      slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login?next=${encodeURIComponent(window.location.pathname)}">Sign in</a>`;
+    }
+  } catch {
+    slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login">Sign in</a>`;
+  }
+}
+async function navSignOut() {
+  await fetch('/auth/logout', { method: 'POST' });
+  window.location.reload();
+}
+
 // ── Boot ──────────────────────────────────────────────────────
 async function init() {
   buildPossOpts('defenders');
   await loadSeasons();
   fetchLeaders();
+  initNavAuth();
 }
 init();
 </script>

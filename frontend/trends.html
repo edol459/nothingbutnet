@@ -581,23 +581,28 @@ async function init() {
   await loadTrends();
 }
 
-// ── Auth nav slot (mirrors other pages) ───────────────────────
+// ── Nav auth ─────────────────────────────────────────────────────
 async function loadAuth() {
+  const slot = document.getElementById('nav-auth-slot');
   try {
-    const r = await fetch(`${API}/api/me`);
-    if (!r.ok) throw new Error();
-    const u = await r.json();
-    const slot = document.getElementById('nav-auth-slot');
-    slot.innerHTML = `
-      <img class="nav-auth-avatar" src="${u.avatar_url || ''}" alt="">
-      <span class="nav-auth-name">${u.display_name}</span>
-      <a href="/profile" class="nav-tab">Profile</a>
-      <button class="nav-signout-btn" onclick="fetch('/api/auth/logout',{method:'POST'}).then(()=>location.reload())">Sign out</button>
-    `;
+    const res = await fetch('/auth/me');
+    const data = await res.json();
+    const user = data.user;
+    if (user) {
+      slot.innerHTML = `
+        <a href="/profile" style="text-decoration:none;cursor:pointer">${user.avatar_url ? `<img class="nav-auth-avatar" src="${user.avatar_url}" alt="">` : ''}</a>
+        <button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>
+      `;
+    } else {
+      slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login?next=${encodeURIComponent(window.location.pathname)}">Sign in</a>`;
+    }
   } catch {
-    document.getElementById('nav-auth-slot').innerHTML =
-      `<a class="nav-signin-btn" href="/api/auth/login">Sign in</a>`;
+    slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login">Sign in</a>`;
   }
+}
+async function navSignOut() {
+  await fetch('/auth/logout', { method: 'POST' });
+  window.location.reload();
 }
 
 // ── Load trends data ───────────────────────────────────────────
