@@ -1257,13 +1257,10 @@ async function uploadAvatar(dataUrl) {
     // Update nav avatar
     const navSlot = document.getElementById('nav-auth-slot');
     if (navSlot) {
-      const navImg = navSlot.querySelector('img.nav-auth-avatar');
-      if (navImg) {
-        navImg.src = dataUrl;
-      } else {
-        const initial = navSlot.querySelector('.nav-auth-avatar-initial');
-        if (initial) initial.outerHTML = `<img class="nav-auth-avatar" src="${dataUrl}" alt="">`;
-      }
+      navSlot.innerHTML = `
+        <a href="/profile" style="text-decoration:none;cursor:pointer"><img class="nav-auth-avatar" src="${dataUrl}" alt=""></a>
+        <button class="nav-signout-btn" onclick="signOut()">Sign out</button>
+      `;
     }
     toast('Profile photo updated');
   } catch {
