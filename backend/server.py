@@ -2150,6 +2150,47 @@ def update_display_name():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# POST /api/me/avatar  — upload / replace profile picture
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/me/avatar", methods=["POST"])
+@login_required
+def update_avatar():
+    user = current_user()
+    body = request.get_json() or {}
+    data = body.get("avatar_data", "").strip()
+
+    if not data:
+        return jsonify({"error": "avatar_data is required"}), 400
+
+    # Must be a data URL with an image MIME type
+    if not data.startswith("data:image/"):
+        return jsonify({"error": "Invalid image format"}), 400
+
+    # Limit size: base64-encoded ~200 KB image → ~270 KB string
+    if len(data) > 300_000:
+        return jsonify({"error": "Image too large (max ~200 KB after resize)"}), 400
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            UPDATE users SET avatar_url = %s, updated_at = NOW()
+            WHERE id = %s
+        """, (data, user["id"]))
+        conn.commit()
+        cur.close(); conn.close()
+
+        from flask import session
+        if "user" in session:
+            session["user"]["avatar_url"] = data
+            session.modified = True
+
+        return jsonify({"ok": True, "avatar_url": data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # PUT /api/me/favorites  — set a game at a position (1–4)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/me/favorites", methods=["PUT"])

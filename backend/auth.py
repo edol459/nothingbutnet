@@ -45,19 +45,18 @@ def get_conn():
                             cursor_factory=psycopg2.extras.RealDictCursor)
 
 
-def upsert_user(google_id: str, email: str, display_name: str, avatar_url: str) -> dict:
+def upsert_user(google_id: str, email: str, display_name: str) -> dict:
     """Insert or update a user row, return the full user dict."""
     conn = get_conn()
     cur  = conn.cursor()
     cur.execute("""
         INSERT INTO users (google_id, email, display_name, avatar_url)
-        VALUES (%s, %s, %s, %s)
+        VALUES (%s, %s, %s, '')
         ON CONFLICT (google_id) DO UPDATE SET
-            email        = EXCLUDED.email,
-            avatar_url   = EXCLUDED.avatar_url,
-            updated_at   = NOW()
+            email      = EXCLUDED.email,
+            updated_at = NOW()
         RETURNING id, google_id, email, display_name, avatar_url, created_at
-    """, (google_id, email, display_name, avatar_url))
+    """, (google_id, email, display_name))
     user = dict(cur.fetchone())
     conn.commit()
     cur.close(); conn.close()
@@ -107,9 +106,7 @@ def google_callback():
     google_id    = userinfo.get("sub")
     email        = userinfo.get("email", "")
     display_name = userinfo.get("name", email.split("@")[0])
-    avatar_url   = userinfo.get("picture", "")
-
-    user = upsert_user(google_id, email, display_name, avatar_url)
+    user = upsert_user(google_id, email, display_name)
 
     # Serialise dates for session storage
     user["created_at"] = str(user.get("created_at", ""))
