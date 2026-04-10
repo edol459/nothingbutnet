@@ -1041,7 +1041,7 @@ function avatarEl(displayName, avatarUrl, size = 40, userId = null, favoriteTeam
     ? `<a href="/profile/${userId}" class="reviewer-avatar" onclick="event.stopPropagation()" style="width:${size}px;height:${size}px;text-decoration:none;color:inherit">${inner}</a>`
     : `<div class="reviewer-avatar" style="width:${size}px;height:${size}px">${inner}</div>`;
   return badge
-    ? `<div class="avatar-wrap">${avatarHtml}${badge}</div>`
+    ? `<div class="avatar-wrap" style="width:${size}px;height:${size}px">${avatarHtml}${badge}</div>`
     : avatarHtml;
 }
 
