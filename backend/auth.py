@@ -55,7 +55,7 @@ def upsert_user(google_id: str, email: str, display_name: str) -> dict:
         ON CONFLICT (google_id) DO UPDATE SET
             email      = EXCLUDED.email,
             updated_at = NOW()
-        RETURNING id, google_id, email, display_name, avatar_url, created_at
+        RETURNING id, google_id, email, display_name, avatar_url, favorite_team, created_at
     """, (google_id, email, display_name))
     user = dict(cur.fetchone())
     conn.commit()

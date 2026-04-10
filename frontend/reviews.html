@@ -246,6 +246,13 @@
     flex-shrink: 0;
   }
   .reviewer-avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+  .avatar-wrap { position: relative; flex-shrink: 0; display: inline-flex; align-self: flex-start; }
+  .avatar-team-badge {
+    position: absolute; bottom: -2px; right: -2px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--paper); border: 1.5px solid var(--paper);
+    object-fit: contain; pointer-events: none;
+  }
 
   .review-body { min-width: 0; }
   .review-meta {
@@ -1014,14 +1021,28 @@ function scoreline(g) {
   </div>`;
 }
 
-function avatarEl(displayName, avatarUrl, size = 40, userId = null) {
+const _TEAM_IDS = {
+  ATL:1610612737,BOS:1610612738,BKN:1610612751,CHA:1610612766,CHI:1610612741,
+  CLE:1610612739,DAL:1610612742,DEN:1610612743,DET:1610612765,GSW:1610612744,
+  HOU:1610612745,IND:1610612754,LAC:1610612746,LAL:1610612747,MEM:1610612763,
+  MIA:1610612748,MIL:1610612749,MIN:1610612750,NOP:1610612740,NYK:1610612752,
+  OKC:1610612760,ORL:1610612753,PHI:1610612755,PHX:1610612756,POR:1610612757,
+  SAC:1610612758,SAS:1610612759,TOR:1610612761,UTA:1610612762,WAS:1610612764,
+};
+
+function avatarEl(displayName, avatarUrl, size = 40, userId = null, favoriteTeam = null) {
   const inner = avatarUrl
     ? `<img src="${avatarUrl}" alt="${displayName}">`
     : displayName.charAt(0).toUpperCase();
-  if (userId) {
-    return `<a href="/profile/${userId}" class="reviewer-avatar" onclick="event.stopPropagation()" style="width:${size}px;height:${size}px;text-decoration:none;color:inherit">${inner}</a>`;
-  }
-  return `<div class="reviewer-avatar" style="width:${size}px;height:${size}px">${inner}</div>`;
+  const badge = favoriteTeam && _TEAM_IDS[favoriteTeam]
+    ? `<img class="avatar-team-badge" src="https://cdn.nba.com/logos/nba/${_TEAM_IDS[favoriteTeam]}/global/L/logo.svg" alt="${favoriteTeam}">`
+    : '';
+  const avatarHtml = userId
+    ? `<a href="/profile/${userId}" class="reviewer-avatar" onclick="event.stopPropagation()" style="width:${size}px;height:${size}px;text-decoration:none;color:inherit">${inner}</a>`
+    : `<div class="reviewer-avatar" style="width:${size}px;height:${size}px">${inner}</div>`;
+  return badge
+    ? `<div class="avatar-wrap">${avatarHtml}${badge}</div>`
+    : avatarHtml;
 }
 
 function showToast(msg) {
@@ -1153,7 +1174,7 @@ async function loadRecent(append = false) {
       div.style.cursor = 'pointer';
       div.addEventListener('click', () => goToGame(r.game_id));
       div.innerHTML = `
-        ${avatarEl(r.display_name, r.avatar_url, 40, r.user_id)}
+        ${avatarEl(r.display_name, r.avatar_url, 40, r.user_id, r.favorite_team)}
         <div class="review-body">
           <div class="review-meta">
             <a href="/profile/${r.user_id}" class="reviewer-name" onclick="event.stopPropagation()" style="text-decoration:none;color:inherit">${r.display_name}</a>
