@@ -342,6 +342,9 @@ table.wt tbody td.td-lineup { text-align: left; }
 
 /* Hide drawer chrome on desktop */
 .drawer-handle { display: none; }
+/* Sidebar left, main right on desktop (DOM order is reversed for mobile) */
+.sidebar { order: -1; }
+.main    { order:  0; }
 
 /* ── Mobile ──────────────────────────────────────────────────── */
 @media (max-width: 768px) {
@@ -390,12 +393,13 @@ table.wt tbody td.td-lineup { text-align: left; }
     background: var(--paper);
     box-shadow: 0 -4px 24px rgba(0,0,0,0.10);
     z-index: 90;
+    max-height: 70vh;
     transform: translateY(calc(100% - 52px));
     transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
     overflow: hidden;
   }
   .sidebar.drawer-open {
-    transform: translateY(0);
+    transform: translateY(calc(100% - 70vh));
   }
   /* Drag handle / toggle strip */
   .drawer-handle {
@@ -421,7 +425,7 @@ table.wt tbody td.td-lineup { text-align: left; }
 
   /* Constrain scrollable player area inside drawer */
   .sidebar-head { padding: 14px 18px 12px; }
-  .players-scroll { max-height: 44vh; overflow-y: auto; }
+  .players-scroll { max-height: calc(70vh - 52px - 120px); overflow-y: auto; }
   .player-grid { grid-template-columns: repeat(3, 1fr); }
 
   /* Space at bottom of main so content isn't hidden behind the closed drawer */
@@ -854,21 +858,13 @@ initNavAuth();
 // ── Mobile drawer ─────────────────────────────────────────────
 function toggleDrawer() {
   if (window.innerWidth > 768) return;
-  const sidebar = document.getElementById('sidebar');
-  sidebar.classList.toggle('drawer-open');
+  document.getElementById('sidebar').classList.toggle('drawer-open');
 }
 
-// Close drawer when a player card is tapped on mobile
-document.getElementById('players-scroll').addEventListener('click', function(e) {
-  if (window.innerWidth > 768) return;
-  const card = e.target.closest('.player-card');
-  if (card) {
-    // slight delay so selection renders before closing
-    setTimeout(() => {
-      document.getElementById('sidebar').classList.remove('drawer-open');
-    }, 180);
-  }
-});
+// Open drawer by default on mobile
+if (window.innerWidth <= 768) {
+  document.getElementById('sidebar').classList.add('drawer-open');
+}
 </script>
 </body>
 </html>
