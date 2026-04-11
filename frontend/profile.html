@@ -70,9 +70,52 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
   background: var(--paper3); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   font-family: var(--ff-serif); font-size: 2rem; color: var(--ink3);
-  overflow: hidden;
+  overflow: hidden; position: relative;
 }
 .profile-avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.profile-avatar-wrap { position: relative; flex-shrink: 0; cursor: default; }
+.profile-avatar-wrap.editable { cursor: pointer; }
+.profile-avatar-overlay {
+  display: none; position: absolute; inset: 0; border-radius: 50%;
+  background: rgba(0,0,0,0.45); align-items: center; justify-content: center;
+  font-family: var(--ff-mono); font-size: 9px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: #fff; text-align: center; line-height: 1.3;
+}
+.profile-avatar-wrap.editable:hover .profile-avatar-overlay { display: flex; }
+.profile-team-badge {
+  position: absolute; bottom: -1px; right: -1px;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--paper); border: 2px solid var(--paper);
+  object-fit: contain; pointer-events: none;
+}
+/* Team picker modal */
+.team-grid {
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  gap: 6px; margin-top: 14px; max-height: 360px; overflow-y: auto;
+}
+.team-cell {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 3px; padding: 8px 4px; border-radius: 6px; cursor: pointer;
+  border: 1.5px solid transparent; transition: border-color 0.12s, background 0.12s;
+}
+.team-cell:hover { background: var(--paper2); }
+.team-cell.selected { border-color: var(--orange); background: var(--paper2); }
+.team-cell img { width: 34px; height: 34px; object-fit: contain; }
+.team-cell-abbr { font-family: var(--ff-mono); font-size: 9px; color: var(--ink3); letter-spacing: 0.04em; }
+.team-none-cell {
+  display: flex; align-items: center; justify-content: center;
+  padding: 8px; border-radius: 6px; cursor: pointer;
+  border: 1.5px solid transparent; font-family: var(--ff-mono);
+  font-size: 10px; color: var(--ink4); letter-spacing: 0.04em;
+  transition: border-color 0.12s, background 0.12s;
+}
+.team-none-cell:hover { background: var(--paper2); }
+.team-none-cell.selected { border-color: var(--orange); background: var(--paper2); }
+.nav-auth-avatar-initial {
+  width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid var(--rule);
+  background: var(--paper3); display: flex; align-items: center; justify-content: center;
+  font-family: var(--ff-serif); font-size: 13px; color: var(--ink3);
+}
 .profile-info { flex: 1; min-width: 0; }
 .profile-name {
   font-family: var(--ff-serif); font-size: 1.9rem;
@@ -297,10 +340,10 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 <nav>
   <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
   <div class="nav-tabs">
-    <a class="nav-tab" href="/stats">Stats</a>
     <a class="nav-tab" href="/reviews">BasketBoxd</a>
-    <a class="nav-tab" href="/builder">Builder</a>
+    <a class="nav-tab" href="/stats">Stats Hub</a>
     <a class="nav-tab" href="/wowy">WoWY</a>
+    <a class="nav-tab" href="/builder">Builder</a>
     <a class="nav-tab" href="/compare">Compare</a>
     <a class="nav-tab" href="/matchups">Matchups</a>
     <a class="nav-tab" href="/trends">Trends</a>
@@ -320,6 +363,19 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
     <div class="fav-picker-list" id="fav-picker-list"><div class="loading-state">Loading…</div></div>
     <div class="modal-actions" style="margin-top:14px">
       <button class="btn" onclick="document.getElementById('fav-picker-modal').style.display='none'">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Team picker modal -->
+<div class="modal-overlay" id="team-picker-modal" style="display:none" onclick="if(event.target===this)closeTeamModal()">
+  <div class="modal" style="max-width:400px" onclick="event.stopPropagation()">
+    <h2 style="margin-bottom:4px">Favorite team</h2>
+    <p style="font-size:13px;color:var(--ink3);margin-bottom:0">Shows as a badge on your profile photo.</p>
+    <div class="team-grid" id="team-picker-grid"></div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn" onclick="closeTeamModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTeam()">Save</button>
     </div>
   </div>
 </div>
@@ -384,7 +440,7 @@ async function loadAuth() {
 
   if (ME) {
     slot.innerHTML = `
-      <a href="/profile" style="text-decoration:none;cursor:pointer">${ME.avatar_url ? `<img class="nav-auth-avatar" src="${ME.avatar_url}" alt="">` : ''}</a>
+      <a href="/profile" style="text-decoration:none;cursor:pointer">${ME.avatar_url ? `<img class="nav-auth-avatar" src="${ME.avatar_url}" alt="">` : `<div class="nav-auth-avatar-initial">${ME.display_name.charAt(0).toUpperCase()}</div>`}</a>
       <button class="nav-signout-btn" onclick="signOut()">Sign out</button>
     `;
   } else {
@@ -392,9 +448,8 @@ async function loadAuth() {
   }
 }
 
-async function signOut() {
-  await fetch('/auth/logout', { method: 'POST' });
-  window.location.reload();
+function signOut() {
+  window.location.href = '/auth/logout?next=/';
 }
 
 // ── Load profile ──────────────────────────────────────────────
@@ -418,16 +473,31 @@ function renderProfile() {
   const isOwn = PROFILE.is_own;
   document.title = `${u.display_name} — ydkball`;
 
-  const avatarContent = u.avatar_url
+  const avatarInner = u.avatar_url
     ? `<img src="${u.avatar_url}" alt="${u.display_name}">`
     : u.display_name.charAt(0).toUpperCase();
+
+  const teamBadgeHtml = u.favorite_team && _RI_TEAM_IDS[u.favorite_team]
+    ? `<img class="profile-team-badge" src="https://cdn.nba.com/logos/nba/${_RI_TEAM_IDS[u.favorite_team]}/global/L/logo.svg" alt="${u.favorite_team}">`
+    : '';
+
+  const avatarContent = isOwn
+    ? `<div class="profile-avatar-wrap editable" onclick="triggerAvatarUpload()">
+         <div class="profile-avatar">${avatarInner}</div>
+         <div class="profile-avatar-overlay">Change<br>photo</div>
+         ${teamBadgeHtml}
+       </div>`
+    : `<div class="profile-avatar-wrap"><div class="profile-avatar">${avatarInner}</div>${teamBadgeHtml}</div>`;
 
   const memberDate = new Date(u.member_since).toLocaleDateString('en-US', {month:'long', year:'numeric'});
 
   // Action buttons
   let actionsHtml = '';
   if (isOwn) {
-    actionsHtml = `<button class="btn" onclick="openNameModal(false)">Edit display name</button>`;
+    actionsHtml = `
+      <button class="btn" onclick="openNameModal(false)">Edit display name</button>
+      <button class="btn" onclick="openTeamModal()">Favorite team${u.favorite_team ? ` · ${u.favorite_team}` : ''}</button>
+    `;
   } else if (ME) {
     const fs = PROFILE.friend_status;
     if (fs === 'friends') {
@@ -461,7 +531,7 @@ function renderProfile() {
 
   document.getElementById('page').innerHTML = `
     <div class="profile-header">
-      <div class="profile-avatar">${avatarContent}</div>
+      ${avatarContent}
       <div class="profile-info">
         <div class="profile-name">${u.display_name}</div>
         <div class="profile-meta">Member since ${memberDate} · ${PROFILE.friend_count} friend${PROFILE.friend_count !== 1 ? 's' : ''}</div>
@@ -1068,6 +1138,133 @@ function toast(msg) {
   t.className = 'toast'; t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 2600);
+}
+
+// ── Team picker ───────────────────────────────────────────────
+const _TEAMS_ORDERED = [
+  'ATL','BOS','BKN','CHA','CHI','CLE','DAL','DEN','DET','GSW',
+  'HOU','IND','LAC','LAL','MEM','MIA','MIL','MIN','NOP','NYK',
+  'OKC','ORL','PHI','PHX','POR','SAC','SAS','TOR','UTA','WAS',
+];
+let _pendingTeam = undefined; // undefined = no change, null = clear, string = new abbr
+
+function openTeamModal() {
+  _pendingTeam = undefined;
+  const current = PROFILE.user.favorite_team || null;
+  const grid = document.getElementById('team-picker-grid');
+  grid.innerHTML = `
+    <div class="team-none-cell${!current ? ' selected' : ''}" data-team="" onclick="selectTeam(this,'')">None</div>
+    ${_TEAMS_ORDERED.map(abbr => {
+      const id = _RI_TEAM_IDS[abbr];
+      return `<div class="team-cell${current === abbr ? ' selected' : ''}" data-team="${abbr}" onclick="selectTeam(this,'${abbr}')">
+        <img src="https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg" alt="${abbr}">
+        <span class="team-cell-abbr">${abbr}</span>
+      </div>`;
+    }).join('')}
+  `;
+  document.getElementById('team-picker-modal').style.display = 'flex';
+}
+
+function selectTeam(el, abbr) {
+  document.querySelectorAll('#team-picker-grid .team-cell, #team-picker-grid .team-none-cell')
+    .forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  _pendingTeam = abbr || null;
+}
+
+function closeTeamModal() {
+  document.getElementById('team-picker-modal').style.display = 'none';
+}
+
+async function saveTeam() {
+  if (_pendingTeam === undefined) { closeTeamModal(); return; }
+  try {
+    const res = await fetch('/api/me/favorite-team', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ favorite_team: _pendingTeam || '' }),
+    });
+    const data = await res.json();
+    if (!res.ok) { toast(data.error || 'Save failed'); return; }
+    PROFILE.user.favorite_team = data.favorite_team;
+    closeTeamModal();
+    renderProfile();
+    toast(_pendingTeam ? `Favorite team set to ${_pendingTeam}` : 'Favorite team removed');
+  } catch {
+    toast('Save failed');
+  }
+}
+
+// ── Avatar upload ──────────────────────────────────────────────
+function triggerAvatarUpload() {
+  let input = document.getElementById('_avatar-input');
+  if (!input) {
+    input = document.createElement('input');
+    input.id = '_avatar-input';
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    input.addEventListener('change', handleAvatarFile);
+  }
+  input.value = '';
+  input.click();
+}
+
+function handleAvatarFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { toast('Please select an image file'); return; }
+  if (file.size > 5 * 1024 * 1024) { toast('Image must be under 5 MB'); return; }
+
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = new Image();
+    img.onload = () => {
+      const size = 256;
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      // crop to square from center
+      const min = Math.min(img.width, img.height);
+      const sx = (img.width - min) / 2;
+      const sy = (img.height - min) / 2;
+      ctx.drawImage(img, sx, sy, min, min, 0, 0, size, size);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+      uploadAvatar(dataUrl);
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function uploadAvatar(dataUrl) {
+  try {
+    const res = await fetch('/api/me/avatar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ avatar_data: dataUrl }),
+    });
+    const data = await res.json();
+    if (!res.ok) { toast(data.error || 'Upload failed'); return; }
+
+    // Update ME and re-render profile
+    ME.avatar_url = dataUrl;
+    PROFILE.user.avatar_url = dataUrl;
+    renderProfile();
+
+    // Update nav avatar
+    const navSlot = document.getElementById('nav-auth-slot');
+    if (navSlot) {
+      navSlot.innerHTML = `
+        <a href="/profile" style="text-decoration:none;cursor:pointer"><img class="nav-auth-avatar" src="${dataUrl}" alt=""></a>
+        <button class="nav-signout-btn" onclick="signOut()">Sign out</button>
+      `;
+    }
+    toast('Profile photo updated');
+  } catch {
+    toast('Upload failed');
+  }
 }
 </script>
 </body>

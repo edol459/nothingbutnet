@@ -540,6 +540,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # ── Past-date cache (immutable data — cache forever) ─────────────
 _past_sb_cache: dict = {}   # date -> payload dict
 
+# ── Future-date cache (schedule can change — TTL 60 min) ──────────
+_future_sb_cache: dict = {}  # date -> {"payload": dict, "ts": float}
+
 # ── Today's scoreboard — kept fresh by background poller ─────────
 _today_sb = {"games": [], "date": "", "raw": []}
 _today_sb_lock = _threading.Lock()
@@ -573,7 +576,13 @@ def _poll_today_scoreboard():
                     _today_sb["games"] = games
                     _today_sb["date"]  = cdn_date
                     _today_sb["raw"]   = raw_games
-            # If CDN is behind, leave existing cache intact until it catches up
+            elif cdn_date < game_today:
+                # CDN is showing a past date — no games scheduled today
+                with _today_sb_lock:
+                    _today_sb["games"] = []
+                    _today_sb["date"]  = game_today
+                    _today_sb["raw"]   = []
+            # If cdn_date > game_today (shouldn't happen), leave cache intact
         except Exception:
             pass
         _threading.Event().wait(30)
@@ -689,6 +698,12 @@ def get_scoreboard():
     if is_past and date in _past_sb_cache:
         return jsonify(_past_sb_cache[date])
 
+    # Future dates — cache for 60 minutes
+    if not is_past and date != _game_today and date in _future_sb_cache:
+        entry = _future_sb_cache[date]
+        if _time.time() - entry["ts"] < 3600:
+            return jsonify(entry["payload"])
+
     # For past dates, try the DB first (avoids nba_api outbound call that
     # gets rate-limited / blocked on cloud IPs in production).
     if is_past:
@@ -734,12 +749,17 @@ def get_scoreboard():
         board = scoreboardv3.ScoreboardV3(
             game_date=dt.strftime("%Y-%m-%d"),
             league_id="00",
-            timeout=30,
+            timeout=15,
         )
         gh_df = board.game_header.get_data_frame()
 
         if gh_df.empty:
-            return jsonify({"games": [], "date": date})
+            payload = {"games": [], "date": date}
+            if is_past:
+                _past_sb_cache[date] = payload
+            elif date != _game_today:
+                _future_sb_cache[date] = {"payload": payload, "ts": _time.time()}
+            return jsonify(payload)
 
         rows = [(str(row.get("gameId", "") or row.get("GAME_ID", "")), row)
                 for _, row in gh_df.iterrows()
@@ -801,6 +821,8 @@ def get_scoreboard():
         payload = {"games": games, "date": date}
         if is_past:
             _past_sb_cache[date] = payload
+        elif date != _game_today:
+            _future_sb_cache[date] = {"payload": payload, "ts": _time.time()}
         return jsonify(payload)
 
     except Exception as e:
@@ -1591,18 +1613,19 @@ def _contains_slur(text: str) -> bool:
 
 def _format_review(r: dict) -> dict:
     return {
-        "id":           r["id"],
-        "game_id":      r["game_id"],
-        "user_id":      r["user_id"],
-        "display_name": r.get("display_name", ""),
-        "avatar_url":   r.get("avatar_url", ""),
-        "rating":       r["rating"],
-        "stars":        r["rating"] / 2,
-        "review_text":  r.get("review_text"),
-        "created_at":   str(r.get("created_at", "")),
-        "updated_at":   str(r.get("updated_at", "")),
-        "like_count":   int(r.get("like_count", 0)),
-        "liked_by_me":  bool(r.get("liked_by_me", False)),
+        "id":             r["id"],
+        "game_id":        r["game_id"],
+        "user_id":        r["user_id"],
+        "display_name":   r.get("display_name", ""),
+        "avatar_url":     r.get("avatar_url", ""),
+        "favorite_team":  r.get("favorite_team") or "",
+        "rating":         r["rating"],
+        "stars":          r["rating"] / 2,
+        "review_text":    r.get("review_text"),
+        "created_at":     str(r.get("created_at", "")),
+        "updated_at":     str(r.get("updated_at", "")),
+        "like_count":     int(r.get("like_count", 0)),
+        "liked_by_me":    bool(r.get("liked_by_me", False)),
     }
 
 
@@ -1720,7 +1743,7 @@ def get_game_reviews(game_id):
         cur  = conn.cursor()
         if user_id:
             cur.execute(f"""
-                SELECT gr.*, u.display_name, u.avatar_url,
+                SELECT gr.*, u.display_name, u.avatar_url, u.favorite_team,
                        COUNT(rl.review_id)                                   AS like_count,
                        BOOL_OR(rl_me.user_id IS NOT NULL)                    AS liked_by_me
                 FROM game_reviews gr
@@ -1729,20 +1752,20 @@ def get_game_reviews(game_id):
                 LEFT JOIN review_likes rl_me ON rl_me.review_id = gr.id
                                             AND rl_me.user_id   = %s
                 WHERE gr.game_id = %s
-                GROUP BY gr.id, u.display_name, u.avatar_url
+                GROUP BY gr.id, u.display_name, u.avatar_url, u.favorite_team
                 ORDER BY {order_sql}
                 LIMIT %s OFFSET %s
             """, (user_id, game_id, limit, offset))
         else:
             cur.execute(f"""
-                SELECT gr.*, u.display_name, u.avatar_url,
+                SELECT gr.*, u.display_name, u.avatar_url, u.favorite_team,
                        COUNT(rl.review_id) AS like_count,
                        FALSE               AS liked_by_me
                 FROM game_reviews gr
                 JOIN users u ON gr.user_id = u.id
                 LEFT JOIN review_likes rl ON rl.review_id = gr.id
                 WHERE gr.game_id = %s
-                GROUP BY gr.id, u.display_name, u.avatar_url
+                GROUP BY gr.id, u.display_name, u.avatar_url, u.favorite_team
                 ORDER BY {order_sql}
                 LIMIT %s OFFSET %s
             """, (game_id, limit, offset))
@@ -1794,8 +1817,9 @@ def submit_review(game_id):
         """, (user["id"], game_id, rating, review_text))
 
         review = dict(cur.fetchone())
-        review["display_name"] = user["display_name"]
-        review["avatar_url"]   = user["avatar_url"]
+        review["display_name"]  = user["display_name"]
+        review["avatar_url"]    = user["avatar_url"]
+        review["favorite_team"] = user.get("favorite_team") or ""
         conn.commit()
         cur.close(); conn.close()
         return jsonify({"review": _format_review(review)}), 201
@@ -2009,7 +2033,7 @@ def get_recent_reviews():
             SELECT
                 gr.id, gr.game_id, gr.rating, gr.review_text,
                 gr.created_at, gr.updated_at,
-                u.id AS user_id, u.display_name, u.avatar_url,
+                u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team,
                 g.game_date, g.home_team_abbr, g.away_team_abbr,
                 g.home_score, g.away_score
             FROM game_reviews gr
@@ -2051,7 +2075,7 @@ def get_user_reviews(user_id):
         cur  = conn.cursor()
         cur.execute("""
             SELECT
-                gr.*, u.display_name, u.avatar_url,
+                gr.*, u.display_name, u.avatar_url, u.favorite_team,
                 g.game_date, g.home_team_abbr, g.away_team_abbr,
                 g.home_score, g.away_score
             FROM game_reviews gr
@@ -2150,6 +2174,81 @@ def update_display_name():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PATCH /api/me/favorite-team  — set or clear favorite NBA team
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+_NBA_ABBRS = {
+    "ATL","BOS","BKN","CHA","CHI","CLE","DAL","DEN","DET","GSW",
+    "HOU","IND","LAC","LAL","MEM","MIA","MIL","MIN","NOP","NYK",
+    "OKC","ORL","PHI","PHX","POR","SAC","SAS","TOR","UTA","WAS",
+}
+
+@app.route("/api/me/favorite-team", methods=["PATCH"])
+@login_required
+def update_favorite_team():
+    user = current_user()
+    body = request.get_json() or {}
+    team = (body.get("favorite_team") or "").strip().upper() or None
+
+    if team and team not in _NBA_ABBRS:
+        return jsonify({"error": "Invalid team abbreviation"}), 400
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            UPDATE users SET favorite_team = %s, updated_at = NOW()
+            WHERE id = %s
+        """, (team, user["id"]))
+        conn.commit()
+        cur.close(); conn.close()
+
+        from flask import session
+        if "user" in session:
+            session["user"]["favorite_team"] = team or ""
+            session.modified = True
+
+        return jsonify({"ok": True, "favorite_team": team or ""})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# POST /api/me/avatar  — upload / replace profile picture
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/me/avatar", methods=["POST"])
+@login_required
+def update_avatar():
+    user = current_user()
+    body = request.get_json() or {}
+    data = body.get("avatar_data", "").strip()
+
+    if not data:
+        return jsonify({"error": "avatar_data is required"}), 400
+
+    # Must be a data URL with an image MIME type
+    if not data.startswith("data:image/"):
+        return jsonify({"error": "Invalid image format"}), 400
+
+    # Limit size: base64-encoded ~200 KB image → ~270 KB string
+    if len(data) > 300_000:
+        return jsonify({"error": "Image too large (max ~200 KB after resize)"}), 400
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            UPDATE users SET avatar_url = %s, updated_at = NOW()
+            WHERE id = %s
+        """, (data, user["id"]))
+        conn.commit()
+        cur.close(); conn.close()
+
+        return jsonify({"ok": True, "avatar_url": data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # PUT /api/me/favorites  — set a game at a position (1–4)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/me/favorites", methods=["PUT"])
@@ -2224,7 +2323,7 @@ def get_user_profile(user_id):
         cur  = conn.cursor()
 
         cur.execute("""
-            SELECT id, display_name, avatar_url, display_name_set, created_at
+            SELECT id, display_name, avatar_url, favorite_team, display_name_set, created_at
             FROM users WHERE id = %s
         """, (user_id,))
         user = cur.fetchone()
@@ -2293,6 +2392,7 @@ def get_user_profile(user_id):
                 "id":               user["id"],
                 "display_name":     user["display_name"],
                 "avatar_url":       user["avatar_url"],
+                "favorite_team":    user["favorite_team"] or "",
                 "display_name_set": user["display_name_set"],
                 "member_since":     str(user["created_at"]),
             },

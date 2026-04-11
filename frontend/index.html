@@ -800,10 +800,10 @@ nav {
 <nav>
   <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
   <div class="nav-links">
-    <a class="nav-link" href="/stats">Stats</a>
     <a class="nav-link" href="/reviews">BasketBoxd</a>
-    <a class="nav-link" href="/builder">Builder</a>
+    <a class="nav-link" href="/stats">Stats Hub</a>
     <a class="nav-link" href="/wowy">WoWY</a>
+    <a class="nav-link" href="/builder">Builder</a>
     <a class="nav-link" href="/compare">Compare</a>
     <a class="nav-link" href="/matchups">Matchups</a>
     <a class="nav-link" href="/trends">Trends</a>
@@ -1304,9 +1304,8 @@ async function initNavAuth() {
     slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login">Sign in</a>`;
   }
 }
-async function navSignOut() {
-  await fetch('/auth/logout', { method: 'POST' });
-  window.location.reload();
+function navSignOut() {
+  window.location.href = '/auth/logout?next=' + encodeURIComponent(window.location.pathname);
 }
 initNavAuth();
 

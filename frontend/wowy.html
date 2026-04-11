@@ -340,6 +340,12 @@ table.wt tbody td.td-lineup { text-align: left; }
 }
 .nav-signout-btn:hover { color: var(--ink); }
 
+/* Drawer handle never used — desktop only */
+.drawer-handle { display: none; }
+/* Sidebar left, main right on desktop (DOM order reversed for mobile) */
+.sidebar { order: -1; }
+.main    { order:  0; }
+
 /* ── Mobile ──────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   :root { --nav-h: 88px; }
@@ -354,36 +360,64 @@ table.wt tbody td.td-lineup { text-align: left; }
   .nav-tabs::-webkit-scrollbar { display: none; }
   .nav-tab { white-space: nowrap; padding: 5px 12px; }
 
-  /* Stack sidebar above main */
+  /* Sidebar becomes a sticky top control strip */
   .app { flex-direction: column; }
   .sidebar {
-    width: 100%; height: auto; position: static;
+    width: 100%; height: auto; order: -1;
+    position: sticky; top: var(--nav-h); z-index: 80;
     border-right: none; border-bottom: 1px solid var(--rule);
+    background: var(--paper); overflow: visible;
   }
-  .players-scroll { max-height: 260px; }
-  .player-grid { grid-template-columns: repeat(3, 1fr); }
 
+  /* Team + season selects side by side */
+  .sidebar-head {
+    display: flex; gap: 10px; padding: 14px 14px;
+    align-items: flex-end;
+  }
+  .sidebar-head > * {max-width: 120px; min-width: 0; }
+  .sidebar-head > *:first-child { flex: 2; }
+  .sidebar-title { display: none; }
+  .ctrl-select { margin-bottom: 0; font-size: 12px; padding: 6px 8px; }
+  .ctrl-label { font-size: 8px; }
+
+  /* Player filmstrip — horizontal scroll */
+  .players-scroll {
+    overflow-x: auto; overflow-y: hidden;
+    padding: 8px 14px 10px;
+    border-top: 1px solid var(--rule);
+    scrollbar-width: none; max-height: none;
+  }
+  .players-scroll::-webkit-scrollbar { display: none; }
+  .players-scroll-label { display: none; }
+  .player-grid { display: flex; flex-direction: row; gap: 8px; width: max-content; }
+  .player-card { width: 62px; padding: 6px 4px 5px; gap: 3px; }
+  .player-headshot { width: 42px; height: 42px; }
+  .player-headshot-fallback { width: 42px; height: 42px; font-size: 11px; }
+  .player-card-name { font-size: 9px; }
+  .player-card-pos { display: none; }
+  .sidebar-footer { display: none !important; }
+
+  /* Results */
   .main { min-width: 0; overflow: visible; }
-  .results-head { padding: 12px 16px 10px; }
-  .sidebar-head { padding-top: 28px; }
-  .sel-strip { padding: 10px 16px; }
+  .results-head { padding: 12px 14px 10px; }
+  .sel-strip { padding: 8px 14px; gap: 8px; }
+  .sel-avatar img { width: 28px; height: 28px; }
+  .sel-avatar-name { font-size: 9px; }
 
-  /* Compact table — applies whenever sidebar stacks */
+  /* Compact table */
   table.wt { min-width: 0; font-size: 12px; }
   table.wt thead th { padding: 8px 6px 7px; font-size: 9px; letter-spacing: 0.04em; }
-  table.wt thead th:first-child { padding-left: 16px; }
-  table.wt thead th:last-child { padding-right: 16px; }
+  table.wt thead th:first-child { padding-left: 14px; }
+  table.wt thead th:last-child  { padding-right: 14px; }
   table.wt tbody td { padding: 10px 6px; }
-  table.wt tbody td:first-child { padding-left: 16px; }
-  table.wt tbody td:last-child { padding-right: 16px; }
+  table.wt tbody td:first-child { padding-left: 14px; }
+  table.wt tbody td:last-child  { padding-right: 14px; }
   table.wt thead th.th-lineup,
   table.wt tbody td.td-lineup { width: 1px; white-space: nowrap; }
   .wowy-lineup { gap: 6px; }
-  .wc img { width: 32px; height: 32px; }
+  .wc img { width: 30px; height: 30px; }
   .wc-name { font-size: 9px; }
   .td-min { font-size: 11px; }
-
-  /* Table: ensure horizontal scroll */
   .table-scroll { overflow-x: auto; }
 }
 
@@ -394,10 +428,10 @@ table.wt tbody td.td-lineup { text-align: left; }
 <nav>
   <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
   <div class="nav-tabs">
-    <a class="nav-tab" href="/stats">Stats</a>
     <a class="nav-tab" href="/reviews">BasketBoxd</a>
-    <a class="nav-tab" href="/builder">Builder</a>
+    <a class="nav-tab" href="/stats">Stats Hub</a>
     <a class="nav-tab active" href="/wowy">WoWY</a>
+    <a class="nav-tab" href="/builder">Builder</a>
     <a class="nav-tab" href="/compare">Compare</a>
     <a class="nav-tab" href="/matchups">Matchups</a>
     <a class="nav-tab" href="/trends">Trends</a>
@@ -406,7 +440,13 @@ table.wt tbody td.td-lineup { text-align: left; }
 </nav>
 
 <div class="app">
-  <aside class="sidebar">
+  <main class="main" id="main">
+    <div class="state-msg">
+      <div class="state-icon">👆</div>
+      <span>Load a team, then select 1–5 players<br>to see every WoWY combination</span>
+    </div>
+  </main>
+  <aside class="sidebar" id="sidebar">
     <div class="sidebar-head">
       <div class="sidebar-title">WoWY</div>
       <label class="ctrl-label" for="team-select">Team</label>
@@ -426,13 +466,6 @@ table.wt tbody td.td-lineup { text-align: left; }
       <button class="btn-clear" id="btn-clear">Clear</button>
     </div>
   </aside>
-
-  <main class="main" id="main">
-    <div class="state-msg">
-      <div class="state-icon">👆</div>
-      <span>Load a team, then select 1–5 players<br>to see every WoWY combination</span>
-    </div>
-  </main>
 </div>
 
 <script src="/season-config.js"></script>
@@ -800,9 +833,8 @@ async function initNavAuth() {
     slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login">Sign in</a>`;
   }
 }
-async function navSignOut() {
-  await fetch('/auth/logout', { method: 'POST' });
-  window.location.reload();
+function navSignOut() {
+  window.location.href = '/auth/logout?next=' + encodeURIComponent(window.location.pathname);
 }
 initNavAuth();
 
