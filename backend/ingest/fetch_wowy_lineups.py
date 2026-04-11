@@ -9,6 +9,11 @@ from pbpstats and upserts into the wowy_lineups table.
 Run from your local machine (residential IP required — pbpstats blocks Railway).
 Omit --season to fetch all seasons from player_seasons. Omit --team for all 30.
 
+Flags:
+  --recent-only   Only fetch teams that played yesterday (default in daily pipeline).
+                  Cuts runtime by ~2/3 on most days. Use without this flag for a
+                  full refresh (e.g. first run of season, or after missing a day).
+
 Table schema (created if missing):
     wowy_lineups (
         team_abbr   TEXT,
@@ -31,7 +36,7 @@ import requests
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -48,6 +53,10 @@ TEAM_IDS = {
     "POR":1610612757,"SAC":1610612758,"SAS":1610612759,"TOR":1610612761,
     "UTA":1610612762,"WAS":1610612764,
 }
+
+# Map full team names / city names that appear in matchup strings -> abbr
+# matchup format is e.g. "BOS vs. MIA" or "MIA @ BOS"
+MATCHUP_TO_ABBR = {abbr: abbr for abbr in TEAM_IDS}  # abbrs map to themselves
 
 LEVERAGE = "Medium,High,VeryHigh"
 
@@ -72,13 +81,36 @@ def ensure_table(cur):
 
 def get_all_seasons(conn):
     cur = conn.cursor()
-    cur.execute("""
-        SELECT DISTINCT season FROM player_seasons
-        ORDER BY season
-    """)
+    cur.execute("SELECT DISTINCT season FROM player_seasons ORDER BY season")
     seasons = [r[0] for r in cur.fetchall()]
     cur.close()
     return seasons
+
+
+def get_teams_playing_yesterday(conn, season):
+    """
+    Query player_gamelogs for games dated yesterday and extract
+    team abbreviations from the matchup string (e.g. 'BOS vs. MIA').
+    Returns a set of team abbreviations, or empty set if none found.
+    """
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT DISTINCT matchup FROM player_gamelogs
+        WHERE game_date = %s AND season = %s
+    """, (yesterday, season))
+    rows = cur.fetchall()
+    cur.close()
+
+    abbrs = set()
+    for (matchup,) in rows:
+        # matchup is like "BOS vs. MIA" or "MIA @ BOS"
+        # split on whitespace and grab 3-letter uppercase tokens
+        for token in matchup.upper().replace(".", "").split():
+            if token in TEAM_IDS:
+                abbrs.add(token)
+
+    return abbrs
 
 
 def fetch_team_season(cur, team_abbr, season, retries=5):
@@ -101,7 +133,7 @@ def fetch_team_season(cur, team_abbr, season, retries=5):
         except (requests.exceptions.Timeout, requests.exceptions.ReadTimeout):
             wait = 15 * (2 ** attempt)
             if attempt < retries - 1:
-                print(f"    timeout, retrying in {wait}s…")
+                print(f"    timeout, retrying in {wait}s...")
                 time.sleep(wait)
             else:
                 print(f"    gave up after {retries} timeouts")
@@ -109,7 +141,7 @@ def fetch_team_season(cur, team_abbr, season, retries=5):
         except requests.exceptions.HTTPError as e:
             wait = 20 * (2 ** attempt)
             if attempt < retries - 1:
-                print(f"    HTTP {e.response.status_code}, retrying in {wait}s…")
+                print(f"    HTTP {e.response.status_code}, retrying in {wait}s...")
                 time.sleep(wait)
             else:
                 print(f"    gave up: {e}")
@@ -160,8 +192,10 @@ def fetch_team_season(cur, team_abbr, season, retries=5):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--season", default=None, help="e.g. 2025-26 (omit for all seasons)")
-    parser.add_argument("--team",   default=None, help="e.g. BOS (omit for all 30 teams)")
+    parser.add_argument("--season",      default=None,  help="e.g. 2025-26 (omit for all seasons)")
+    parser.add_argument("--team",        default=None,  help="e.g. BOS (omit for all 30 teams)")
+    parser.add_argument("--recent-only", action="store_true",
+                        help="Only fetch teams that played yesterday (faster daily runs)")
     args = parser.parse_args()
 
     conn = psycopg2.connect(DATABASE_URL)
@@ -169,14 +203,31 @@ def main():
     ensure_table(cur)
     conn.commit()
 
-    teams   = [args.team.upper()] if args.team else list(TEAM_IDS.keys())
-    unknown = [t for t in teams if t not in TEAM_IDS]
-    if unknown:
-        print(f"Unknown teams: {unknown}"); sys.exit(1)
-
     seasons = [args.season] if args.season else get_all_seasons(conn)
     if not seasons:
         print("No seasons found in DB."); sys.exit(1)
+
+    # Determine team list
+    if args.team:
+        teams = [args.team.upper()]
+    elif args.recent_only:
+        # Use the most recent season for the yesterday lookup
+        active_season = seasons[-1]
+        yesterday_teams = get_teams_playing_yesterday(conn, active_season)
+        if not yesterday_teams:
+            yesterday = (date.today() - timedelta(days=1)).isoformat()
+            print(f"No games found in player_gamelogs for {yesterday} — falling back to all 30 teams.")
+            teams = list(TEAM_IDS.keys())
+        else:
+            teams = sorted(yesterday_teams)
+            yesterday = (date.today() - timedelta(days=1)).isoformat()
+            print(f"Teams playing yesterday ({yesterday}): {', '.join(teams)}")
+    else:
+        teams = list(TEAM_IDS.keys())
+
+    unknown = [t for t in teams if t not in TEAM_IDS]
+    if unknown:
+        print(f"Unknown teams: {unknown}"); sys.exit(1)
 
     print(f"\nFetching WoWY lineups (leverage: {LEVERAGE})")
     print(f"Teams: {len(teams)}  |  Seasons: {len(seasons)}  |  Total: {len(teams)*len(seasons)} calls")
@@ -186,16 +237,15 @@ def main():
     failed = []  # (abbr, season) pairs that returned 0 lineups
 
     for s_idx, season in enumerate(seasons, 1):
-        print(f"── Season {season} ({s_idx}/{len(seasons)}) ──")
+        print(f"-- Season {season} ({s_idx}/{len(seasons)}) --")
         for t_idx, abbr in enumerate(teams, 1):
-            print(f"  [{t_idx:2}/{len(teams)}] {abbr}… ", end="", flush=True)
+            print(f"  [{t_idx:2}/{len(teams)}] {abbr}... ", end="", flush=True)
             count = fetch_team_season(cur, abbr, season)
             conn.commit()
             print(f"{count} lineups")
             total_rows += count
             if count == 0:
                 failed.append((abbr, season))
-            # Be polite between calls — pbpstats rate-limits aggressive clients
             if not (s_idx == len(seasons) and t_idx == len(teams)):
                 time.sleep(3.0)
 
@@ -205,11 +255,11 @@ def main():
     while failed and retry_pass < MAX_RETRY_PASSES:
         retry_pass += 1
         wait = 60 * retry_pass
-        print(f"\n── Retry pass {retry_pass}/{MAX_RETRY_PASSES}: {len(failed)} team(s) — waiting {wait}s before starting… ──")
+        print(f"\n-- Retry pass {retry_pass}/{MAX_RETRY_PASSES}: {len(failed)} team(s) — waiting {wait}s before starting... --")
         time.sleep(wait)
         still_failed = []
         for t_idx, (abbr, season) in enumerate(failed, 1):
-            print(f"  [{t_idx:2}/{len(failed)}] {abbr} ({season})… ", end="", flush=True)
+            print(f"  [{t_idx:2}/{len(failed)}] {abbr} ({season})... ", end="", flush=True)
             count = fetch_team_season(cur, abbr, season)
             conn.commit()
             print(f"{count} lineups")

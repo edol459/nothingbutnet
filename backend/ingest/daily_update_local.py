@@ -131,7 +131,7 @@ def main():
         (
             'fetch_wowy_lineups.py',
             'WoWY lineups (leverage-filtered)',
-            ['--season', season],
+            ['--season', season, '--recent-only'],
         ),
         # ── Compute (runs last, after all stats are fresh) ────
         (

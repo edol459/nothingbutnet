@@ -1,10 +1,11 @@
 """
-ydkball — Fetch Player Game Logs
-=================================
+ydkball — Fetch Player Game Logs (Incremental)
+===============================================
 python backend/ingest/fetch_gamelogs.py [--season 2025-26] [--season-type "Regular Season"]
 
 Fetches per-game box score data for every player via NBA API PlayerGameLogs
-(Base measure type), computes ts_pct per row, and upserts into player_gamelogs.
+(Base measure type), computes ts_pct per row, and upserts only NEW games into
+player_gamelogs. Already-processed game_ids are skipped.
 Run after fetch_season.py in the daily local update pipeline.
 """
 
@@ -53,6 +54,27 @@ def fetch_gamelogs(season: str, season_type: str):
 
     print(f"  Fetched {len(df)} game-log rows for {df['PLAYER_NAME'].nunique()} players")
 
+    conn = psycopg2.connect(DATABASE_URL)
+    cur  = conn.cursor()
+
+    # ── Find already-processed game_ids ──────────────────────
+    cur.execute(
+        "SELECT DISTINCT game_id FROM player_gamelogs WHERE season = %s AND season_type = %s",
+        (season, season_type)
+    )
+    existing_game_ids = {r[0] for r in cur.fetchall()}
+    print(f"  Already in DB: {len(existing_game_ids)} game_ids")
+
+    # Filter to new games only
+    df = df[~df["GAME_ID"].astype(str).isin(existing_game_ids)]
+    if df.empty:
+        print("  ✅ No new games to process — already up to date")
+        cur.close(); conn.close()
+        return
+
+    new_game_count = df["GAME_ID"].nunique()
+    print(f"  New games to process: {new_game_count} ({len(df)} rows)")
+
     # Compute ts_pct per game row
     def compute_ts(row):
         denom = 2 * (row["FGA"] + 0.44 * row["FTA"])
@@ -60,6 +82,7 @@ def fetch_gamelogs(season: str, season_type: str):
             return round(row["PTS"] / denom, 4)
         return None
 
+    df = df.copy()
     df["ts_pct_calc"] = df.apply(compute_ts, axis=1)
 
     rows = []
@@ -70,7 +93,7 @@ def fetch_gamelogs(season: str, season_type: str):
             "season":      season,
             "season_type": season_type,
             "game_id":     str(r["GAME_ID"]),
-            "game_date":   str(r["GAME_DATE"])[:10],  # YYYY-MM-DD
+            "game_date":   str(r["GAME_DATE"])[:10],
             "matchup":     str(r.get("MATCHUP", "")),
             "wl":          str(r.get("WL", "")),
             "min":         float(r["MIN"]) if r["MIN"] is not None else None,
@@ -87,18 +110,16 @@ def fetch_gamelogs(season: str, season_type: str):
 
     if not rows:
         print("  No rows to upsert.")
+        cur.close(); conn.close()
         return
-
-    conn = psycopg2.connect(DATABASE_URL)
-    cur  = conn.cursor()
 
     # Filter to only players already present in the players table
     cur.execute("SELECT player_id FROM players")
     known_ids = {r[0] for r in cur.fetchall()}
     skipped = [r for r in rows if r["player_id"] not in known_ids]
-    rows     = [r for r in rows if r["player_id"] in known_ids]
+    rows    = [r for r in rows if r["player_id"] in known_ids]
     if skipped:
-        print(f"  ⚠️  Skipped {len(skipped)} rows for {len({r['player_id'] for r in skipped})} unknown player(s) (not in players table)")
+        print(f"  ⚠️  Skipped {len(skipped)} rows for {len({r['player_id'] for r in skipped})} unknown player(s)")
 
     if not rows:
         print("  No rows to upsert after filtering.")
@@ -137,7 +158,7 @@ def fetch_gamelogs(season: str, season_type: str):
     cur.close()
     conn.close()
 
-    print(f"  ✅ Upserted {len(rows)} game-log rows into player_gamelogs")
+    print(f"  ✅ Upserted {len(rows)} new game-log rows ({new_game_count} games) into player_gamelogs")
 
 
 if __name__ == "__main__":

@@ -101,7 +101,7 @@ def main():
     ]
 
     set_clause = ", ".join(col + " = %s" for col in all_cd_cols)
-    sql = "UPDATE player_seasons SET " + set_clause + ", updated_at = NOW() WHERE player_id = %s AND season = %s AND season_type = %s AND league = 'NBA'"
+    sql = "UPDATE player_seasons SET " + set_clause + ", updated_at = NOW() WHERE player_id = %s AND season = %s AND season_type = %s"
 
     db_rows = []
     for pid, vals in updates.items():
