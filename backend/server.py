@@ -573,7 +573,13 @@ def _poll_today_scoreboard():
                     _today_sb["games"] = games
                     _today_sb["date"]  = cdn_date
                     _today_sb["raw"]   = raw_games
-            # If CDN is behind, leave existing cache intact until it catches up
+            elif cdn_date < game_today:
+                # CDN is showing a past date — no games scheduled today
+                with _today_sb_lock:
+                    _today_sb["games"] = []
+                    _today_sb["date"]  = game_today
+                    _today_sb["raw"]   = []
+            # If cdn_date > game_today (shouldn't happen), leave cache intact
         except Exception:
             pass
         _threading.Event().wait(30)
@@ -734,12 +740,15 @@ def get_scoreboard():
         board = scoreboardv3.ScoreboardV3(
             game_date=dt.strftime("%Y-%m-%d"),
             league_id="00",
-            timeout=30,
+            timeout=15,
         )
         gh_df = board.game_header.get_data_frame()
 
         if gh_df.empty:
-            return jsonify({"games": [], "date": date})
+            payload = {"games": [], "date": date}
+            if is_past:
+                _past_sb_cache[date] = payload
+            return jsonify(payload)
 
         rows = [(str(row.get("gameId", "") or row.get("GAME_ID", "")), row)
                 for _, row in gh_df.iterrows()
