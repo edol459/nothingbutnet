@@ -108,10 +108,16 @@ def google_callback():
     display_name = userinfo.get("name", email.split("@")[0])
     user = upsert_user(google_id, email, display_name)
 
-    # Serialise dates for session storage
-    user["created_at"] = str(user.get("created_at", ""))
-
-    session["user"] = user
+    # Store only small fields in the session cookie — avatar_url can be a
+    # base64 data URL (~200 KB) which silently overflows the 4 KB cookie limit.
+    # /auth/me fetches avatar_url and favorite_team fresh from the DB instead.
+    session["user"] = {
+        "id":               user["id"],
+        "google_id":        user["google_id"],
+        "email":            user["email"],
+        "display_name":     user["display_name"],
+        "created_at":       str(user.get("created_at", "")),
+    }
     session.permanent = True
 
     next_url = session.pop("oauth_next", "/")
