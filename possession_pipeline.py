@@ -14,12 +14,17 @@ Usage:
     possessions = build_possessions(game_id="0022300001")
 """
 
+import re
 import time
 import logging
 import requests
 from dataclasses import dataclass, field
 from typing import Optional
 from nba_api.stats.endpoints import playbyplayv3, gamerotation
+
+# Matches "(S.Curry 8 AST)" or "(LeBron James 5 AST)" at the end of a description.
+# Group 1 captures the raw assister name fragment as the NBA formats it.
+_ASSIST_RE = re.compile(r'\(([^)]+?)\s+\d+\s+AST\)', re.IGNORECASE)
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -92,6 +97,9 @@ class PbpEvent:
     score_away: Optional[int]
     x_legacy: Optional[float]
     y_legacy: Optional[float]
+    # Assister name fragment parsed from description, e.g. "S.Curry" or "LeBron James".
+    # Only populated on made field goals that were assisted.
+    assist_player_name: Optional[str] = None
 
 
 @dataclass
@@ -308,6 +316,18 @@ def parse_events(pbp_df) -> list[PbpEvent]:
             except (ValueError, TypeError):
                 return None
 
+        description  = row.get("description") or ""
+        action_type  = (row.get("actionType") or "").strip().lower()
+        shot_result  = row.get("shotResult")
+
+        # Parse assister name from description on made field goals only.
+        # Description format: "K.Durant 25' Jump Shot (10 PTS) (L.James 5 AST)"
+        assist_player_name: Optional[str] = None
+        if action_type in ("2pt", "3pt") and (shot_result or "").lower() == "made":
+            m = _ASSIST_RE.search(description)
+            if m:
+                assist_player_name = m.group(1).strip()
+
         events.append(PbpEvent(
             action_number=int(row["actionNumber"]),
             action_id=int(row["actionId"]) if row.get("actionId") else 0,
@@ -318,16 +338,17 @@ def parse_events(pbp_df) -> list[PbpEvent]:
             team_id=int(row["teamId"]) if row.get("teamId") else None,
             player_id=int(row["personId"]) if row.get("personId") else None,
             player_name=row.get("playerName") or row.get("playerNameI"),
-            action_type=(row.get("actionType") or "").strip().lower(),
+            action_type=action_type,
             sub_type=(row.get("subType") or "").strip().lower(),
-            description=row.get("description") or "",
+            description=description,
             shot_distance=float(row["shotDistance"]) if row.get("shotDistance") else None,
-            shot_result=row.get("shotResult"),
+            shot_result=shot_result,
             is_field_goal=bool(row.get("isFieldGoal")),
             score_home=_score(row.get("scoreHome")),
             score_away=_score(row.get("scoreAway")),
             x_legacy=float(row["xLegacy"]) if row.get("xLegacy") else None,
             y_legacy=float(row["yLegacy"]) if row.get("yLegacy") else None,
+            assist_player_name=assist_player_name,
         ))
     return events
 
@@ -656,6 +677,7 @@ def possession_to_dict(p: Possession) -> dict:
                 "description": e.description,
                 "x_legacy": e.x_legacy,
                 "y_legacy": e.y_legacy,
+                "assist_player_name": e.assist_player_name,
             }
             for e in p.events
         ],

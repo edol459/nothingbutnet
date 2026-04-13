@@ -143,9 +143,14 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 
 /* ── Tabs ── */
 .profile-tabs { display: flex; border-bottom: 1px solid var(--rule); margin-bottom: 24px; }
-.profile-tab { font-family: var(--ff-sans); font-size: 13px; font-weight: 500; padding: 10px 16px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--ink3); cursor: pointer; margin-bottom: -1px; transition: color 0.15s; }
+.profile-tab { font-family: var(--ff-sans); font-size: 13px; font-weight: 500; padding: 10px 16px; border: none; border-bottom: 2px solid transparent; background: none; color: var(--ink3); cursor: pointer; margin-bottom: -1px; transition: color 0.15s; position: relative; }
 .profile-tab:hover { color: var(--ink2); }
 .profile-tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+.tab-dot {
+  position: absolute; top: 8px; right: 4px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--orange); border: 1.5px solid var(--paper);
+}
 
 /* ── Review list ── */
 .review-item {
@@ -343,9 +348,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
     <a class="nav-tab" href="/reviews">BasketBoxd</a>
     <a class="nav-tab" href="/stats">Stats Hub</a>
     <a class="nav-tab" href="/wowy">WoWY</a>
-    <a class="nav-tab" href="/builder">Builder</a>
     <a class="nav-tab" href="/compare">Compare</a>
-    <a class="nav-tab" href="/matchups">Matchups</a>
     <a class="nav-tab" href="/trends">Trends</a>
   </div>
   <div class="nav-auth" id="nav-auth-slot"></div>
@@ -400,6 +403,7 @@ let ME        = null;   // logged-in user
 let PROFILE   = null;   // profile being viewed
 let PROFILE_ID = null;  // user_id from URL, or own id
 let reviewOffset = 0;
+let pendingRequestCount = 0;  // incoming friend requests awaiting response
 let reviewTotal  = 0;
 
 // ── Init ──────────────────────────────────────────────────────
@@ -422,6 +426,22 @@ let reviewTotal  = 0;
   }
 
   await loadProfile();
+
+  // Fetch pending friend requests count for own profile (used for tab dot)
+  if (ME && ME.id === PROFILE_ID) {
+    fetch('/api/friends')
+      .then(r => r.json())
+      .then(data => {
+        pendingRequestCount = (data.requests_received || []).length;
+        if (pendingRequestCount > 0) {
+          const friendsTab = document.querySelector('.profile-tab[data-tab="friends"]');
+          if (friendsTab && !friendsTab.querySelector('.tab-dot')) {
+            friendsTab.insertAdjacentHTML('beforeend', '<span class="tab-dot"></span>');
+          }
+        }
+      })
+      .catch(() => {});
+  }
 
   // First-login prompt: show name modal if user hasn't set their name
   if (ME && ME.id === PROFILE_ID && !PROFILE.user.display_name_set) {
@@ -580,7 +600,12 @@ function renderProfile() {
         const el = document.getElementById(`tab-${t}`);
         if (el) el.style.display = btn.dataset.tab === t ? '' : 'none';
       });
-      if (btn.dataset.tab === 'friends' && !document.getElementById('tab-friends').dataset.loaded) loadFriends();
+      if (btn.dataset.tab === 'friends') {
+        // Clear the dot once the user opens the tab
+        const dot = btn.querySelector('.tab-dot');
+        if (dot) dot.remove();
+        if (!document.getElementById('tab-friends').dataset.loaded) loadFriends();
+      }
       if (btn.dataset.tab === 'find'    && !document.getElementById('tab-find').dataset.loaded)    renderFindFriends();
     });
   });

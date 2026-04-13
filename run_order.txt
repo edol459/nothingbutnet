@@ -1,0 +1,130 @@
+PVA — Full Run Order
+====================
+Run each step from the project root directory (nothingbutnet/).
+Every script reads DATABASE_URL from your .env file.
+
+
+──────────────────────────────────────────────────────────────
+STEP 1 — Run the database migrations
+──────────────────────────────────────────────────────────────
+Creates the possession tables and the PVA aggregation table.
+Safe to re-run; all statements use CREATE TABLE IF NOT EXISTS
+and ALTER TABLE ... ADD COLUMN IF NOT EXISTS.
+
+    psql $DATABASE_URL -f migrate_possessions.sql
+    psql $DATABASE_URL -f migrate_pva.sql
+
+
+──────────────────────────────────────────────────────────────
+STEP 2 — Collect possession data
+──────────────────────────────────────────────────────────────
+Fetches PBP + rotation data for every game in the season,
+runs the possession pipeline, and writes results to:
+  possessions, possession_events, possession_lineups
+
+Resume-safe: already-collected games are skipped automatically.
+Expect ~4-8 hours for a full regular season (~1,230 games).
+Run overnight. You can Ctrl-C and restart at any time.
+
+Minimum viable: one season (used for both training and output).
+Recommended: two seasons so the model trains on more data.
+
+    python collect_to_db.py --seasons 2024-25
+
+    # Or for a richer training set:
+    python collect_to_db.py --seasons 2023-24 2024-25
+
+
+──────────────────────────────────────────────────────────────
+STEP 3 — Train the Expected Possession Value (EPV) model
+──────────────────────────────────────────────────────────────
+Trains a gradient-boosting classifier on the collected
+possession data, saves the model to:
+  backend/ingest/epv_model.pkl
+
+Then backfills the expected_points column in the possessions
+table for every collected possession.
+
+The script prints validation RMSE, EV bias, and mean EV so
+you can sanity-check the model before proceeding.
+Typical mean predicted EV should be ~1.05–1.12 pts/possession.
+
+    python backend/ingest/train_ev_model.py --seasons 2023-24 2024-25
+
+    # If you only collected one season:
+    python backend/ingest/train_ev_model.py --seasons 2024-25
+
+    # To re-backfill without retraining (e.g. after adding more games):
+    python backend/ingest/train_ev_model.py --backfill-only --seasons 2024-25
+
+
+──────────────────────────────────────────────────────────────
+STEP 4 — Compute player PVA
+──────────────────────────────────────────────────────────────
+Runs the attribution SQL: identifies the primary actor for each
+possession, resolves assister names to player IDs, applies the
+50/50 shooter/assister split on assisted made FGs, splits
+defensive credit equally across 5 defenders, then aggregates
+per player per season into player_pva_season.
+
+Prints the top 5 players by PVA/100 as a quick sanity check.
+
+    python backend/ingest/compute_pva.py --seasons 2024-25
+
+    # For playoffs:
+    python backend/ingest/compute_pva.py --seasons 2024-25 --season-type Playoffs
+
+
+──────────────────────────────────────────────────────────────
+STEP 5 — Start the server and open the page
+──────────────────────────────────────────────────────────────
+The PVA leaderboard is now live at /pva.
+
+    python backend/server.py
+    # then open: http://localhost:5000/pva
+
+
+──────────────────────────────────────────────────────────────
+RE-RUNNING (e.g. mid-season refresh)
+──────────────────────────────────────────────────────────────
+At any point during the season you can update the data:
+
+    # 1. Collect new games (skips already-done ones automatically)
+    python collect_to_db.py --seasons 2024-25
+
+    # 2. Backfill expected_points on the new possessions only
+    python backend/ingest/train_ev_model.py --backfill-only --seasons 2024-25
+
+    # 3. Recompute player PVA (upserts, so safe to re-run)
+    python backend/ingest/compute_pva.py --seasons 2024-25
+
+
+──────────────────────────────────────────────────────────────
+QUICK REFERENCE — what each file does
+──────────────────────────────────────────────────────────────
+possession_pipeline.py       Converts raw PBP + rotation data into
+                             structured Possession objects. Parses
+                             assist names from event descriptions.
+
+collect_to_db.py             Loops over all games in a season, runs
+                             the pipeline, writes to DB.
+
+migrate_possessions.sql      Schema for possessions, possession_events,
+                             possession_lineups, collection_progress.
+
+migrate_pva.sql              Schema for player_pva_season.
+
+backend/ingest/
+  train_ev_model.py          Trains GBM on possession data, saves
+                             epv_model.pkl, backfills expected_points.
+
+  compute_pva.py             Runs attribution SQL, writes PVA per
+                             player per season to player_pva_season.
+
+backend/server.py            API endpoints:
+                               GET /api/pva/leaders
+                               GET /api/pva/player/<id>
+                               GET /api/pva/seasons
+                               GET /pva  (serves pva.html)
+
+frontend/pva.html            Leaderboard + scatter chart UI.

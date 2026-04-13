@@ -1817,9 +1817,11 @@ def submit_review(game_id):
         """, (user["id"], game_id, rating, review_text))
 
         review = dict(cur.fetchone())
+        cur.execute("SELECT avatar_url, favorite_team FROM users WHERE id = %s", (user["id"],))
+        user_row = cur.fetchone()
         review["display_name"]  = user["display_name"]
-        review["avatar_url"]    = user["avatar_url"]
-        review["favorite_team"] = user.get("favorite_team") or ""
+        review["avatar_url"]    = (user_row["avatar_url"] if user_row else None) or ""
+        review["favorite_team"] = (user_row["favorite_team"] if user_row else None) or ""
         conn.commit()
         cur.close(); conn.close()
         return jsonify({"review": _format_review(review)}), 201
@@ -2988,6 +2990,209 @@ def get_trends_gamelog():
 @app.route("/trends.html")
 def trends_page():
     return app.send_static_file("trends.html")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PVA (Possession Value Added)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/pva/leaders")
+def pva_leaders():
+    """
+    Return the PVA leaderboard for a season.
+
+    Query params:
+      season       — e.g. "2024-25"  (defaults to current season)
+      season_type  — "Regular Season" | "Playoffs"
+      min_poss     — minimum offensive possessions (default 200)
+      sort         — column to sort by (default "total_pva_per_100")
+      dir          — "desc" | "asc" (default "desc")
+      limit        — max rows (default 200)
+    """
+    season      = request.args.get("season",      DEFAULT_SEASON)
+    season_type = request.args.get("season_type", "Regular Season")
+    min_poss    = request.args.get("min_poss",    200,  type=int)
+    sort        = request.args.get("sort",        "total_pva_per_100")
+    direction   = request.args.get("dir",         "desc").lower()
+    limit       = request.args.get("limit",       200,  type=int)
+
+    allowed_sorts = {
+        "total_pva_per_100", "off_pva_per_100", "def_pva_per_100",
+        "total_pva", "off_pva", "def_pva",
+        "off_possessions", "total_possessions",
+        "pva_from_makes", "pva_from_misses", "pva_from_turnovers",
+        "avg_actual_pts", "avg_expected_pts",
+    }
+    if sort not in allowed_sorts:
+        sort = "total_pva_per_100"
+    order = "DESC" if direction != "asc" else "ASC"
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+
+        cur.execute(f"""
+            SELECT
+                pv.player_id,
+                pv.player_name,
+                pv.off_possessions,
+                pv.def_possessions,
+                pv.total_possessions,
+                pv.off_pva,
+                pv.def_pva,
+                pv.total_pva,
+                pv.off_pva_per_100,
+                pv.def_pva_per_100,
+                pv.total_pva_per_100,
+                pv.pva_from_makes,
+                pv.pva_from_misses,
+                pv.pva_from_turnovers,
+                pv.avg_expected_pts,
+                pv.avg_actual_pts,
+                ps.team_abbr
+            FROM player_pva_season pv
+            LEFT JOIN player_seasons ps
+                   ON ps.player_id = pv.player_id
+                  AND ps.season     = pv.season
+                  AND ps.season_type = pv.season_type
+            WHERE pv.season      = %s
+              AND pv.season_type = %s
+              AND pv.off_possessions >= %s
+            ORDER BY {sort} {order}
+            LIMIT %s
+        """, (season, season_type, min_poss, limit))
+
+        rows = cur.fetchall()
+        float_cols = (
+            "off_pva", "def_pva", "total_pva",
+            "off_pva_per_100", "def_pva_per_100", "total_pva_per_100",
+            "pva_from_makes", "pva_from_misses", "pva_from_turnovers",
+            "avg_expected_pts", "avg_actual_pts",
+        )
+        result = []
+        for r in rows:
+            row = dict(r)
+            for k in float_cols:
+                row[k] = _safe(row[k])
+            result.append(row)
+
+        cur.close(); conn.close()
+        return jsonify({
+            "season": season,
+            "season_type": season_type,
+            "min_poss": min_poss,
+            "players": result,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/pva/player/<int:player_id>")
+def pva_player(player_id):
+    """
+    Return all seasons of PVA data for a single player, plus their last
+    10 possessions (for game-log flavour context).
+    """
+    season      = request.args.get("season",      DEFAULT_SEASON)
+    season_type = request.args.get("season_type", "Regular Season")
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+
+        # Career PVA rows (all seasons)
+        cur.execute("""
+            SELECT season, season_type,
+                   off_possessions, def_possessions, total_possessions,
+                   off_pva, def_pva, total_pva,
+                   off_pva_per_100, def_pva_per_100, total_pva_per_100,
+                   pva_from_makes, pva_from_misses, pva_from_turnovers,
+                   avg_expected_pts, avg_actual_pts,
+                   computed_at
+            FROM player_pva_season
+            WHERE player_id = %s
+            ORDER BY season DESC, season_type
+        """, (player_id,))
+        seasons = []
+        float_cols = (
+            "off_pva", "def_pva", "total_pva",
+            "off_pva_per_100", "def_pva_per_100", "total_pva_per_100",
+            "pva_from_makes", "pva_from_misses", "pva_from_turnovers",
+            "avg_expected_pts", "avg_actual_pts",
+        )
+        for r in cur.fetchall():
+            row = dict(r)
+            for k in float_cols:
+                row[k] = _safe(row[k])
+            if row.get("computed_at"):
+                row["computed_at"] = row["computed_at"].isoformat()
+            seasons.append(row)
+
+        # Per-game PVA: join possession outcomes with game log for context
+        # (gives actual vs expected for games where this player was primary actor)
+        cur.execute("""
+            SELECT
+                p.game_id,
+                p.period,
+                p.points_scored,
+                p.expected_points,
+                p.points_scored - p.expected_points AS pva,
+                p.end_reason,
+                p.score_margin_offense,
+                p.start_clock_seconds
+            FROM possessions p
+            JOIN possession_events pe
+                ON pe.possession_id = p.id
+               AND pe.action_type IN ('2pt', '3pt', 'turnover', 'freethrow')
+               AND pe.player_id = %s
+            WHERE p.season      = %s
+              AND p.expected_points IS NOT NULL
+            ORDER BY p.game_seconds_start DESC
+            LIMIT 50
+        """, (player_id, season))
+        recent = []
+        for r in cur.fetchall():
+            row = dict(r)
+            row["expected_points"] = _safe(row["expected_points"])
+            row["pva"]             = _safe(row["pva"])
+            recent.append(row)
+
+        cur.close(); conn.close()
+        return jsonify({
+            "player_id": player_id,
+            "season": season,
+            "season_type": season_type,
+            "career": seasons,
+            "recent_possessions": recent,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/pva/seasons")
+def pva_seasons():
+    """Return seasons that have computed PVA data."""
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT season, season_type,
+                   COUNT(DISTINCT player_id) AS player_count
+            FROM player_pva_season
+            GROUP BY season, season_type
+            ORDER BY season DESC
+        """)
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close(); conn.close()
+        return jsonify({"seasons": rows})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/pva")
+@app.route("/pva.html")
+def pva_page():
+    return app.send_static_file("pva.html")
 
 
 if __name__ == "__main__":

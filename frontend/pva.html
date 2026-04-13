@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>PVA · ydkball</title>
+<meta name="description" content="Possession Value Added — a basketball EPA model that measures how much each player beats or misses their expected possession outcome.">
+<meta property="og:site_name" content="ydkball">
+<meta property="og:title" content="PVA · ydkball">
+<meta property="og:description" content="Possession Value Added — a basketball EPA model measuring decision quality at the possession level.">
+<meta property="og:image" content="https://ydkball.net/logo.png">
+<meta property="og:url" content="https://ydkball.net/pva">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --ink:       #0c0c0d;
+  --ink2:      #2a2a2e;
+  --ink3:      #6b6b78;
+  --ink4:      #a8a8b3;
+  --paper:     #F5F0E8;
+  --paper2:    #eeecea;
+  --paper3:    #e5e2dc;
+  --rule:      #d8d5cf;
+  --orange:    #e8530a;
+  --orange-lt: #fff0ea;
+  --green:     #1a7a4a;
+  --green-lt:  #edf7f2;
+  --red:       #c0392b;
+  --red-lt:    #fdf0ee;
+  --ff-serif: 'DM Serif Display', Georgia, serif;
+  --ff-sans:  'Instrument Sans', system-ui, sans-serif;
+  --ff-mono:  'DM Mono', 'Courier New', monospace;
+  --nav-h: 56px;
+  --controls-h: 53px;
+  font-size: 15px;
+}
+html { scroll-behavior: smooth; overflow-x: clip; -webkit-text-size-adjust: 100%; }
+body {
+  position: relative;
+  font-family: var(--ff-sans);
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+}
+body::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  opacity: 0.022; pointer-events: none; z-index: 9999;
+}
+
+/* ── Nav ─────────────────────────────────────────────────────── */
+nav {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: var(--nav-h); background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  display: flex; align-items: center;
+  padding: 0 24px; gap: 32px; z-index: 100;
+}
+.nav-wordmark {
+  font-family: var(--ff-serif); font-size: 20px;
+  color: var(--ink); letter-spacing: -0.01em;
+  text-decoration: none; flex-shrink: 0;
+  display: flex; align-items: center; gap: 0;
+}
+.nav-logo { height: 26px; width: auto; margin-right: 8px; }
+.nav-wordmark span { color: var(--orange); }
+.nav-tabs { display: flex; gap: 2px; flex: 1 1 0; min-width: 0; overflow: hidden; }
+.nav-tab {
+  font-family: var(--ff-mono); font-size: 11px;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink3); background: none; border: none;
+  padding: 6px 14px; cursor: pointer; border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  text-decoration: none; display: inline-block; white-space: nowrap;
+}
+.nav-tab:hover  { color: var(--ink); background: var(--paper2); }
+.nav-tab.active { color: var(--ink); background: var(--paper3); }
+.nav-auth { margin-left: auto; flex-shrink: 0; }
+
+/* ── Page layout ─────────────────────────────────────────────── */
+.page { padding-top: var(--nav-h); display: flex; flex-direction: column; min-height: 100vh; }
+
+/* ── Hero ─────────────────────────────────────────────────────── */
+.hero {
+  padding: 40px 40px 32px;
+  border-bottom: 1px solid var(--rule);
+}
+.hero-kicker {
+  font-family: var(--ff-mono); font-size: 10px;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--orange); margin-bottom: 8px;
+}
+.hero-title {
+  font-family: var(--ff-serif); font-size: 36px;
+  color: var(--ink); margin-bottom: 14px; line-height: 1.1;
+}
+.hero-desc {
+  font-size: 14px; color: var(--ink3); line-height: 1.7;
+  max-width: 720px;
+}
+.hero-desc strong { color: var(--ink2); }
+
+/* ── Controls bar ────────────────────────────────────────────── */
+.controls-bar {
+  display: flex; align-items: center; gap: 20px;
+  padding: 14px 40px; border-bottom: 1px solid var(--rule);
+  background: var(--paper2); flex-wrap: wrap;
+}
+.ctrl-group { display: flex; align-items: center; gap: 8px; }
+.ctrl-label {
+  font-family: var(--ff-mono); font-size: 9px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink4); white-space: nowrap;
+}
+.ctrl-select {
+  font-family: var(--ff-sans); font-size: 13px;
+  background: var(--paper); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 6px;
+  padding: 6px 10px; cursor: pointer; outline: none;
+  transition: border-color 0.15s;
+}
+.ctrl-select:focus { border-color: var(--orange); }
+.ctrl-input {
+  font-family: var(--ff-mono); font-size: 12px;
+  background: var(--paper); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 6px;
+  padding: 6px 10px; outline: none; width: 80px;
+  transition: border-color 0.15s;
+}
+.ctrl-input:focus { border-color: var(--orange); }
+
+.view-toggle { display: flex; gap: 4px; margin-left: auto; }
+.view-btn {
+  font-family: var(--ff-mono); font-size: 10px;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 5px 12px; border-radius: 5px; cursor: pointer;
+  border: 1px solid var(--rule); background: var(--paper);
+  color: var(--ink3); transition: all 0.12s;
+}
+.view-btn.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* ── State messages ──────────────────────────────────────────── */
+.state-msg {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px; padding: 80px 32px;
+  font-family: var(--ff-mono); font-size: 12px;
+  color: var(--ink3); letter-spacing: 0.04em;
+  text-align: center; line-height: 1.9;
+}
+.spin {
+  display: inline-block; width: 20px; height: 20px;
+  border: 2px solid var(--rule); border-top-color: var(--orange);
+  border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Table view ──────────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; }
+table.pva {
+  width: 100%; border-collapse: collapse;
+  font-family: var(--ff-sans); font-size: 13px; min-width: 760px;
+}
+table.pva thead {
+  position: sticky; top: calc(var(--nav-h) + var(--controls-h)); z-index: 5;
+  background: var(--paper);
+}
+table.pva thead th {
+  font-family: var(--ff-mono); font-size: 10px;
+  letter-spacing: 0.07em; text-transform: uppercase; font-weight: 500;
+  padding: 10px 12px 8px; color: var(--ink3);
+  border-bottom: 1px solid var(--rule); white-space: nowrap;
+  cursor: pointer; user-select: none; text-align: right;
+  transition: color 0.12s;
+}
+table.pva thead th:first-child { text-align: left; padding-left: 40px; }
+table.pva thead th:hover { color: var(--ink); }
+table.pva thead th.sort-active { color: var(--orange); }
+table.pva thead th .sort-arrow { opacity: 0.5; margin-left: 3px; font-style: normal; }
+table.pva thead th.sort-active .sort-arrow { opacity: 1; }
+
+table.pva tbody tr {
+  border-bottom: 1px solid var(--paper3);
+  transition: background 0.1s;
+}
+table.pva tbody tr:hover { background: var(--paper2); }
+table.pva tbody td {
+  padding: 12px 12px; text-align: right; color: var(--ink);
+  vertical-align: middle;
+}
+table.pva tbody td:first-child { text-align: left; padding-left: 40px; }
+
+.rank-cell {
+  font-family: var(--ff-mono); font-size: 11px;
+  color: var(--ink4); width: 28px; text-align: right;
+  padding-right: 6px !important;
+}
+.player-cell { display: flex; align-items: center; gap: 10px; }
+.player-hs {
+  width: 36px; height: 36px; border-radius: 50%;
+  object-fit: cover; background: var(--paper3);
+  border: 1.5px solid var(--rule); flex-shrink: 0;
+}
+.player-info { display: flex; flex-direction: column; gap: 1px; }
+.player-name {
+  font-weight: 600; font-size: 13px; color: var(--ink);
+  text-decoration: none; white-space: nowrap;
+}
+.player-name:hover { color: var(--orange); }
+.player-meta { font-family: var(--ff-mono); font-size: 10px; color: var(--ink4); }
+
+.num { font-family: var(--ff-mono); font-size: 12px; }
+.pos  { color: var(--green);  font-weight: 700; }
+.neg  { color: var(--red);    font-weight: 700; }
+.neu  { color: var(--ink3); }
+
+.poss-cell { font-family: var(--ff-mono); font-size: 11px; color: var(--ink4); }
+
+/* ── Scatter view ────────────────────────────────────────────── */
+.scatter-wrap {
+  padding: 32px 40px;
+  display: none;
+}
+.scatter-wrap.visible { display: block; }
+.scatter-title {
+  font-family: var(--ff-serif); font-size: 20px;
+  color: var(--ink); margin-bottom: 6px;
+}
+.scatter-sub {
+  font-family: var(--ff-mono); font-size: 10px;
+  color: var(--ink4); letter-spacing: 0.04em; margin-bottom: 24px;
+}
+#scatter-canvas {
+  display: block;
+  width: 100%; max-width: 760px;
+  border: 1px solid var(--rule); border-radius: 8px;
+  background: var(--paper2); cursor: crosshair;
+}
+.scatter-tooltip {
+  position: fixed;
+  background: var(--ink); color: var(--paper);
+  font-family: var(--ff-sans); font-size: 12px;
+  padding: 8px 12px; border-radius: 6px;
+  pointer-events: none; opacity: 0;
+  transition: opacity 0.12s; z-index: 200;
+  white-space: nowrap; line-height: 1.6;
+}
+
+/* ── Explainer cards ─────────────────────────────────────────── */
+.explainer {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 16px; padding: 32px 40px;
+  border-top: 1px solid var(--rule);
+}
+.exp-card {
+  background: var(--paper2); border-radius: 10px;
+  padding: 20px; border: 1px solid var(--rule);
+}
+.exp-kicker {
+  font-family: var(--ff-mono); font-size: 9px;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--orange); margin-bottom: 6px;
+}
+.exp-title {
+  font-family: var(--ff-serif); font-size: 17px;
+  color: var(--ink); margin-bottom: 8px;
+}
+.exp-body {
+  font-size: 13px; color: var(--ink3); line-height: 1.65;
+}
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 680px) {
+  .hero { padding: 24px 20px 20px; }
+  .hero-title { font-size: 26px; }
+  .controls-bar { padding: 10px 20px; gap: 12px; }
+  table.pva thead th:first-child { padding-left: 16px; }
+  table.pva tbody td:first-child  { padding-left: 16px; }
+  .explainer { grid-template-columns: 1fr; padding: 20px; }
+  .scatter-wrap { padding: 20px; }
+  .view-toggle { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
+  <div class="nav-tabs">
+    <a class="nav-tab" href="/reviews">BasketBoxd</a>
+    <a class="nav-tab" href="/stats">Stats Hub</a>
+    <a class="nav-tab" href="/wowy">WoWY</a>
+    <a class="nav-tab" href="/compare">Compare</a>
+    <a class="nav-tab" href="/trends">Trends</a>
+  </div>
+  <div class="nav-auth" id="nav-auth-slot"></div>
+</nav>
+
+<div class="page">
+
+  <div class="hero">
+    <div class="hero-kicker">Novel metric</div>
+    <h1 class="hero-title">Possession Value Added</h1>
+    <p class="hero-desc">
+      <strong>PVA</strong> is a basketball EPA model. For every possession, a gradient-boosted model
+      predicts how many points an average team would score given the game state — the period, clock,
+      and score margin. The difference between what actually happened and what was expected is the
+      possession's value-added. PVA aggregates those deltas per player, normalised per 100 possessions,
+      separating <strong>offensive credit</strong> (shooters and turnover players) from
+      <strong>defensive credit</strong> (equal split across the 5 defenders who held possession).
+    </p>
+  </div>
+
+  <div class="controls-bar">
+    <div class="ctrl-group">
+      <span class="ctrl-label">Season</span>
+      <select class="ctrl-select" id="season-sel"></select>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Type</span>
+      <select class="ctrl-select" id="type-sel">
+        <option value="Regular Season">Regular Season</option>
+        <option value="Playoffs">Playoffs</option>
+      </select>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Min possessions</span>
+      <input class="ctrl-input" id="min-poss" type="number" value="200" min="0" step="50">
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Sort</span>
+      <select class="ctrl-select" id="sort-sel">
+        <option value="total_pva_per_100">Total PVA/100</option>
+        <option value="off_pva_per_100">Off PVA/100</option>
+        <option value="def_pva_per_100">Def PVA/100</option>
+        <option value="total_pva">Total PVA (raw)</option>
+      </select>
+    </div>
+    <div class="view-toggle">
+      <button class="view-btn active" id="btn-table">Table</button>
+      <button class="view-btn" id="btn-scatter">Scatter</button>
+    </div>
+  </div>
+
+  <div id="content-area">
+    <div class="state-msg" id="loading-msg">
+      <div class="spin"></div>
+      <span>Loading possession value data…</span>
+    </div>
+    <div class="state-msg" id="empty-msg" style="display:none;">
+      <span style="font-size:24px;opacity:0.3;">📊</span>
+      <span>No PVA data yet for this season.<br>Run <code>collect_to_db.py</code> → <code>train_ev_model.py</code> → <code>compute_pva.py</code> to generate it.</span>
+    </div>
+    <div class="state-msg" id="error-msg" style="display:none;">
+      <span style="font-size:24px;opacity:0.3;">⚠</span>
+      <span id="error-text">Failed to load data.</span>
+    </div>
+
+    <!-- Table view -->
+    <div id="table-view" style="display:none;">
+      <div class="table-wrap">
+        <table class="pva" id="pva-table">
+          <thead>
+            <tr>
+              <th class="th-rank" style="width:36px;text-align:right;padding-left:40px;">#</th>
+              <th class="th-player" style="text-align:left;">Player</th>
+              <th data-col="total_pva_per_100" class="sort-active">
+                Total<br>PVA/100 <i class="sort-arrow">▼</i>
+              </th>
+              <th data-col="off_pva_per_100">Off<br>PVA/100 <i class="sort-arrow">↕</i></th>
+              <th data-col="def_pva_per_100">Def<br>PVA/100 <i class="sort-arrow">↕</i></th>
+              <th data-col="total_pva">Total<br>PVA <i class="sort-arrow">↕</i></th>
+              <th data-col="off_possessions">Off<br>Poss <i class="sort-arrow">↕</i></th>
+              <th data-col="avg_actual_pts">Avg<br>Actual <i class="sort-arrow">↕</i></th>
+              <th data-col="avg_expected_pts">Avg<br>xPts <i class="sort-arrow">↕</i></th>
+            </tr>
+          </thead>
+          <tbody id="pva-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Scatter view -->
+    <div class="scatter-wrap" id="scatter-view">
+      <div class="scatter-title">Offensive vs Defensive PVA</div>
+      <div class="scatter-sub">Per 100 possessions · hover to identify players · min <span id="scatter-min-label">200</span> off possessions</div>
+      <canvas id="scatter-canvas" height="520"></canvas>
+    </div>
+  </div>
+
+  <div class="explainer">
+    <div class="exp-card">
+      <div class="exp-kicker">How it works</div>
+      <div class="exp-title">Expected Possession Value</div>
+      <div class="exp-body">
+        A gradient-boosting model trained on hundreds of thousands of historical possessions
+        predicts expected points from four features: period, clock, score margin, and game-time
+        fraction. Every possession gets a baseline — what an average NBA offense would score
+        from that exact state.
+      </div>
+    </div>
+    <div class="exp-card">
+      <div class="exp-kicker">Attribution</div>
+      <div class="exp-title">Who gets credit</div>
+      <div class="exp-body">
+        Offensive credit flows to the primary actor: the shooter (made or missed FG),
+        the turnover player, or the FT shooter. The difference between what they produced and
+        what was expected is their possession's contribution. Defensive credit is split equally
+        among the five defenders on that possession.
+      </div>
+    </div>
+    <div class="exp-card">
+      <div class="exp-kicker">Interpretation</div>
+      <div class="exp-title">Reading the numbers</div>
+      <div class="exp-body">
+        <strong>+2.0 Off PVA/100</strong> means this player's possessions produced 2 more points
+        per 100 possessions than a league-average offense would in identical game states.
+        <strong>+1.5 Def PVA/100</strong> means defenses they were part of saved 1.5 points per 100
+        versus expectation. Total PVA/100 combines both.
+      </div>
+    </div>
+  </div>
+
+</div><!-- .page -->
+
+<div class="scatter-tooltip" id="scatter-tooltip"></div>
+
+<script src="/season-config.js"></script>
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let allPlayers  = [];
+let sortCol     = 'total_pva_per_100';
+let sortDir     = 'desc';
+let viewMode    = 'table';  // 'table' | 'scatter'
+
+const seasonSel  = document.getElementById('season-sel');
+const typeSel    = document.getElementById('type-sel');
+const minPossEl  = document.getElementById('min-poss');
+const sortSelEl  = document.getElementById('sort-sel');
+const loadingMsg = document.getElementById('loading-msg');
+const emptyMsg   = document.getElementById('empty-msg');
+const errorMsg   = document.getElementById('error-msg');
+const tableView  = document.getElementById('table-view');
+const scatterView= document.getElementById('scatter-view');
+const tbody      = document.getElementById('pva-tbody');
+
+// ─── Season selector population ───────────────────────────────────────────────
+async function populateSeasons() {
+  try {
+    const res  = await fetch('/api/pva/seasons');
+    const data = await res.json();
+    if (data.seasons && data.seasons.length > 0) {
+      const seen = new Set();
+      data.seasons.forEach(s => {
+        if (!seen.has(s.season)) {
+          seen.add(s.season);
+          const opt = document.createElement('option');
+          opt.value = s.season;
+          opt.textContent = s.season;
+          seasonSel.appendChild(opt);
+        }
+      });
+    } else {
+      // Fallback: use CURRENT_SEASON from season-config.js if available
+      const fallback = (typeof CURRENT_SEASON !== 'undefined') ? CURRENT_SEASON : '2024-25';
+      const opt = document.createElement('option');
+      opt.value = fallback;
+      opt.textContent = fallback;
+      seasonSel.appendChild(opt);
+    }
+  } catch {
+    const fallback = (typeof CURRENT_SEASON !== 'undefined') ? CURRENT_SEASON : '2024-25';
+    const opt = document.createElement('option');
+    opt.value = fallback;
+    opt.textContent = fallback;
+    seasonSel.appendChild(opt);
+  }
+}
+
+// ─── Data loading ─────────────────────────────────────────────────────────────
+async function load() {
+  const season   = seasonSel.value;
+  const type     = typeSel.value;
+  const minPoss  = parseInt(minPossEl.value) || 0;
+  const sort     = sortCol;
+  const dir      = sortDir;
+
+  showState('loading');
+
+  try {
+    const url = `/api/pva/leaders?season=${encodeURIComponent(season)}&season_type=${encodeURIComponent(type)}&min_poss=${minPoss}&sort=${sort}&dir=${dir}&limit=300`;
+    const res  = await fetch(url);
+    const data = await res.json();
+
+    if (data.error) throw new Error(data.error);
+    allPlayers = data.players || [];
+
+    if (allPlayers.length === 0) {
+      showState('empty');
+      return;
+    }
+
+    showState('data');
+    renderTable();
+    if (viewMode === 'scatter') renderScatter();
+  } catch (e) {
+    showState('error', e.message);
+  }
+}
+
+function showState(state, msg) {
+  loadingMsg.style.display = 'none';
+  emptyMsg.style.display   = 'none';
+  errorMsg.style.display   = 'none';
+  tableView.style.display  = 'none';
+  scatterView.classList.remove('visible');
+
+  if (state === 'loading') {
+    loadingMsg.style.display = 'flex';
+  } else if (state === 'empty') {
+    emptyMsg.style.display = 'flex';
+  } else if (state === 'error') {
+    document.getElementById('error-text').textContent = msg || 'Failed to load data.';
+    errorMsg.style.display = 'flex';
+  } else {
+    if (viewMode === 'table') {
+      tableView.style.display = 'block';
+    } else {
+      scatterView.classList.add('visible');
+    }
+  }
+}
+
+// ─── Table rendering ──────────────────────────────────────────────────────────
+function fmt(v, decimals = 2) {
+  if (v == null || isNaN(v)) return '—';
+  const n = parseFloat(v);
+  const s = n.toFixed(decimals);
+  return s;
+}
+
+function fmtSigned(v, decimals = 2) {
+  if (v == null || isNaN(v)) return '—';
+  const n = parseFloat(v);
+  return (n >= 0 ? '+' : '') + n.toFixed(decimals);
+}
+
+function colorClass(v) {
+  if (v == null || isNaN(v)) return 'neu';
+  return parseFloat(v) >= 0 ? 'pos' : 'neg';
+}
+
+function renderTable() {
+  const rows = [...allPlayers];
+
+  // Client-side sort if needed
+  rows.sort((a, b) => {
+    const va = parseFloat(a[sortCol]) || 0;
+    const vb = parseFloat(b[sortCol]) || 0;
+    return sortDir === 'desc' ? vb - va : va - vb;
+  });
+
+  tbody.innerHTML = '';
+  rows.forEach((p, i) => {
+    const tr = document.createElement('tr');
+    const abbr = p.team_abbr || '';
+    const logoUrl = abbr ? `https://cdn.nba.com/logos/nba/${p.player_id}/global/L/logo.svg` : '';
+    const hsUrl = `https://cdn.nba.com/headshots/nba/latest/260x190/${p.player_id}.png`;
+
+    tr.innerHTML = `
+      <td class="rank-cell num" style="padding-left:40px;">${i + 1}</td>
+      <td>
+        <div class="player-cell">
+          <img class="player-hs" src="${hsUrl}"
+               onerror="this.src='https://cdn.nba.com/headshots/nba/latest/260x190/fallback.png'"
+               alt="${p.player_name}" loading="lazy">
+          <div class="player-info">
+            <a class="player-name" href="/stats?player_id=${p.player_id}">${p.player_name}</a>
+            <span class="player-meta">${abbr || '—'}</span>
+          </div>
+        </div>
+      </td>
+      <td class="num ${colorClass(p.total_pva_per_100)}">${fmtSigned(p.total_pva_per_100)}</td>
+      <td class="num ${colorClass(p.off_pva_per_100)}">${fmtSigned(p.off_pva_per_100)}</td>
+      <td class="num ${colorClass(p.def_pva_per_100)}">${fmtSigned(p.def_pva_per_100)}</td>
+      <td class="num ${colorClass(p.total_pva)}">${fmtSigned(p.total_pva, 1)}</td>
+      <td class="poss-cell">${p.off_possessions?.toLocaleString() || '—'}</td>
+      <td class="num">${fmt(p.avg_actual_pts, 3)}</td>
+      <td class="num">${fmt(p.avg_expected_pts, 3)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  updateSortHeaders();
+}
+
+function updateSortHeaders() {
+  document.querySelectorAll('table.pva thead th[data-col]').forEach(th => {
+    th.classList.remove('sort-active');
+    const arrow = th.querySelector('.sort-arrow');
+    if (arrow) arrow.textContent = '↕';
+    if (th.dataset.col === sortCol) {
+      th.classList.add('sort-active');
+      if (arrow) arrow.textContent = sortDir === 'desc' ? '▼' : '▲';
+    }
+  });
+}
+
+// ─── Sort on header click ─────────────────────────────────────────────────────
+document.querySelectorAll('table.pva thead th[data-col]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (sortCol === col) {
+      sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+    } else {
+      sortCol = col;
+      sortDir = 'desc';
+    }
+    if (allPlayers.length > 0) {
+      renderTable();
+      if (viewMode === 'scatter') renderScatter();
+    }
+  });
+});
+
+// ─── Scatter chart ────────────────────────────────────────────────────────────
+const canvas  = document.getElementById('scatter-canvas');
+const ctx     = canvas.getContext('2d');
+const tooltip = document.getElementById('scatter-tooltip');
+let scatterPoints = [];
+
+function renderScatter() {
+  document.getElementById('scatter-min-label').textContent =
+    parseInt(minPossEl.value) || 200;
+
+  const dpr    = window.devicePixelRatio || 1;
+  const W      = canvas.clientWidth;
+  const H      = canvas.clientHeight || 520;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
+
+  const pad = { top: 36, right: 36, bottom: 52, left: 64 };
+  const pw  = W - pad.left - pad.right;
+  const ph  = H - pad.top  - pad.bottom;
+
+  const players = allPlayers.filter(p =>
+    p.off_pva_per_100 != null && p.def_pva_per_100 != null
+  );
+
+  if (players.length === 0) return;
+
+  const xs  = players.map(p => parseFloat(p.off_pva_per_100));
+  const ys  = players.map(p => parseFloat(p.def_pva_per_100));
+  const xmin = Math.min(...xs) - 0.5;
+  const xmax = Math.max(...xs) + 0.5;
+  const ymin = Math.min(...ys) - 0.5;
+  const ymax = Math.max(...ys) + 0.5;
+
+  const toX = v => pad.left + (v - xmin) / (xmax - xmin) * pw;
+  const toY = v => pad.top  + ph - (v - ymin) / (ymax - ymin) * ph;
+
+  // Background
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--paper2').trim() || '#eeecea';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid lines at zero
+  ctx.strokeStyle = '#d8d5cf';
+  ctx.lineWidth   = 1;
+  // Vertical zero
+  if (xmin < 0 && xmax > 0) {
+    const zx = toX(0);
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(zx, pad.top); ctx.lineTo(zx, pad.top + ph); ctx.stroke();
+  }
+  // Horizontal zero
+  if (ymin < 0 && ymax > 0) {
+    const zy = toY(0);
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(pad.left, zy); ctx.lineTo(pad.left + pw, zy); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Quadrant labels
+  ctx.font = '11px "DM Mono", monospace';
+  ctx.fillStyle = '#a8a8b3';
+  ctx.fillText('Off+ / Def+', toX(xmax) - 64, toY(ymax) + 14);
+  ctx.fillText('Off+ / Def−', toX(xmax) - 64, toY(ymin) - 6);
+  ctx.fillText('Off− / Def+', toX(xmin),      toY(ymax) + 14);
+  ctx.fillText('Off− / Def−', toX(xmin),      toY(ymin) - 6);
+
+  // Axes
+  ctx.strokeStyle = '#c0bdb7';
+  ctx.lineWidth   = 1;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(pad.left, pad.top + ph); ctx.lineTo(pad.left + pw, pad.top + ph); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + ph); ctx.stroke();
+
+  // Axis labels
+  ctx.fillStyle = '#6b6b78';
+  ctx.font = '11px "DM Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('OFF PVA / 100', pad.left + pw / 2, H - 10);
+  ctx.save();
+  ctx.translate(16, pad.top + ph / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('DEF PVA / 100', 0, 0);
+  ctx.restore();
+
+  // Tick labels
+  ctx.font = '10px "DM Mono", monospace';
+  ctx.fillStyle = '#a8a8b3';
+  ctx.textAlign = 'center';
+  const xTicks = 5;
+  for (let i = 0; i <= xTicks; i++) {
+    const v  = xmin + (xmax - xmin) * i / xTicks;
+    const px = toX(v);
+    ctx.fillText(v.toFixed(1), px, pad.top + ph + 16);
+  }
+  ctx.textAlign = 'right';
+  const yTicks = 5;
+  for (let i = 0; i <= yTicks; i++) {
+    const v  = ymin + (ymax - ymin) * i / yTicks;
+    const py = toY(v);
+    ctx.fillText(v.toFixed(1), pad.left - 8, py + 4);
+  }
+
+  // Points
+  scatterPoints = [];
+  players.forEach(p => {
+    const x   = toX(parseFloat(p.off_pva_per_100));
+    const y   = toY(parseFloat(p.def_pva_per_100));
+    const tot = parseFloat(p.total_pva_per_100);
+    const r   = 5;
+
+    // Color by total
+    let fill;
+    if (tot >= 1.5)       fill = '#1a7a4a';
+    else if (tot >= 0.5)  fill = '#4aaa7a';
+    else if (tot >= -0.5) fill = '#a8a8b3';
+    else if (tot >= -1.5) fill = '#e07060';
+    else                  fill = '#c0392b';
+
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = fill + 'cc';
+    ctx.fill();
+    ctx.strokeStyle = fill;
+    ctx.lineWidth   = 1;
+    ctx.stroke();
+
+    scatterPoints.push({ x, y, r, player: p });
+  });
+}
+
+// Tooltip on hover
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  const mx   = e.clientX - rect.left;
+  const my   = e.clientY - rect.top;
+  const scaleX = canvas.width  / (canvas.clientWidth  * (window.devicePixelRatio || 1));
+  const scaleY = canvas.height / (canvas.clientHeight * (window.devicePixelRatio || 1));
+
+  let hit = null;
+  for (const pt of scatterPoints) {
+    const dx = mx - pt.x;
+    const dy = my - pt.y;
+    if (Math.sqrt(dx*dx + dy*dy) <= pt.r + 4) { hit = pt; break; }
+  }
+  if (hit) {
+    const p = hit.player;
+    tooltip.innerHTML = `
+      <strong>${p.player_name}</strong>${p.team_abbr ? ' · ' + p.team_abbr : ''}<br>
+      Total PVA/100: <strong>${fmtSigned(p.total_pva_per_100)}</strong><br>
+      Off PVA/100: ${fmtSigned(p.off_pva_per_100)} &nbsp; Def PVA/100: ${fmtSigned(p.def_pva_per_100)}<br>
+      ${(p.off_possessions || 0).toLocaleString()} off possessions
+    `;
+    tooltip.style.opacity = '1';
+    tooltip.style.left = (e.clientX + 14) + 'px';
+    tooltip.style.top  = (e.clientY - 10) + 'px';
+    canvas.style.cursor = 'pointer';
+  } else {
+    tooltip.style.opacity = '0';
+    canvas.style.cursor   = 'crosshair';
+  }
+});
+canvas.addEventListener('mouseleave', () => { tooltip.style.opacity = '0'; });
+
+// ─── View toggle ──────────────────────────────────────────────────────────────
+document.getElementById('btn-table').addEventListener('click', () => {
+  viewMode = 'table';
+  document.getElementById('btn-table').classList.add('active');
+  document.getElementById('btn-scatter').classList.remove('active');
+  if (allPlayers.length > 0) { showState('data'); renderTable(); }
+});
+
+document.getElementById('btn-scatter').addEventListener('click', () => {
+  viewMode = 'scatter';
+  document.getElementById('btn-scatter').classList.add('active');
+  document.getElementById('btn-table').classList.remove('active');
+  if (allPlayers.length > 0) { showState('data'); requestAnimationFrame(renderScatter); }
+});
+
+// ─── Controls ─────────────────────────────────────────────────────────────────
+seasonSel.addEventListener('change', load);
+typeSel.addEventListener('change', load);
+sortSelEl.addEventListener('change', () => {
+  sortCol = sortSelEl.value;
+  sortDir = 'desc';
+  if (allPlayers.length > 0) renderTable();
+});
+
+let minPossTimer;
+minPossEl.addEventListener('input', () => {
+  clearTimeout(minPossTimer);
+  minPossTimer = setTimeout(load, 600);
+});
+
+// Resize scatter
+window.addEventListener('resize', () => {
+  if (viewMode === 'scatter' && allPlayers.length > 0) requestAnimationFrame(renderScatter);
+});
+
+// ─── Nav auth (mirrors other pages) ──────────────────────────────────────────
+async function loadAuth() {
+  try {
+    const res  = await fetch('/auth/me');
+    const slot = document.getElementById('nav-auth-slot');
+    if (res.ok) {
+      const u = await res.json();
+      slot.innerHTML = `<a href="/profile/${u.id}" style="font-family:var(--ff-mono);font-size:11px;color:var(--ink3);text-decoration:none;letter-spacing:0.06em;">${u.display_name || u.email}</a>`;
+    } else {
+      slot.innerHTML = `<a href="/auth/google/login" style="font-family:var(--ff-mono);font-size:11px;color:var(--ink3);text-decoration:none;letter-spacing:0.06em;text-transform:uppercase;">Sign in</a>`;
+    }
+  } catch {}
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+(async () => {
+  await populateSeasons();
+  loadAuth();
+  load();
+})();
+</script>
+</body>
+</html>

@@ -76,11 +76,20 @@ CREATE TABLE IF NOT EXISTS possession_events (
     x_legacy            REAL            NULL,       -- shot chart coordinates
     y_legacy            REAL            NULL,
 
+    -- Assist credit: player_id of the assister on assisted made FGs.
+    -- Null on misses, turnovers, and unassisted makes.
+    assist_player_name  TEXT            NULL,   -- legacy column, kept for safety
+    assist_player_id    BIGINT          NULL,
+
     -- Model output (filled after training)
     ev_before           REAL            NULL,       -- expected points before this event
     ev_after            REAL            NULL,       -- expected points after this event
     ev_delta            REAL            NULL        -- ev_after - ev_before (player's credit)
 );
+
+-- If the table already exists (re-running migration), add columns safely:
+ALTER TABLE possession_events ADD COLUMN IF NOT EXISTS assist_player_name TEXT NULL;
+ALTER TABLE possession_events ADD COLUMN IF NOT EXISTS assist_player_id BIGINT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_pevents_possession ON possession_events (possession_id);
 CREATE INDEX IF NOT EXISTS idx_pevents_player     ON possession_events (player_id);
