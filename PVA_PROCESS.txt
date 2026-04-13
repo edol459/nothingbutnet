@@ -1,0 +1,181 @@
+ydkball — PVA (Possession Value Added) Pipeline
+================================================
+Last updated: April 2026
+
+OVERVIEW
+--------
+PVA is a basketball EPA model. For every possession, a gradient-boosted model
+predicts how many points an average team should score given the game state (period,
+clock, score margin). The difference between what actually happened and what was
+predicted is the possession's value-added. We then attribute that delta to the
+players involved on offense and defense.
+
+The result is a per-player, per-100-possession metric split into:
+  - Offensive PVA: how much you beat/missed the expected value as a shooter, TOV, or FT player
+  - Defensive PVA: how much you held opponents under/over their expected value as 1 of 5 defenders
+
+
+STEP 0: DATABASE SCHEMA
+-----------------------
+Run migrate_possessions.sql and migrate_pva.sql to set up the required tables:
+
+  psql $DATABASE_URL -f migrate_possessions.sql
+  psql $DATABASE_URL -f migrate_pva.sql
+
+Key tables:
+  possessions          — one row per possession, game state at start, outcome, expected_points
+  possession_events    — individual play-by-play events within each possession
+  possession_lineups   — the 5 offensive and 5 defensive players on court for each possession
+  player_pva_season    — final aggregated PVA per player per season (output table)
+
+
+STEP 1: COLLECT PLAY-BY-PLAY DATA
+----------------------------------
+Script: collect_to_db.py
+
+This script pulls play-by-play data for every NBA game using the pbpstats Python
+library (LivePossessionWebLoader), which reads from NBA's S3 CDN:
+  https://nba-prod-us-east-1-mediaops-stats.s3.amazonaws.com/NBA/liveData/playbyplay/
+
+For each game it:
+  1. Downloads and caches PBP JSON to data/pbp_cache/pbp/
+  2. Parses possessions using pbpstats' possession segmentation logic
+  3. Writes each possession's game state (period, clock, score margin, points_scored, end_reason)
+  4. Writes each event within the possession (action_type, player_id, assist_player_id)
+  5. Writes the 10-player lineup for each possession (5 offense, 5 defense)
+
+Usage:
+  python collect_to_db.py                     # all games in DB for current season
+  python collect_to_db.py --season 2023-24    # specify season
+  python collect_to_db.py --workers 4         # parallel workers (default 4)
+
+Runtime: ~30-40 min for a full season (~1200 games) at 0.4-0.5s/game.
+
+Notes:
+  - Games that fail are marked status='failed' and retried on next run.
+  - Two pbpstats bugs were patched in the venv:
+      .venv/.../live/enhanced_pbp_item.py    — added sub_type/descriptor defaults
+      .venv/.../nba_enhanced_pbp_loader.py   — added ignore_missing_starters=True for OT
+
+
+STEP 2: TRAIN THE EV MODEL
+---------------------------
+Script: backend/ingest/train_ev_model.py
+
+Trains a GradientBoostingClassifier to predict P(0 pts | 1 pt | 2 pts | 3 pts)
+for each possession given 7 game-state features:
+
+  Feature               Description
+  -------               -----------
+  period_norm           period / 5
+  clock_fraction        seconds_remaining / period_length
+  game_time_fraction    game_seconds_elapsed / 2880 (regulation)
+  margin_clipped        score_margin clipped to [-40, +40], normalised
+  is_ot                 1 if overtime period
+  under_two             1 if < 2 min left in period
+  under_thirty          1 if < 30 sec left in period
+
+Expected value = sum(class * P(class)) over {0, 1, 2, 3}.
+
+Garbage-time possessions are excluded from training and backfill:
+  Excluded: |score_margin| > 15 AND game_seconds_elapsed > 2160 (past 3 quarters)
+  Reason: these possessions have severe selection bias (reserves playing mop-up duty)
+          and inflating their expected_points estimate corrupts PVA for bench players.
+
+After training, the model is saved to backend/ingest/epv_model.pkl and then used
+to backfill possessions.expected_points for every non-garbage possession in the DB.
+
+Usage:
+  python backend/ingest/train_ev_model.py                         # train + backfill
+  python backend/ingest/train_ev_model.py --seasons 2023-24 2024-25  # multi-season
+  python backend/ingest/train_ev_model.py --backfill-only         # reuse saved model
+  python backend/ingest/train_ev_model.py --train-only            # skip backfill
+
+Model hyperparams (GradientBoostingClassifier):
+  n_estimators=300, learning_rate=0.05, max_depth=4,
+  subsample=0.8, min_samples_leaf=50
+
+
+STEP 3: COMPUTE PVA
+--------------------
+Script: backend/ingest/compute_pva.py
+
+Aggregates possession-level EV credits into per-player season stats.
+All SQL runs in Postgres for performance (~5-10 sec for a full season).
+
+Attribution logic:
+
+  OFFENSIVE CREDIT:
+    Primary actor = the player who executed the last meaningful event in the possession
+    (shot attempt, turnover, or free throw).
+
+    - Assisted made FG:  shooter gets 50% of PVA, assister gets 50%
+    - All other endings: primary actor gets 100% of PVA
+    - Garbage time:      excluded entirely (same filter as Step 2)
+
+    Assist player is taken from possession_events.assist_player_id, which is
+    populated directly from pbpstats (event.player2_id / assistPersonId in live data).
+    No name-matching needed.
+
+  DEFENSIVE CREDIT:
+    All 5 defenders split the negated PVA equally:
+      each defender gets -(points_scored - expected_points) / 5
+
+Output columns in player_pva_season:
+  off_pva, def_pva, total_pva                      (raw cumulative)
+  off_pva_per_100, def_pva_per_100, total_pva_per_100  (per 100 possessions)
+  off_possessions, def_possessions, total_possessions
+  pva_from_makes, pva_from_misses, pva_from_turnovers  (offense breakdown)
+  avg_expected_pts, avg_actual_pts                  (context)
+
+Usage:
+  python backend/ingest/compute_pva.py                        # 2024-25 Regular Season
+  python backend/ingest/compute_pva.py --seasons 2023-24      # different season
+  python backend/ingest/compute_pva.py --season-type Playoffs
+
+
+STEP 4: SERVE + DISPLAY
+------------------------
+API endpoint: GET /api/pva/leaders
+  Params: season, season_type, min_poss, sort (default: total_pva_per_100)
+  Returns: ranked player list with PVA columns + team_abbr + headshot URL
+
+Frontend: frontend/pva.html
+  - Table view: ranked leaderboard, sortable by any column
+  - Scatter view: off_pva_per_100 vs def_pva_per_100 scatter plot
+  - Filters: season, season_type, min possessions (default 200, raise to 500 for stability)
+
+
+FULL RUN ORDER
+--------------
+1. psql $DATABASE_URL -f migrate_possessions.sql
+2. psql $DATABASE_URL -f migrate_pva.sql
+3. python collect_to_db.py --season 2024-25
+4. python backend/ingest/train_ev_model.py --seasons 2024-25
+5. python backend/ingest/compute_pva.py --seasons 2024-25
+
+To add a prior season and retrain on more data:
+3b. python collect_to_db.py --season 2023-24
+4b. python backend/ingest/train_ev_model.py --seasons 2023-24 2024-25
+5b. python backend/ingest/compute_pva.py --seasons 2023-24 2024-25
+
+
+KNOWN LIMITATIONS & FUTURE IMPROVEMENTS
+-----------------------------------------
+1. No shot quality features — the model predicts EP from game state only, not
+   shot location or shot type. A mid-range jumper and a layup get the same baseline.
+   Fix: add 2pt/3pt indicator (already in possessions.end_reason) as a feature.
+
+2. Small-sample instability — players with <200 possessions can have extreme PVA.
+   Fix: use a min_poss filter of 500 for the headline leaderboard.
+
+3. Defense is equal-split only — every defender on the floor shares credit equally.
+   We have no per-event defensive player attribution (contested shot data not in PBP).
+   Fix: requires tracking player proximity, which would need tracking data (Second Spectrum).
+
+4. Single season training — training on only 2024-25 (~65k possessions) is fine but
+   adding 2023-24 doubles the training set and improves EV calibration.
+
+5. And-1 plays — the pipeline splits these into two possession records (made FG + FT).
+   This is correct behavior from pbpstats but means a made-and-1 basket gives PVA credit
+   for the make and separate FT credit, which may double-count slightly.

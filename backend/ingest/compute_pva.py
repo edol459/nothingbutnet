@@ -71,6 +71,7 @@ last_actor AS (
       AND p.expected_points IS NOT NULL
       AND pe.action_type IN ('2pt', '3pt', 'turnover', 'freethrow')
       AND pe.player_id IS NOT NULL
+      AND NOT (ABS(p.score_margin_offense) > 15 AND p.game_seconds_start > 3 * 720)
     ORDER BY pe.possession_id, pe.event_index DESC
 ),
 
@@ -105,6 +106,7 @@ poss_pva AS (
     LEFT JOIN assist_resolved ar ON ar.possession_id = p.id
     WHERE p.season         = %s
       AND p.expected_points IS NOT NULL
+      AND NOT (ABS(p.score_margin_offense) > 15 AND p.game_seconds_start > 3 * 720)
 ),
 
 -- ── Step 4a: Shooter credits ──────────────────────────────────────────────────

@@ -109,6 +109,10 @@ def train(seasons: list[str]) -> GradientBoostingClassifier:
         FROM possessions
         WHERE season = ANY(%s)
           AND end_reason NOT IN ('end_game', 'fouled')
+          AND NOT (
+            ABS(score_margin_offense) > 15
+            AND game_seconds_start > 3 * 720
+          )
     """, (seasons,))
     rows = cur.fetchall()
     cur.close()
@@ -200,20 +204,38 @@ def predict_ev(model, classes, period: int, clock_seconds: float,
 # ── Backfill DB ───────────────────────────────────────────────────────────────
 
 def backfill(model, classes, seasons: list[str], batch_size: int = 5000):
-    """Update possessions.expected_points for all rows where it's currently NULL."""
+    """
+    Reset expected_points to NULL for all possessions in the given seasons,
+    then backfill non-garbage-time possessions with fresh model predictions.
+    Garbage-time possessions (margin > 15 past Q3) are left NULL and therefore
+    excluded from PVA attribution.
+    """
     log.info("Starting DB backfill of expected_points...")
 
     conn = get_conn()
     cur  = conn.cursor()
+
+    # Reset all existing values so the garbage-time filter takes effect cleanly
+    cur.execute(
+        "UPDATE possessions SET expected_points = NULL WHERE season = ANY(%s)",
+        (seasons,)
+    )
+    conn.commit()
+    log.info("  Reset expected_points to NULL for all possessions in specified seasons")
+
     cur.execute("""
         SELECT id, period, start_clock_seconds, game_seconds_start, score_margin_offense
         FROM possessions
         WHERE expected_points IS NULL
           AND season = ANY(%s)
+          AND NOT (
+            ABS(score_margin_offense) > 15
+            AND game_seconds_start > 3 * 720
+          )
         ORDER BY id
     """, (seasons,))
     rows = cur.fetchall()
-    log.info(f"  {len(rows):,} possessions to backfill")
+    log.info(f"  {len(rows):,} non-garbage possessions to backfill")
 
     if not rows:
         log.info("  Nothing to backfill.")

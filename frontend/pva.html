@@ -38,7 +38,7 @@
   --ff-sans:  'Instrument Sans', system-ui, sans-serif;
   --ff-mono:  'DM Mono', 'Courier New', monospace;
   --nav-h: 56px;
-  --controls-h: 53px;
+  --controls-h: 54px; /* fallback; JS overrides this with actual rendered height */
   font-size: 15px;
 }
 html { scroll-behavior: smooth; overflow-x: clip; -webkit-text-size-adjust: 100%; }
@@ -115,6 +115,7 @@ nav {
   display: flex; align-items: center; gap: 20px;
   padding: 14px 40px; border-bottom: 1px solid var(--rule);
   background: var(--paper2); flex-wrap: wrap;
+  position: sticky; top: var(--nav-h); z-index: 10;
 }
 .ctrl-group { display: flex; align-items: center; gap: 8px; }
 .ctrl-label {
@@ -171,11 +172,9 @@ table.pva {
   width: 100%; border-collapse: collapse;
   font-family: var(--ff-sans); font-size: 13px; min-width: 760px;
 }
-table.pva thead {
+table.pva thead th {
   position: sticky; top: calc(var(--nav-h) + var(--controls-h)); z-index: 5;
   background: var(--paper);
-}
-table.pva thead th {
   font-family: var(--ff-mono); font-size: 10px;
   letter-spacing: 0.07em; text-transform: uppercase; font-weight: 500;
   padding: 10px 12px 8px; color: var(--ink3);
@@ -437,6 +436,16 @@ table.pva tbody td:first-child { text-align: left; padding-left: 40px; }
 
 <script src="/season-config.js"></script>
 <script>
+// ─── Sync --controls-h to actual rendered height ──────────────────────────────
+function syncControlsHeight() {
+  const bar = document.querySelector('.controls-bar');
+  if (bar) {
+    document.documentElement.style.setProperty('--controls-h', bar.offsetHeight + 'px');
+  }
+}
+syncControlsHeight();
+window.addEventListener('resize', syncControlsHeight);
+
 // ─── State ────────────────────────────────────────────────────────────────────
 let allPlayers  = [];
 let sortCol     = 'total_pva_per_100';

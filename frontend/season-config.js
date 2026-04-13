@@ -23,9 +23,10 @@
   function computeCurrentSeasonType() {
     const now = new Date();
     const m = now.getMonth() + 1, d = now.getDate();
-    if ((m === 4 && d >= 20) || m === 5 || m === 6) return 'Playoffs';
+    if (m === 5 || m === 6 || (m === 4 && d >= 20)) return 'Playoffs';
+    if (m === 4 && d >= 13) return 'PlayIn';
     return 'Regular Season';
-  }
+}
 
   /**
    * Populate a <select> with distinct seasons fetched from /api/seasons.

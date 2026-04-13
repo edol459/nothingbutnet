@@ -49,11 +49,12 @@ def get_current_season() -> str:
 
 
 def get_current_season_type() -> str:
-    """Returns 'Playoffs' during late April–June, else 'Regular Season'."""
     today = date.today()
     m, d = today.month, today.day
-    if (m == 4 and d >= 20) or m in (5, 6):
+    if m in (5, 6) or (m == 4 and d >= 20):
         return "Playoffs"
+    if m == 4 and d >= 13:
+        return "PlayIn"
     return "Regular Season"
 
 
