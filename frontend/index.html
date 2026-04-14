@@ -1009,12 +1009,9 @@ async function loadScoreboard() {
   gameStrip.innerHTML = '<div class="strip-state"><span class="spin"></span> Loading…</div>';
 
   try {
-    const qs = SB.date ? `?date=${SB.date}` : '';
+    const qs = `?date=${SB.date || SB.today}`;
     // For today, reuse the preload promise fired in <head> (already in-flight or resolved)
-    const fetchPromise = (!SB.date && window._sbPreload)
-      ? window._sbPreload.then(r => r.clone())
-      : fetch(`${API}/api/scoreboard${qs}`);
-    const res = await fetchPromise;
+    const res = await fetch(`${API}/api/scoreboard${qs}`);
     const data = await res.json();
     const games = data.games || [];
 
