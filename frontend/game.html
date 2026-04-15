@@ -251,6 +251,82 @@ table.box-table tfoot td:first-child{text-align:left;}
 .btn-load-more:hover { border-color: var(--orange); color: var(--orange); }
 .reviews-loading { padding: 32px 0; text-align: center; font-family: var(--ff-mono); font-size: 12px; color: var(--ink4); }
 
+/* ── Stat tags ────────────────────────────────────────────────── */
+.review-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.review-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--paper); border: 1px solid var(--rule);
+  border-radius: 20px; padding: 2px 8px 2px 3px;
+  font-family: var(--ff-mono); font-size: 11px; color: var(--ink2);
+}
+.tag-headshot { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; background: var(--paper3); flex-shrink: 0; }
+.tag-val { font-weight: 600; color: var(--ink); }
+.tag-lbl { color: var(--ink3); margin-left: 1px; }
+.write-tags-row {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 5px; margin-bottom: 10px; min-height: 26px;
+}
+.write-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--paper); border: 1px solid var(--rule);
+  border-radius: 20px; padding: 2px 5px 2px 3px;
+  font-family: var(--ff-mono); font-size: 11px; color: var(--ink2);
+}
+.write-tag-x {
+  background: none; border: none; cursor: pointer;
+  color: var(--ink4); font-size: 14px; line-height: 1; padding: 0 1px;
+}
+.write-tag-x:hover { color: var(--red); }
+.btn-add-tag {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 1.5px dashed var(--ink4); background: none; cursor: pointer;
+  color: var(--ink4); font-size: 16px; line-height: 1;
+  transition: border-color 0.15s, color 0.15s;
+}
+.btn-add-tag:hover { border-color: var(--orange); color: var(--orange); }
+/* Tag picker popover */
+.tag-picker {
+  position: fixed; z-index: 9000; width: 272px;
+  background: var(--paper); border: 1px solid var(--rule);
+  border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.15);
+  overflow: hidden;
+}
+.tag-picker-tabs { display: flex; border-bottom: 1px solid var(--rule); }
+.tag-picker-tab {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  gap: 5px; padding: 9px 10px; cursor: pointer;
+  font-family: var(--ff-mono); font-size: 11px; font-weight: 600;
+  color: var(--ink3); background: var(--paper2); border: none;
+  border-bottom: 2px solid transparent; transition: background 0.12s, color 0.12s;
+}
+.tag-picker-tab.active { background: var(--paper); color: var(--ink); border-bottom-color: var(--orange); }
+.tag-picker-body { max-height: 232px; overflow-y: auto; }
+.tag-picker-back {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px; border-bottom: 1px solid var(--paper3);
+  cursor: pointer; font-size: 12px; color: var(--ink3);
+  background: none; border-top: none; border-left: none; border-right: none;
+  width: 100%; text-align: left; font-family: var(--ff-sans);
+}
+.tag-picker-back:hover { color: var(--ink); background: var(--paper2); }
+.tag-picker-player {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px; cursor: pointer; transition: background 0.1s;
+}
+.tag-picker-player:hover { background: var(--paper2); }
+.tp-headshot { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: var(--paper3); flex-shrink: 0; }
+.tp-name { font-size: 12px; color: var(--ink); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tp-mins { font-family: var(--ff-mono); font-size: 10px; color: var(--ink4); }
+.tag-picker-stat {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 14px; cursor: pointer; transition: background 0.1s;
+}
+.tag-picker-stat:hover { background: var(--paper2); }
+.tps-label { font-size: 12px; color: var(--ink2); }
+.tps-val { font-family: var(--ff-mono); font-size: 12px; font-weight: 600; color: var(--ink); }
+.tag-picker-msg { padding: 20px 12px; text-align: center; font-family: var(--ff-mono); font-size: 11px; color: var(--ink4); }
+
 /* ── Loading / Error ─────────────────────────────────────────── */
 .loading-state,.error-state{display:flex;align-items:center;justify-content:center;padding:60px 24px;color:var(--ink4);font-family:var(--ff-mono);font-size:12px;gap:8px;}
 .loading-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--rule);border-top-color:var(--orange);border-radius:50%;animation:spin .7s linear infinite;}
@@ -703,6 +779,13 @@ function nbaTeamId(abbr) { return TEAM_IDS[abbr] || 0; }
 const STAR_ON  = '#00C030';
 const STAR_OFF = '#d8d5cf';
 let _reviewUser    = null;
+let _currentTags   = [];
+let _boxscoreData  = null;
+let _pickerEl      = null;
+let _pickerPlayers = [];
+let _pickerStats   = [];
+let _pickerActiveTeam      = null;
+let _pickerSelectedPlayer  = null;
 let _pickedRating  = 0;
 let _reviewOffset  = 0;
 let _reviewTotal   = 0;
@@ -766,6 +849,8 @@ async function loadReviewsPanel(append = false) {
 
   if (!append) {
     _reviewOffset = 0;
+    _currentTags  = [];
+    closeTagPicker();
     container.innerHTML = '<div class="reviews-loading">Loading…</div>';
     panel.dataset.loaded = '1';
   }
@@ -822,6 +907,7 @@ function renderReviewsContent(g, reviews, hasMore) {
         <div class="reviews-write-title" id="write-title">Rate This Game</div>
         <div class="star-picker-inline" id="star-picker-inline"></div>
         <textarea class="review-write-textarea" id="review-textarea" placeholder="Write a review (optional)…"></textarea>
+        <div class="write-tags-row" id="write-tags-row"></div>
         <div class="reviews-write-actions">
           <button class="btn-review-submit" id="btn-review-submit">Submit</button>
         </div>
@@ -870,6 +956,7 @@ function reviewItemHTML(r) {
         <span class="review-date">${fmtShortDate(r.created_at)}</span>
       </div>
       ${r.review_text ? `<p class="review-text">${r.review_text}</p>` : ''}
+      ${r.tags && r.tags.length ? `<div class="review-tags">${r.tags.map(t => tagPillHTML(t)).join('')}</div>` : ''}
       <div class="review-footer">
         <button class="btn-like${r.liked_by_me ? ' liked' : ''}" data-review-id="${r.id}" title="Like this review">
           ${heartIcon}<span class="like-count">${likeLabel}</span>
@@ -919,6 +1006,9 @@ function wireWriteSection() {
 
   if (!_reviewUser) return;
 
+  // Initial empty tag row
+  renderWriteTags();
+
   // Check if user already reviewed — pre-fill
   fetch(`/api/games/${GAME_ID}/reviews?limit=100`)
     .then(r => r.json())
@@ -940,6 +1030,11 @@ function wireWriteSection() {
           del.textContent = 'Delete review';
           del.addEventListener('click', deleteReview);
           btn.parentElement.appendChild(del);
+        }
+        // Pre-fill tags
+        if (existing.tags && existing.tags.length) {
+          _currentTags = existing.tags.slice();
+          renderWriteTags();
         }
       }
     }).catch(() => {});
@@ -1017,7 +1112,7 @@ async function submitReview() {
     const r = await fetch(`/api/games/${GAME_ID}/reviews`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({rating: _pickedRating, review_text: text}),
+      body: JSON.stringify({rating: _pickedRating, review_text: text, tags: _currentTags}),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error);
@@ -1047,6 +1142,188 @@ function showReviewToast(msg) {
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 2600);
+}
+
+// ── Stat tag system ────────────────────────────────────────
+const STAT_OPTS = [
+  { key: 'points',            label: 'PTS', fmt: s => s.points },
+  { key: 'reboundsTotal',     label: 'REB', fmt: s => s.reboundsTotal },
+  { key: 'assists',           label: 'AST', fmt: s => s.assists },
+  { key: 'steals',            label: 'STL', fmt: s => s.steals },
+  { key: 'blocks',            label: 'BLK', fmt: s => s.blocks },
+  { key: 'turnovers',         label: 'TOV', fmt: s => s.turnovers },
+  { key: 'threePointersMade', label: '3PM', fmt: s => `${s.threePointersMade}/${s.threePointersAttempted}` },
+  { key: 'fieldGoalsMade',    label: 'FG',  fmt: s => `${s.fieldGoalsMade}/${s.fieldGoalsAttempted}` },
+  { key: 'freeThrowsMade',    label: 'FT',  fmt: s => `${s.freeThrowsMade}/${s.freeThrowsAttempted}` },
+  { key: 'plusMinusPoints',   label: '+/-', fmt: s => { const v = +s.plusMinusPoints; return v >= 0 ? `+${v}` : `${v}`; } },
+];
+
+function _esc(str) {
+  return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function _headshotUrl(pid) { return `https://cdn.nba.com/headshots/nba/latest/260x190/${pid}.png`; }
+function _teamLogoUrl(abbr) {
+  const id = TEAM_IDS[abbr];
+  return id ? `https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg` : '';
+}
+function _parseMins(str) {
+  const m = String(str || '').match(/PT(\d+)M/);
+  return m ? parseInt(m[1]) : 0;
+}
+
+function tagPillHTML(t) {
+  return `<span class="review-tag">
+    <img class="tag-headshot" src="${_headshotUrl(t.player_id)}" onerror="this.style.display='none'" alt="">
+    <span class="tag-val">${_esc(t.stat_display)}</span>
+    <span class="tag-lbl">${_esc(t.stat_label)}</span>
+  </span>`;
+}
+
+function renderWriteTags() {
+  const row = document.getElementById('write-tags-row');
+  if (!row) return;
+  let html = _currentTags.map((t, i) => `
+    <span class="write-tag">
+      <img class="tag-headshot" src="${_headshotUrl(t.player_id)}" onerror="this.style.display='none'" alt="">
+      <span class="tag-val">${_esc(t.stat_display)}</span>
+      <span class="tag-lbl">${_esc(t.stat_label)}</span>
+      <button class="write-tag-x" data-tag-idx="${i}" title="Remove">×</button>
+    </span>`).join('');
+  if (_currentTags.length < 5) {
+    html += `<button class="btn-add-tag" id="btn-add-tag" title="Add a stat context tag">+</button>`;
+  }
+  row.innerHTML = html;
+  const addBtn = document.getElementById('btn-add-tag');
+  if (addBtn) addBtn.addEventListener('click', e => { e.stopPropagation(); openTagPicker(addBtn); });
+  row.querySelectorAll('.write-tag-x').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      _currentTags.splice(parseInt(btn.dataset.tagIdx), 1);
+      renderWriteTags();
+    });
+  });
+}
+
+function closeTagPicker() {
+  if (_pickerEl) { _pickerEl.remove(); _pickerEl = null; }
+  document.removeEventListener('click', _pickerOutsideClick, true);
+}
+
+function _pickerOutsideClick(e) {
+  if (_pickerEl && !_pickerEl.contains(e.target)) {
+    const addBtn = document.getElementById('btn-add-tag');
+    if (addBtn && addBtn.contains(e.target)) return;
+    closeTagPicker();
+  }
+}
+
+function _positionPicker(anchor) {
+  if (!_pickerEl || !anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  let top = rect.bottom + 6, left = rect.left;
+  if (left + 272 > window.innerWidth - 8) left = window.innerWidth - 272 - 8;
+  if (left < 8) left = 8;
+  if (top + 290 > window.innerHeight - 8) top = rect.top - 290 - 6;
+  _pickerEl.style.top = top + 'px';
+  _pickerEl.style.left = left + 'px';
+}
+
+async function openTagPicker(anchor) {
+  closeTagPicker();
+  _pickerEl = document.createElement('div');
+  _pickerEl.className = 'tag-picker';
+  _pickerEl.innerHTML = `<div class="tag-picker-msg">Loading…</div>`;
+  document.body.appendChild(_pickerEl);
+  _positionPicker(anchor);
+  setTimeout(() => document.addEventListener('click', _pickerOutsideClick, true), 10);
+
+  if (!_boxscoreData) {
+    const res = await fetch(`/api/live/boxscore/${GAME_ID}`);
+    if (res.ok) _boxscoreData = await res.json();
+  }
+  if (!_boxscoreData) {
+    _pickerEl.innerHTML = `<div class="tag-picker-msg">Could not load boxscore.</div>`;
+    return;
+  }
+  if (!_pickerActiveTeam) _pickerActiveTeam = _boxscoreData.awayTeam?.teamTricode;
+  _pickerSelectedPlayer = null;
+  _pickerEl.addEventListener('click', _pickerClick);
+  _renderPickerContent();
+}
+
+function _pickerClick(e) {
+  const tab = e.target.closest('.tag-picker-tab');
+  if (tab) { _pickerActiveTeam = tab.dataset.team; _pickerSelectedPlayer = null; _renderPickerContent(); return; }
+  const back = e.target.closest('.tag-picker-back');
+  if (back) { _pickerSelectedPlayer = null; _renderPickerContent(); return; }
+  const playerRow = e.target.closest('.tag-picker-player');
+  if (playerRow) { _pickerSelectedPlayer = _pickerPlayers[parseInt(playerRow.dataset.idx)]; _renderPickerContent(); return; }
+  const statRow = e.target.closest('.tag-picker-stat');
+  if (statRow) { _confirmStatTag(parseInt(statRow.dataset.idx)); return; }
+}
+
+function _renderPickerContent() {
+  if (!_pickerEl || !_boxscoreData) return;
+  const away = _boxscoreData.awayTeam, home = _boxscoreData.homeTeam;
+  const isAway = _pickerActiveTeam === away.teamTricode;
+  const activeTeam = isAway ? away : home;
+
+  const tabsHtml = `<div class="tag-picker-tabs">
+    <button class="tag-picker-tab${isAway?' active':''}" data-team="${_esc(away.teamTricode)}">
+      <img src="${_teamLogoUrl(away.teamTricode)}" width="16" height="16" style="object-fit:contain" onerror="this.style.display='none'"> ${_esc(away.teamTricode)}
+    </button>
+    <button class="tag-picker-tab${!isAway?' active':''}" data-team="${_esc(home.teamTricode)}">
+      <img src="${_teamLogoUrl(home.teamTricode)}" width="16" height="16" style="object-fit:contain" onerror="this.style.display='none'"> ${_esc(home.teamTricode)}
+    </button>
+  </div>`;
+
+  if (_pickerSelectedPlayer) {
+    const p = _pickerSelectedPlayer, s = p.statistics || {};
+    _pickerStats = STAT_OPTS.map(opt => {
+      let val; try { val = String(opt.fmt(s)); } catch { val = '—'; }
+      return { ...opt, display: val };
+    });
+    const statsHtml = _pickerStats.map((opt, i) =>
+      `<div class="tag-picker-stat" data-idx="${i}">
+        <span class="tps-label">${_esc(opt.label)}</span>
+        <span class="tps-val">${_esc(opt.display)}</span>
+      </div>`).join('');
+    _pickerEl.innerHTML = `${tabsHtml}
+      <div class="tag-picker-body">
+        <button class="tag-picker-back">← ${_esc(p.name)}</button>
+        ${statsHtml}
+      </div>`;
+  } else {
+    _pickerPlayers = (activeTeam.players || []).filter(p => _parseMins(p.statistics?.minutes) >= 1);
+    const playersHtml = _pickerPlayers.length
+      ? _pickerPlayers.map((p, i) =>
+          `<div class="tag-picker-player" data-idx="${i}">
+            <img class="tp-headshot" src="${_headshotUrl(p.personId)}" onerror="this.src=''" alt="">
+            <span class="tp-name">${_esc(p.name)}</span>
+            <span class="tp-mins">${_parseMins(p.statistics?.minutes)}m</span>
+          </div>`).join('')
+      : `<div class="tag-picker-msg">No players found.</div>`;
+    _pickerEl.innerHTML = `${tabsHtml}<div class="tag-picker-body">${playersHtml}</div>`;
+  }
+  _pickerEl.addEventListener('click', _pickerClick);
+}
+
+function _confirmStatTag(idx) {
+  const opt = _pickerStats[idx], player = _pickerSelectedPlayer;
+  if (!opt || !player) return;
+  if (_currentTags.length >= 5) { showReviewToast('Max 5 tags per review.'); closeTagPicker(); return; }
+  const dup = _currentTags.find(t => t.player_id === String(player.personId) && t.stat_label === opt.label);
+  if (!dup) {
+    _currentTags.push({
+      player_id:    String(player.personId),
+      player_name:  player.name,
+      team_abbr:    _pickerActiveTeam,
+      stat_label:   opt.label,
+      stat_display: opt.display,
+    });
+  }
+  renderWriteTags();
+  closeTagPicker();
 }
 
 // ── Nav auth ──────────────────────────────────────────────

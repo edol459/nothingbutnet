@@ -152,6 +152,54 @@ def me():
     return jsonify({"user": user})
 
 
+@auth_bp.route("/dev-login")
+def dev_login():
+    """
+    Local-only shortcut: sets the session without going through Google OAuth.
+    Disabled in production — returns 403 if FLASK_ENV == 'production'.
+
+    Usage:
+      GET /auth/dev-login                  → signs in as the first user in the DB
+      GET /auth/dev-login?email=you@x.com  → signs in as a specific user by email
+      GET /auth/dev-login?next=/reviews    → redirects there after sign-in
+    """
+    if os.getenv("FLASK_ENV") == "production":
+        return jsonify({"error": "Dev login is disabled in production"}), 403
+
+    target_email = request.args.get("email", "").strip()
+    next_url     = request.args.get("next", "/")
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        if target_email:
+            cur.execute(
+                "SELECT id, google_id, email, display_name FROM users WHERE email = %s LIMIT 1",
+                (target_email,)
+            )
+        else:
+            cur.execute(
+                "SELECT id, google_id, email, display_name FROM users ORDER BY id LIMIT 1"
+            )
+        user = cur.fetchone()
+        cur.close(); conn.close()
+    except Exception as e:
+        return jsonify({"error": f"DB error: {e}"}), 500
+
+    if not user:
+        return jsonify({"error": "No users in DB yet. Create one via Google OAuth first, then use dev-login."}), 404
+
+    session["user"] = {
+        "id":           user["id"],
+        "google_id":    user["google_id"],
+        "email":        user["email"],
+        "display_name": user["display_name"],
+        "created_at":   "",
+    }
+    session.permanent = True
+    return redirect(next_url)
+
+
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
     """Clear the session (fetch-based)."""

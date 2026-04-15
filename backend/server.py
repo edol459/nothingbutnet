@@ -1626,6 +1626,7 @@ def _format_review(r: dict) -> dict:
         "updated_at":     str(r.get("updated_at", "")),
         "like_count":     int(r.get("like_count", 0)),
         "liked_by_me":    bool(r.get("liked_by_me", False)),
+        "tags":           r.get("tags") or [],
     }
 
 
@@ -1797,9 +1798,31 @@ def submit_review(game_id):
     if review_text and _contains_slur(review_text):
         return jsonify({"error": "Your review contains language that isn't allowed. Please edit and resubmit."}), 400
 
+    # ── Sanitize tags ─────────────────────────────────────────────
+    import json as _json
+    raw_tags = body.get("tags") or []
+    if not isinstance(raw_tags, list):
+        raw_tags = []
+    clean_tags = []
+    for t in raw_tags[:5]:
+        if isinstance(t, dict):
+            clean_tags.append({
+                "player_id":    str(t.get("player_id", ""))[:20],
+                "player_name":  str(t.get("player_name", ""))[:60],
+                "team_abbr":    str(t.get("team_abbr", ""))[:5],
+                "stat_label":   str(t.get("stat_label", ""))[:10],
+                "stat_display": str(t.get("stat_display", ""))[:20],
+            })
+
     try:
         conn = get_conn()
         cur  = conn.cursor()
+
+        # One-time idempotent migration for the tags column
+        cur.execute("""
+            ALTER TABLE game_reviews
+            ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'
+        """)
 
         cur.execute("SELECT game_id FROM games WHERE game_id = %s", (game_id,))
         if not cur.fetchone():
@@ -1807,14 +1830,15 @@ def submit_review(game_id):
             return jsonify({"error": "Game not found"}), 404
 
         cur.execute("""
-            INSERT INTO game_reviews (user_id, game_id, rating, review_text)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO game_reviews (user_id, game_id, rating, review_text, tags)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (user_id, game_id) DO UPDATE SET
                 rating      = EXCLUDED.rating,
                 review_text = EXCLUDED.review_text,
+                tags        = EXCLUDED.tags,
                 updated_at  = NOW()
             RETURNING *
-        """, (user["id"], game_id, rating, review_text))
+        """, (user["id"], game_id, rating, review_text, _json.dumps(clean_tags)))
 
         review = dict(cur.fetchone())
         cur.execute("SELECT avatar_url, favorite_team FROM users WHERE id = %s", (user["id"],))
@@ -2035,6 +2059,7 @@ def get_recent_reviews():
             SELECT
                 gr.id, gr.game_id, gr.rating, gr.review_text,
                 gr.created_at, gr.updated_at,
+                COALESCE(gr.tags, '[]'::jsonb) AS tags,
                 u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team,
                 g.game_date, g.home_team_abbr, g.away_team_abbr,
                 g.home_score, g.away_score
