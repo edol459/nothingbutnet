@@ -591,8 +591,10 @@ def _fetch_boxscores_parallel(game_ids, timeout=8):
 @app.route("/api/scoreboard")
 def get_scoreboard():
     """
-    No ?date  → today (with 6 AM ET cutoff) via ScoreboardV3.
-    ?date=YYYY-MM-DD → specific day via ScoreboardV3.
+    No ?date  → today (with 6 AM ET cutoff).
+                Primary: NBA live CDN (fast, works on cloud IPs).
+                Fallback: ScoreboardV3 (works locally, may be blocked on production).
+    ?date=YYYY-MM-DD → DB first for past dates, then ScoreboardV3.
     Results are cached: past dates forever, today for 30 s, future for 60 min.
     """
     date = request.args.get("date", "").strip()
@@ -612,6 +614,39 @@ def get_scoreboard():
     if is_today and _today_sb_cache.get("date") == _game_today:
         if _time.time() - _today_sb_cache.get("ts", 0) < 30:
             return jsonify(_today_sb_cache["payload"])
+
+    # Today — try the NBA live CDN first (not rate-limited on cloud IPs)
+    if is_today:
+        try:
+            cdn_url  = "https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json"
+            cdn_resp = _requests.get(cdn_url, headers=_CDN_HEADERS, timeout=8)
+            cdn_resp.raise_for_status()
+            cdn_data  = cdn_resp.json()
+            cdn_games = cdn_data.get("scoreboard", {}).get("games", [])
+            cdn_date  = cdn_data.get("scoreboard", {}).get("gameDate", "")
+            if cdn_date == _game_today and cdn_games:
+                away_k = "awayTeam"; home_k = "homeTeam"
+                games = []
+                for g in cdn_games:
+                    away = g.get(away_k, {}); home = g.get(home_k, {})
+                    games.append({
+                        "gameId":         g.get("gameId", ""),
+                        "gameStatus":     g.get("gameStatus", 1),
+                        "gameStatusText": g.get("gameStatusText", ""),
+                        "period":         g.get("period", 0),
+                        "gameClock":      g.get("gameClock", ""),
+                        "gameTimeUTC":    g.get("gameTimeUTC", ""),
+                        "away": {"abbr": away.get("teamTricode",""), "score": int(away.get("score",0) or 0),
+                                 "wins": away.get("wins"), "losses": away.get("losses")},
+                        "home": {"abbr": home.get("teamTricode",""), "score": int(home.get("score",0) or 0),
+                                 "wins": home.get("wins"), "losses": home.get("losses")},
+                    })
+                payload = {"games": games, "date": cdn_date}
+                _today_sb_cache.update({"payload": payload, "ts": _time.time(), "date": _game_today})
+                return jsonify(payload)
+            # CDN is still on a past date — fall through to ScoreboardV3
+        except Exception:
+            pass  # CDN failed — fall through to ScoreboardV3
 
     # Future dates — cache for 60 min
     if not is_past and not is_today and date in _future_sb_cache:
