@@ -1008,8 +1008,7 @@ async function loadScoreboard() {
   gameStrip.innerHTML = '<div class="strip-state"><span class="spin"></span> Loading…</div>';
 
   try {
-    const qs = `?date=${SB.date || SB.today}`;
-    // For today, reuse the preload promise fired in <head> (already in-flight or resolved)
+    const qs = SB.date ? `?date=${SB.date}` : '';
     const res = await fetch(`${API}/api/scoreboard${qs}`);
     const data = await res.json();
     const games = data.games || [];
@@ -1082,7 +1081,8 @@ function buildCard(g) {
     const clock = fmtClock(g.gameClock || '');
     statusHtml = `<div class="card-status live"><div class="live-pip"></div>${pLabel}${clock ? ' · '+clock : ''}</div>`;
   } else if (isFinal) {
-    statusHtml = `<div class="card-status">Final</div>`;
+    const wentOT = (g.period > 4) || (g.gameStatusText || '').toUpperCase().includes('OT');
+    statusHtml = `<div class="card-status">Final${wentOT ? '/OT' : ''}</div>`;
   } else {
     // Upcoming — show tip-off time
     const tip = fmtTipoff(g.gameTimeUTC || '');
