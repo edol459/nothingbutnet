@@ -818,28 +818,6 @@ def get_scoreboard():
                          "wins": home_wins, "losses": home_losses},
             })
 
-        # Cross-check: override any game ScoreboardV3 still calls live
-        # if it's already stored as final in the DB.
-        live_ids = [g["gameId"] for g in games if g["gameStatus"] == 2]
-        if live_ids:
-            try:
-                conn = get_conn()
-                cur  = conn.cursor()
-                cur.execute(
-                    "SELECT game_id, home_score, away_score FROM games WHERE game_id = ANY(%s)",
-                    (live_ids,)
-                )
-                for row in cur.fetchall():
-                    for g in games:
-                        if g["gameId"] == row["game_id"]:
-                            g["gameStatus"]     = 3
-                            g["gameStatusText"] = "Final"
-                            g["home"]["score"]  = row["home_score"]
-                            g["away"]["score"]  = row["away_score"]
-                cur.close(); conn.close()
-            except Exception:
-                pass
-
         payload = {"games": games, "date": date}
         if is_past:
             _past_sb_cache[date] = payload
