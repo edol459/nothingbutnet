@@ -895,94 +895,42 @@ def preview_team_stats(abbr):
 @app.route("/api/preview/h2h/<away>/<home>")
 def preview_h2h(away, home):
     """
-    Returns last 5 head-to-head games between two teams using nba_api.
-    Uses TeamGameLog for the away team and filters for games vs the home team.
+    Returns last 5 head-to-head games between two teams from the local DB.
     """
     away = away.upper()
     home = home.upper()
 
-    # Build a reverse lookup: abbr → team_id
-    _TEAM_IDS = {
-        "ATL":1610612737,"BOS":1610612738,"BKN":1610612751,"CHA":1610612766,
-        "CHI":1610612741,"CLE":1610612739,"DAL":1610612742,"DEN":1610612743,
-        "DET":1610612765,"GSW":1610612744,"HOU":1610612745,"IND":1610612754,
-        "LAC":1610612746,"LAL":1610612747,"MEM":1610612763,"MIA":1610612748,
-        "MIL":1610612749,"MIN":1610612750,"NOP":1610612740,"NYK":1610612752,
-        "OKC":1610612760,"ORL":1610612753,"PHI":1610612755,"PHX":1610612756,
-        "POR":1610612757,"SAC":1610612758,"SAS":1610612759,"TOR":1610612761,
-        "UTA":1610612762,"WAS":1610612764,
-    }
-
-    away_id = _TEAM_IDS.get(away)
-    home_id = _TEAM_IDS.get(home)
-    if not away_id or not home_id:
-        return jsonify({"games": [], "error": "unknown team abbreviation"})
-
     try:
-        from nba_api.stats.endpoints import teamgamelog
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT game_id, game_date, home_team_abbr, away_team_abbr,
+                   home_score, away_score
+            FROM games
+            WHERE status = 'Final'
+              AND (
+                    (home_team_abbr = %s AND away_team_abbr = %s)
+                 OR (home_team_abbr = %s AND away_team_abbr = %s)
+              )
+            ORDER BY game_date DESC
+            LIMIT 5
+        """, (home, away, away, home))
+        rows = cur.fetchall()
+        conn.close()
 
-        # Pull last 2 seasons to get enough H2H games
         games_out = []
-        cur_s = get_current_season()
-        prev_s = f"{int(cur_s[:4]) - 1}-{cur_s[:4][2:]}"
-        for season in [cur_s, prev_s]:
-            if len(games_out) >= 5:
-                break
-            try:
-                log = teamgamelog.TeamGameLog(
-                    team_id=away_id,
-                    season=season,
-                    season_type_all_star="Regular Season",
-                )
-                df = log.get_data_frames()[0]
-            except Exception:
-                continue
+        for row in rows:
+            game_date = row["game_date"].strftime("%Y-%m-%d") if hasattr(row["game_date"], "strftime") else str(row["game_date"])
+            games_out.append({
+                "game_id":   row["game_id"],
+                "date":      game_date,
+                "away_abbr": row["away_team_abbr"],
+                "home_abbr": row["home_team_abbr"],
+                "away_pts":  row["away_score"],
+                "home_pts":  row["home_score"],
+            })
 
-            # Filter for matchups vs home team
-            # MATCHUP looks like "ATL vs. BOS" or "ATL @ BOS"
-            mask = df["MATCHUP"].str.contains(home, na=False)
-            filtered = df[mask].head(5 - len(games_out))
-
-            for _, row in filtered.iterrows():
-                matchup = str(row.get("MATCHUP", ""))
-                is_home = "vs." in matchup  # away team was home if "vs."
-                away_abbr = away if not is_home else home
-                home_abbr = home if not is_home else away
-                away_pts  = int(row.get("PTS", 0) or 0)
-                # We only have the away team's score from TeamGameLog
-                # Derive home score from win/loss + point diff if available
-                # PTS = points scored by the logged team
-                # Use WL and plus_minus to get opponent score
-                plus_minus = int(row.get("PLUS_MINUS", 0) or 0)
-                opp_pts = away_pts - plus_minus  # opponent scored away_pts - plus_minus
-
-                if is_home:
-                    # away team was actually playing at home
-                    final_away_pts = opp_pts
-                    final_home_pts = away_pts
-                else:
-                    final_away_pts = away_pts
-                    final_home_pts = opp_pts
-
-                game_date = str(row.get("GAME_DATE", ""))
-                # Convert "DEC 25, 2025" → "2025-12-25"
-                try:
-                    from datetime import datetime as _dt2
-                    parsed = _dt2.strptime(game_date, "%b %d, %Y")
-                    game_date = parsed.strftime("%Y-%m-%d")
-                except Exception:
-                    pass
-
-                games_out.append({
-                    "game_id":   str(row.get("Game_ID", "")),
-                    "date":      game_date,
-                    "away_abbr": away_abbr,
-                    "home_abbr": home_abbr,
-                    "away_pts":  final_away_pts,
-                    "home_pts":  final_home_pts,
-                })
-
-        return jsonify({"games": games_out[:5], "away": away, "home": home})
+        return jsonify({"games": games_out, "away": away, "home": home})
 
     except Exception as e:
         return jsonify({"games": [], "error": str(e)}), 200
