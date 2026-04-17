@@ -1130,13 +1130,19 @@ def _upsert_game_from_boxscore(game_id: str, game: dict):
         away_score = int(away.get("score", 0) or 0)
         home_score = int(home.get("score", 0) or 0)
  
-        # Parse game date from gameTimeUTC or gameId
-        # gameId format: 0022501109 — first 8 chars after leading 00 = season/type,
-        # remainder doesn't encode date. Use gameTimeUTC instead.
+        # Parse game date from gameTimeUTC, converted to ET.
+        # NBA game dates are defined in ET — a 10 PM PT tip-off is still "that day"
+        # in ET, but its UTC timestamp flips to the next calendar day, so we must
+        # localise to ET before extracting the date.
         game_time_utc = game.get("gameTimeUTC", "")
         if game_time_utc:
             from datetime import datetime as _dt2
-            game_date = _dt2.fromisoformat(game_time_utc.replace("Z", "+00:00")).date()
+            try:
+                from zoneinfo import ZoneInfo as _ZI
+            except ImportError:
+                from backports.zoneinfo import ZoneInfo as _ZI
+            utc_dt    = _dt2.fromisoformat(game_time_utc.replace("Z", "+00:00"))
+            game_date = utc_dt.astimezone(_ZI("America/New_York")).date()
         else:
             # Fallback: today's date (close enough for recent games)
             from datetime import date as _date2
@@ -1942,6 +1948,56 @@ def get_top_rated_games():
         games = [_format_game(dict(r)) for r in cur.fetchall()]
         cur.close(); conn.close()
         return jsonify({"games": games})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/reviews/most-liked
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/reviews/most-liked")
+def get_most_liked_reviews():
+    limit  = min(int(request.args.get("limit", 20)), 100)
+    offset = int(request.args.get("offset", 0))
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT
+                gr.id, gr.game_id, gr.rating, gr.review_text,
+                gr.created_at, gr.updated_at,
+                COALESCE(gr.tags, '[]'::jsonb) AS tags,
+                gr.attended,
+                u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team,
+                g.game_date, g.home_team_abbr, g.away_team_abbr,
+                g.home_score, g.away_score,
+                COUNT(rl.review_id) AS like_count
+            FROM game_reviews gr
+            JOIN users u  ON gr.user_id = u.id
+            JOIN games g  ON gr.game_id = g.game_id
+            LEFT JOIN review_likes rl ON rl.review_id = gr.id
+            GROUP BY gr.id, u.id, g.game_id
+            ORDER BY like_count DESC, gr.created_at DESC
+            LIMIT %s OFFSET %s
+        """, (limit, offset))
+        rows = cur.fetchall()
+        cur.execute("SELECT COUNT(*) FROM game_reviews")
+        total = cur.fetchone()["count"]
+        cur.close(); conn.close()
+        result = []
+        for r in rows:
+            d = dict(r)
+            result.append({
+                **_format_review(d),
+                "game_date":      str(d["game_date"]),
+                "home_team_abbr": d["home_team_abbr"],
+                "away_team_abbr": d["away_team_abbr"],
+                "home_score":     d["home_score"],
+                "away_score":     d["away_score"],
+            })
+        return jsonify({"reviews": result, "total": total,
+                        "has_more": offset + len(result) < total})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

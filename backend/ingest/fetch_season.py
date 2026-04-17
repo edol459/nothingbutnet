@@ -718,13 +718,18 @@ def build_player_rows(data, season, season_type):
             'pfd':         safe_float(row.get('PFD')),
             'fgm':         safe_float(row.get('FGM')),
             'fga':         safe_float(row.get('FGA')),
-            'fg_pct':      safe_float(row.get('FG_PCT')),
+            # Compute pct from averaged makes/attempts — avoids the bug where
+            # games with 0 attempts return FG_PCT=0.0, dragging the mean down.
+            'fg_pct':      (safe_float(row.get('FGM')) / safe_float(row.get('FGA')))
+                           if safe_float(row.get('FGA')) else None,
             'fg3m':        safe_float(row.get('FG3M')),
             'fg3a':        safe_float(row.get('FG3A')),
-            'fg3_pct':     safe_float(row.get('FG3_PCT')),
+            'fg3_pct':     (safe_float(row.get('FG3M')) / safe_float(row.get('FG3A')))
+                           if safe_float(row.get('FG3A')) else None,
             'ftm':         safe_float(row.get('FTM')),
             'fta':         safe_float(row.get('FTA')),
-            'ft_pct':      safe_float(row.get('FT_PCT')),
+            'ft_pct':      (safe_float(row.get('FTM')) / safe_float(row.get('FTA')))
+                           if safe_float(row.get('FTA')) else None,
             'plus_minus':  safe_float(row.get('PLUS_MINUS')),
 
             # Advanced

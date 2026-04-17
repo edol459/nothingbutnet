@@ -868,13 +868,20 @@
   <main>
     <!-- Tab bar -->
     <div class="tab-bar">
-      <button class="tab active" data-tab="recent">Recent Activity</button>
+      <button class="tab active" data-tab="liked">Most Liked</button>
+      <button class="tab" data-tab="recent">Recent Activity</button>
       <button class="tab" data-tab="top">Top Rated</button>
       <button class="tab" data-tab="browse">Browse Games</button>
     </div>
 
+    <!-- Most Liked -->
+    <div id="paneLiked">
+      <div id="likedFeed" class="state-loading">Loading…</div>
+      <button class="btn-more" id="btnMoreLiked" style="display:none">Load more</button>
+    </div>
+
     <!-- Recent Activity -->
-    <div id="paneRecent">
+    <div id="paneRecent" style="display:none">
       <div id="recentFeed" class="state-loading">Loading…</div>
       <button class="btn-more" id="btnMoreRecent" style="display:none">Load more</button>
     </div>
@@ -941,6 +948,7 @@ let currentUser   = null;
 let currentGameId = null;
 let pickedRating  = 0;    // 1–10
 
+const likedState  = { offset: 0, loading: false, exhausted: false };
 const recentState = { offset: 0, loading: false, exhausted: false };
 const browseState = { offset: 0, loading: false, exhausted: false };
 
@@ -1165,6 +1173,7 @@ function signOut() {
 // TABS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const TABS = {
+  liked:  document.getElementById('paneLiked'),
   recent: document.getElementById('paneRecent'),
   top:    document.getElementById('paneTop'),
   browse: document.getElementById('paneBrowse'),
@@ -1176,10 +1185,74 @@ document.querySelectorAll('.tab').forEach(btn => {
     btn.classList.add('active');
     const tab = btn.dataset.tab;
     Object.entries(TABS).forEach(([k, el]) => el.style.display = k === tab ? '' : 'none');
-    if (tab === 'top' && !document.getElementById('topFeed').dataset.loaded) loadTopRated();
+    if (tab === 'recent' && !document.getElementById('recentFeed').dataset.loaded) loadRecent();
+    if (tab === 'top'    && !document.getElementById('topFeed').dataset.loaded) loadTopRated();
     if (tab === 'browse' && !document.getElementById('browseFeed').dataset.loaded) loadBrowse();
   });
 });
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SHARED REVIEW CARD RENDERER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function buildReviewCard(r, i, { showLikes = false } = {}) {
+  const div = document.createElement('div');
+  div.className = 'review-card';
+  div.style.animationDelay = `${i * 0.04}s`;
+  div.style.cursor = 'pointer';
+  div.addEventListener('click', () => goToGame(r.game_id));
+  const likeBadge = showLikes && r.like_count > 0
+    ? `<span style="font-family:var(--mono);font-size:0.7rem;color:var(--ink-3);margin-left:4px">♥ ${r.like_count}</span>`
+    : '';
+  div.innerHTML = `
+    ${avatarEl(r.display_name, r.avatar_url, 40, r.user_id, r.favorite_team)}
+    <div class="review-body">
+      <div class="review-meta">
+        <a href="/profile/${r.user_id}" class="reviewer-name" onclick="event.stopPropagation()" style="text-decoration:none;color:inherit">${r.display_name}</a>
+        <span class="review-action">reviewed</span>
+        <span class="review-game-link" onclick="goToGame('${r.game_id}')">${r.away_team_abbr} @ ${r.home_team_abbr}</span>
+        ${likeBadge}
+      </div>
+      ${scoreline(r)}
+      <div class="review-rating-row">
+        ${starsHTML(r.rating)}
+        <span class="review-date">${fmtShortDate(r.game_date)}</span>
+      </div>
+      ${r.review_text ? `<p class="review-text">${r.review_text}</p>` : ''}
+      ${(r.tags && r.tags.length) || r.attended ? `<div class="review-tags">
+        ${r.attended ? `<span class="attended-badge">${_PERSON_SVG}attended</span>` : ''}
+        ${r.tags ? r.tags.map(tagPillHTML).join('') : ''}
+      </div>` : ''}
+    </div>
+  `;
+  return div;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MOST LIKED
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function loadMostLiked(append = false) {
+  if (likedState.loading || likedState.exhausted) return;
+  likedState.loading = true;
+
+  const data = await api(`/api/reviews/most-liked?limit=15&offset=${likedState.offset}`);
+  const feed = document.getElementById('likedFeed');
+  const reviews = data.reviews || [];
+
+  if (!append) feed.innerHTML = '';
+
+  if (reviews.length === 0 && !append) {
+    feed.innerHTML = `<div class="state-empty"><p>No liked reviews yet.<br>Start liking reviews to see them here!</p></div>`;
+  } else {
+    reviews.forEach((r, i) => feed.appendChild(buildReviewCard(r, i, { showLikes: true })));
+  }
+
+  likedState.offset += reviews.length;
+  likedState.loading = false;
+  if (reviews.length < 15) likedState.exhausted = true;
+  document.getElementById('btnMoreLiked').style.display = likedState.exhausted ? 'none' : 'block';
+}
+
+document.getElementById('btnMoreLiked').addEventListener('click', () => loadMostLiked(true));
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // RECENT ACTIVITY
@@ -1187,8 +1260,9 @@ document.querySelectorAll('.tab').forEach(btn => {
 async function loadRecent(append = false) {
   if (recentState.loading || recentState.exhausted) return;
   recentState.loading = true;
+  document.getElementById('recentFeed').dataset.loaded = '1';
 
-  const data = await api(`/api/reviews/recent?limit=15`);
+  const data = await api(`/api/reviews/recent?limit=15&offset=${recentState.offset}`);
   const feed = document.getElementById('recentFeed');
   const reviews = data.reviews || [];
 
@@ -1197,36 +1271,10 @@ async function loadRecent(append = false) {
   if (reviews.length === 0 && !append) {
     feed.innerHTML = `<div class="state-empty"><p>No reviews yet.<br>Be the first to review a game!</p></div>`;
   } else {
-    reviews.forEach((r, i) => {
-      const div = document.createElement('div');
-      div.className = 'review-card';
-      div.style.animationDelay = `${i * 0.04}s`;
-      div.style.cursor = 'pointer';
-      div.addEventListener('click', () => goToGame(r.game_id));
-      div.innerHTML = `
-        ${avatarEl(r.display_name, r.avatar_url, 40, r.user_id, r.favorite_team)}
-        <div class="review-body">
-          <div class="review-meta">
-            <a href="/profile/${r.user_id}" class="reviewer-name" onclick="event.stopPropagation()" style="text-decoration:none;color:inherit">${r.display_name}</a>
-            <span class="review-action">reviewed</span>
-            <span class="review-game-link" onclick="goToGame('${r.game_id}')">${r.away_team_abbr} @ ${r.home_team_abbr}</span>
-          </div>
-          ${scoreline(r)}
-          <div class="review-rating-row">
-            ${starsHTML(r.rating)}
-            <span class="review-date">${fmtShortDate(r.game_date)}</span>
-          </div>
-          ${r.review_text ? `<p class="review-text">${r.review_text}</p>` : ''}
-          ${(r.tags && r.tags.length) || r.attended ? `<div class="review-tags">
-            ${r.attended ? `<span class="attended-badge">${_PERSON_SVG}attended</span>` : ''}
-            ${r.tags ? r.tags.map(tagPillHTML).join('') : ''}
-          </div>` : ''}
-        </div>
-      `;
-      feed.appendChild(div);
-    });
+    reviews.forEach((r, i) => feed.appendChild(buildReviewCard(r, i)));
   }
 
+  recentState.offset += reviews.length;
   recentState.loading = false;
   if (reviews.length < 15) recentState.exhausted = true;
   document.getElementById('btnMoreRecent').style.display = recentState.exhausted ? 'none' : 'block';
@@ -1429,7 +1477,7 @@ function goToGame(gameId) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 (async () => {
   await loadAuth();
-  loadRecent();
+  loadMostLiked();
   loadSidebarTop();
 })();
 </script>

@@ -308,6 +308,26 @@ table.wt tbody td.td-lineup { text-align: left; }
   display: flex; gap: 20px; padding: 16px 28px 8px;
   justify-content: center; flex-wrap: wrap; flex-shrink: 0;
 }
+.shot-zone-wrap {
+  padding: 16px 28px 4px; flex-shrink: 0;
+}
+.court-3d-outer {
+  perspective: 700px;
+  perspective-origin: 50% 110%;
+  display: flex; justify-content: center;
+}
+.court-3d-inner {
+  transform: rotateX(44deg);
+  transform-origin: bottom center;
+  filter: drop-shadow(0 18px 22px rgba(0,0,0,0.32));
+}
+.zone-tooltip {
+  position: fixed; display: none; pointer-events: none;
+  background: rgba(20,20,25,0.92); color: #f0ede6;
+  font-family: var(--ff-mono); font-size: 10px; line-height: 1.7;
+  padding: 6px 10px; border-radius: 5px; z-index: 900;
+  white-space: nowrap;
+}
 .shot-court-block {
   display: flex; flex-direction: column; align-items: center; gap: 5px;
 }
@@ -323,10 +343,7 @@ table.wt tbody td.td-lineup { text-align: left; }
   padding: 0 28px 10px; font-family: var(--ff-mono);
   font-size: 9px; color: var(--ink4); flex-shrink: 0;
 }
-.shot-legend-gradient {
-  width: 72px; height: 7px; border-radius: 3px;
-  background: linear-gradient(to right, hsl(220,95%,50%), hsl(55,95%,50%), hsl(0,95%,50%));
-}
+.shot-legend { gap: 4px; }
 
 /* ── Mode note ───────────────────────────────────────────────── */
 .adj-note {
@@ -543,7 +560,7 @@ let lineupsReady = false;
 let lineupsError = false;
 let currentMode  = 'raw';   // 'raw' | 'shot' | 'stat'
 const MODES = [
-  { key: 'raw',  label: 'WoWY'         },
+  { key: 'raw',  label: 'Traditional'   },
   { key: 'shot', label: 'Shot Profile' },
   { key: 'stat', label: 'Stat Line'    },
 ];
@@ -956,28 +973,24 @@ async function renderShotProfileBody(rows, rosterMap, selArr, season) {
   const onPoss   = locData.on_poss   || 0;
   const offPoss  = locData.off_poss  || 0;
 
-  const combos  = zoneData.combos || [];
-  const onZone  = combos.find(c => c.on_players.includes(anchorId)) || null;
-  const offZone = combos.find(c => !c.on_players.includes(anchorId)) || null;
+  const combos     = zoneData.combos || [];
+  const anchorNum  = Number(anchorId);
+  const onZone  = combos.find(c => c.on_players.some(p => Number(p) === anchorNum)) || null;
+  const offZone = combos.find(c => !c.on_players.some(p => Number(p) === anchorNum)) || null;
   const fmtPct  = v => v == null ? '—' : v.toFixed(1) + '%';
 
   body.innerHTML = `
-    <div class="shot-heatmap-wrap">
-      <div class="shot-court-block">
-        <div class="shot-court-label">With ${lastName(anchorName)}</div>
-        <canvas id="court-on" width="260" height="246" style="border-radius:4px;display:block;"></canvas>
-        <div class="shot-court-sublabel">${onShots.length.toLocaleString()} FGA · ${onPoss.toLocaleString()} poss</div>
+    <div class="shot-zone-wrap">
+      <div class="shot-court-label" style="text-align:center;margin-bottom:8px;">
+        Zone shift with ${lastName(anchorName)} on court
+        <span style="display:block;font-size:8px;text-transform:none;letter-spacing:0;color:var(--ink4);margin-top:2px;">FGA per 100 possessions · on vs. off</span>
       </div>
-      <div class="shot-court-block">
-        <div class="shot-court-label">Without ${lastName(anchorName)}</div>
-        <canvas id="court-off" width="260" height="246" style="border-radius:4px;display:block;"></canvas>
-        <div class="shot-court-sublabel">${offShots.length.toLocaleString()} FGA · ${offPoss.toLocaleString()} poss</div>
+      <div style="display:flex;justify-content:center;">
+        <div id="court-zone" style="width:460px;position:relative;"></div>
       </div>
-    </div>
-    <div class="shot-legend">
-      <span>Low</span>
-      <div class="shot-legend-gradient"></div>
-      <span>High freq</span>
+      <div class="shot-court-sublabel" style="text-align:center;margin-top:6px;">
+        ${onShots.length.toLocaleString()} FGA on · ${offShots.length.toLocaleString()} FGA off · hover zones for stats
+      </div>
     </div>
     <div class="table-scroll" style="margin:0 28px 16px;">
       <table class="wt">
@@ -1013,8 +1026,7 @@ async function renderShotProfileBody(rows, rosterMap, selArr, season) {
       </table>
     </div>`;
 
-  drawCourtHeatmap(document.getElementById('court-on'),  onShots,  onPoss);
-  drawCourtHeatmap(document.getElementById('court-off'), offShots, offPoss);
+  drawZoneDiffChart(document.getElementById('court-zone'), onShots, offShots, onPoss, offPoss);
 }
 
 // ── Court heatmap renderer ─────────────────────────────────────
@@ -1036,54 +1048,23 @@ function drawCourtHeatmap(canvas, shots, totalPoss) {
   ctx.fillStyle = '#f5f1ea';
   ctx.fillRect(0, 0, W, H);
 
-  // ── Heatmap layer ───────────────────────────────────────────
-  if (shots.length > 0 && totalPoss > 0) {
-    const CELL = 18;
-    const COLS = Math.ceil(XR / CELL);
-    const ROWS = Math.ceil(YR / CELL);
-    const grid = new Float32Array(COLS * ROWS);
+  // ── Shot dots ───────────────────────────────────────────────
+  // Draw missed shots first (underneath), then made shots on top
+  const missed = shots.filter(s => !s.made);
+  const made   = shots.filter(s =>  s.made);
+  const r = Math.max(1.5, W / 160);  // dot radius scales with canvas size
 
-    for (const s of shots) {
-      const c = Math.min(Math.floor((s.x - X_MIN) / CELL), COLS - 1);
-      const r = Math.min(ROWS - 1 - Math.floor((s.y - Y_MIN) / CELL), ROWS - 1);
-      if (c >= 0 && r >= 0) grid[r * COLS + c]++;
-    }
-
-    // Gaussian-weighted blur (radius 2 cells)
-    const smoothed = new Float32Array(COLS * ROWS);
-    const BLUR = 2;
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        let wsum = 0, wtot = 0;
-        for (let dr = -BLUR; dr <= BLUR; dr++) {
-          for (let dc = -BLUR; dc <= BLUR; dc++) {
-            const nr = r + dr, nc = c + dc;
-            if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) continue;
-            const w = Math.exp(-(dr * dr + dc * dc) / (BLUR * BLUR));
-            wsum += grid[nr * COLS + nc] * w;
-            wtot += w;
-          }
-        }
-        smoothed[r * COLS + c] = wtot > 0 ? wsum / wtot : 0;
-      }
-    }
-
-    // Use 95th-percentile density as the "max" to avoid outlier washing
-    const nonzero = [...smoothed].filter(v => v > 0).sort((a, b) => a - b);
-    const p95 = nonzero.length ? nonzero[Math.floor(nonzero.length * 0.95)] : 1;
-
-    const cellW = W / COLS, cellH = H / ROWS;
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        const v = smoothed[r * COLS + c];
-        if (v < 0.05) continue;
-        const norm = Math.min(v / p95, 1);
-        const alpha = 0.12 + norm * 0.72;
-        const hue   = (1 - norm) * 220;  // 220 (blue) → 0 (red)
-        ctx.fillStyle = `hsla(${hue},95%,50%,${alpha})`;
-        ctx.fillRect(c * cellW, r * cellH, cellW + 0.5, cellH + 0.5);
-      }
-    }
+  for (const s of missed) {
+    ctx.beginPath();
+    ctx.arc(px(s.x), py(s.y), r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(90, 150, 230, 0.45)';
+    ctx.fill();
+  }
+  for (const s of made) {
+    ctx.beginPath();
+    ctx.arc(px(s.x), py(s.y), r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 210, 55, 0.88)';
+    ctx.fill();
   }
 
   // ── Court lines ─────────────────────────────────────────────
@@ -1135,6 +1116,181 @@ function drawCourtHeatmap(canvas, shots, totalPoss) {
 
   // Baseline
   ctx.beginPath(); ctx.moveTo(px(-250), py(-52)); ctx.lineTo(px(250), py(-52)); ctx.stroke();
+}
+
+// ── Zone differential chart ────────────────────────────────────
+// Top-down half-court SVG, styled to match the site's warm editorial palette.
+// Neutral zones are transparent (maple court shows through); hot/cold zones
+// get semi-transparent color overlays. Hover events work natively on SVG shapes.
+function drawZoneDiffChart(container, onShots, offShots, onPoss, offPoss) {
+  if (!container) return;
+  if (container._threeRenderer) { try { container._threeRenderer.dispose(); } catch(e){} container._threeRenderer = null; }
+  container.innerHTML = '';
+
+  // ── Court constants (NBA tenths of feet) ──────────────────────
+  const RA=40, PW=80, FTY=142, TR=238, CX=220;
+  const CY = Math.sqrt(TR*TR - CX*CX); // ≈ 90.8
+  const cA = Math.atan2(CY, CX);
+
+  // ── Zone classification ────────────────────────────────────────
+  function zoneOf(s) {
+    const d = Math.sqrt(s.x*s.x + s.y*s.y);
+    if (d <= RA) return 'ra';
+    if (Math.abs(s.x) <= PW && s.y <= FTY) return 'paint';
+    if (s.is3) return s.y <= CY ? 'c3' : 'ab3';
+    return 'mid';
+  }
+
+  // ── Count shots per zone ──────────────────────────────────────
+  const onC={ra:0,paint:0,mid:0,c3:0,ab3:0};
+  const offC={ra:0,paint:0,mid:0,c3:0,ab3:0};
+  for (const s of onShots)  onC[zoneOf(s)]++;
+  for (const s of offShots) offC[zoneOf(s)]++;
+  const onR   = z => onPoss  > 0 ? onC[z]/onPoss*100  : 0;
+  const offR  = z => offPoss > 0 ? offC[z]/offPoss*100 : 0;
+  const delta = z => onR(z) - offR(z);
+
+  // ── Zone color ────────────────────────────────────────────────
+  // Neutral → transparent (maple surface shows through).
+  // Colors are semi-opaque so court lines remain visible underneath.
+  function zoneColor(z) {
+    const d = delta(z);
+    if (d > 4.0)  return 'rgba(118,20,182,0.78)';              // purple — heavy increase
+    if (d > 1.5)  { const n=(d-1.5)/2.5;
+      return `rgba(${Math.round(210+n*20)},${Math.round(40-n*20)},${Math.round(28-n*18)},0.76)`; } // red
+    if (d < -4.0) return 'rgba(80,148,228,0.75)';              // icy blue — heavy decrease
+    if (d < -1.5) { const n=(-d-1.5)/2.5;
+      return `rgba(${Math.round(30-n*8)},${Math.round(88+n*28)},${Math.round(205+n*35)},0.76)`; }  // blue
+    return 'rgba(0,0,0,0)';                                     // neutral — transparent
+  }
+
+  // ── SVG coordinate helpers ────────────────────────────────────
+  // Crop at courtY=290 (~50 units above the 3pt arc top at 238).
+  // svgH = 290 + 52 = 342.  viewBox "0 0 500 342"
+  //   svgX = courtX + 250   (-250 → 0,  250 → 500)
+  //   svgY = courtY + 52    ( -52 → 0,  290 → 342)
+  const SVG_H = 342;
+  const sx = x => (x + 250).toFixed(1);
+  const sy = y => (y + 52).toFixed(1);
+
+  function arcSVG(r, a0, a1, cx=0, cy=0, n=60) {
+    const pts = [];
+    for (let i=0; i<=n; i++) {
+      const a = a0+(a1-a0)*i/n;
+      pts.push(sx(cx+r*Math.cos(a))+','+sy(cy+r*Math.sin(a)));
+    }
+    return pts.join(' ');
+  }
+
+  // ── Pre-build arc strings ─────────────────────────────────────
+  // 3pt arc: right corner (CX,CY) → top (0,TR) → left corner (-CX,CY) [CCW in math]
+  const arc3  = arcSVG(TR, cA, Math.PI-cA);
+  const cyS   = sy(CY);   // SVG Y of the corner-3 / AB3 boundary
+
+  // AB3 polygon: 3pt arc (inner boundary) + sidelines up to midcourt
+  const ab3pts = `${arc3} 0,${cyS} 0,${SVG_H} 500,${SVG_H} 500,${cyS}`;
+
+  // FT circle: upper half (toward basket) = dashed; lower half = solid
+  const ftSolid = arcSVG(60, 0, Math.PI, 0, FTY);    // curves away from basket
+  const ftDash  = arcSVG(60, Math.PI, 2*Math.PI, 0, FTY); // curves toward basket
+
+  // ── Build SVG ─────────────────────────────────────────────────
+  // Court surface: warm maple tone. Lines: dark warm ink.
+  const SURFACE = '#dfd2b2';
+  const LINES   = 'rgba(38,28,14,0.68)';
+  const BASKET  = 'rgba(38,28,14,0.80)';
+
+  const svg = `<svg viewBox="0 0 500 ${SVG_H}" xmlns="http://www.w3.org/2000/svg"
+     style="width:100%;height:auto;display:block;" overflow="hidden">
+
+  <!-- Court surface -->
+  <rect x="0" y="0" width="500" height="${SVG_H}" fill="${SURFACE}" />
+
+  <!-- Zone color overlays (painter order: mid → ab3 → c3 → paint → ra) -->
+  <polygon data-zone="mid"   points="0,0 500,0 500,${SVG_H} 0,${SVG_H}"
+           fill="${zoneColor('mid')}" />
+  <polygon data-zone="ab3"   points="${ab3pts}"
+           fill="${zoneColor('ab3')}" />
+  <polygon data-zone="c3"    points="0,0 ${sx(-CX)},0 ${sx(-CX)},${cyS} 0,${cyS}"
+           fill="${zoneColor('c3')}" />
+  <polygon data-zone="c3"    points="${sx(CX)},0 500,0 500,${cyS} ${sx(CX)},${cyS}"
+           fill="${zoneColor('c3')}" />
+  <rect    data-zone="paint" x="${sx(-PW)}" y="0" width="${PW*2}" height="${sy(FTY)}"
+           fill="${zoneColor('paint')}" />
+  <circle  data-zone="ra"    cx="250" cy="${sy(0)}" r="${RA}"
+           fill="${zoneColor('ra')}" />
+
+  <!-- Court lines (on top of zones, pointer-events off) -->
+  <g stroke="${LINES}" stroke-width="2" fill="none" pointer-events="none" stroke-linejoin="round">
+    <!-- Outer court boundary -->
+    <rect x="0" y="0" width="500" height="${SVG_H}" />
+    <!-- Paint box -->
+    <rect x="${sx(-PW)}" y="0" width="${PW*2}" height="${sy(FTY)}" />
+    <!-- FT circle -->
+    <polyline points="${ftSolid}" />
+    <polyline points="${ftDash}" stroke-dasharray="5,5" stroke-opacity="0.55" />
+    <!-- 3pt corner straight lines -->
+    <line x1="${sx(-CX)}" y1="0" x2="${sx(-CX)}" y2="${cyS}" />
+    <line x1="${sx( CX)}" y1="0" x2="${sx( CX)}" y2="${cyS}" />
+    <!-- 3pt arc -->
+    <polyline points="${arc3}" />
+    <!-- RA arc (facing midcourt) -->
+    <polyline points="${arcSVG(RA, 0, Math.PI, 0, 0)}" />
+  </g>
+
+  <!-- Basket ring + backboard -->
+  <g stroke="${BASKET}" stroke-width="2" fill="none" pointer-events="none">
+    <polyline points="${arcSVG(7.5, 0, 2*Math.PI, 0, 0, 28)}" />
+    <line x1="${sx(-30)}" y1="${sy(-7.5)}" x2="${sx(30)}" y2="${sy(-7.5)}" />
+  </g>
+</svg>`;
+
+  // ── Legend row ────────────────────────────────────────────────
+  const legendItems = [
+    { color:'rgba(118,20,182,0.85)',  label:'Heavy ↑' },
+    { color:'rgba(210,38,22,0.85)',   label:'Moderate ↑' },
+    { color:'rgba(0,0,0,0)',          label:'Neutral', border:true },
+    { color:'rgba(30,90,210,0.85)',   label:'Moderate ↓' },
+    { color:'rgba(80,148,228,0.85)',  label:'Heavy ↓' },
+  ];
+  const legendHTML = legendItems.map(({color,label,border}) =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;">` +
+    `<span style="width:9px;height:9px;border-radius:2px;background:${color};` +
+    `flex-shrink:0;border:1px solid rgba(38,28,14,${border?'0.30':'0.10'});display:inline-block;"></span>` +
+    `<span style="font-family:var(--ff-mono);font-size:9px;letter-spacing:0.04em;color:var(--ink3);">${label}</span>` +
+    `</span>`
+  ).join('<span style="color:var(--rule);margin:0 2px;">·</span>');
+
+  // ── Inject ────────────────────────────────────────────────────
+  container.innerHTML =
+    `<div style="border-radius:6px;overflow:hidden;border:1px solid #cec3a8;">${svg}</div>` +
+    `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;` +
+    `margin-top:8px;padding:0 2px;">${legendHTML}</div>`;
+
+  // ── Tooltip ───────────────────────────────────────────────────
+  const ZNAMES = {ra:'Restricted Area',paint:'Paint (non-RA)',mid:'Mid-Range',c3:'Corner 3',ab3:'Above-Break 3'};
+  let tip = document.getElementById('zone-tip');
+  if (!tip) { tip=document.createElement('div'); tip.id='zone-tip'; tip.className='zone-tooltip'; document.body.appendChild(tip); }
+
+  function showTip(z, e) {
+    const d = delta(z), sign = d>=0?'+':'';
+    const col = d>4?'#c084fc': d>1.5?'#f87171': d<-4?'#7dd3fc': d<-1.5?'#60a5fa':'#94a3b8';
+    tip.innerHTML =
+      `<strong style="color:${col}">${ZNAMES[z]}</strong><br>` +
+      `On:&nbsp;&nbsp;${onR(z).toFixed(1)} FGA/100<br>` +
+      `Off:&nbsp;${offR(z).toFixed(1)} FGA/100<br>` +
+      `<span style="color:${col};font-size:11px">${sign}${d.toFixed(1)} per 100 poss</span>`;
+    tip.style.display='block';
+    tip.style.left=(e.clientX+14)+'px';
+    tip.style.top =(e.clientY-10)+'px';
+  }
+
+  if (container._moveListener)  container.removeEventListener('mousemove',  container._moveListener);
+  if (container._leaveListener) container.removeEventListener('mouseleave', container._leaveListener);
+  container._moveListener  = e => { const z=e.target?.dataset?.zone; z?showTip(z,e):tip.style.display='none'; };
+  container._leaveListener = () => tip.style.display='none';
+  container.addEventListener('mousemove',  container._moveListener);
+  container.addEventListener('mouseleave', container._leaveListener);
 }
 
 // ── Stat Line body ─────────────────────────────────────────────
