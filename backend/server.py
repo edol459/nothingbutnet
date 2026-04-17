@@ -536,8 +536,10 @@ import requests as _requests
 from datetime import datetime as _dt
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ── Past-date cache (immutable data — cache forever) ─────────────
-_past_sb_cache: dict = {}   # date -> payload dict
+# ── Past-date cache ───────────────────────────────────────────────
+# Scores never change once Final — cache forever after first ScoreboardV3 fetch.
+# Cleared on server restart, which forces a fresh ScoreboardV3 call.
+_past_sb_cache: dict = {}   # date -> {"payload": dict, "ts": float}
 
 # ── Future-date cache (schedule can change — TTL 60 min) ──────────
 _future_sb_cache: dict = {}  # date -> {"payload": dict, "ts": float}
@@ -595,7 +597,8 @@ def get_scoreboard():
                 Primary: NBA live CDN (fast, works on cloud IPs).
                 Fallback: ScoreboardV3 (works locally, may be blocked on production).
     ?date=YYYY-MM-DD → DB first for past dates, then ScoreboardV3.
-    Results are cached: past dates forever, today for 30 s, future for 60 min.
+    Results are cached: past dates forever (after first ScoreboardV3 fetch),
+    today for 30 s, future for 60 min.
     """
     date = request.args.get("date", "").strip()
     _game_today = _compute_game_today()
@@ -606,9 +609,9 @@ def get_scoreboard():
     is_past   = date < _game_today
     is_today  = date == _game_today
 
-    # Past dates — cache forever
+    # Past dates — cache forever once fetched from ScoreboardV3
     if is_past and date in _past_sb_cache:
-        return jsonify(_past_sb_cache[date])
+        return jsonify(_past_sb_cache[date]["payload"])
 
     # Today — short-lived cache (30 s) so live-game frontend polls don't hammer the API
     if is_today and _today_sb_cache.get("date") == _game_today:
@@ -654,44 +657,6 @@ def get_scoreboard():
         if _time.time() - entry["ts"] < 3600:
             return jsonify(entry["payload"])
 
-    # For past dates, try the DB first (avoids nba_api outbound calls that can
-    # be rate-limited / blocked on cloud IPs in production).
-    if is_past:
-        try:
-            conn = get_conn()
-            cur  = conn.cursor()
-            cur.execute("""
-                SELECT game_id, home_team_abbr, away_team_abbr,
-                       home_score, away_score
-                FROM games
-                WHERE game_date = %s
-                ORDER BY game_id
-            """, (date,))
-            db_rows = cur.fetchall()
-            cur.close()
-            conn.close()
-            if db_rows:
-                games = [
-                    {
-                        "gameId":         row["game_id"],
-                        "gameStatus":     3,
-                        "gameStatusText": "Final",
-                        "period":         0,
-                        "gameClock":      "",
-                        "gameTimeUTC":    "",
-                        "away": {"abbr": row["away_team_abbr"], "score": row["away_score"],
-                                 "wins": None, "losses": None},
-                        "home": {"abbr": row["home_team_abbr"], "score": row["home_score"],
-                                 "wins": None, "losses": None},
-                    }
-                    for row in db_rows
-                ]
-                payload = {"games": games, "date": date}
-                _past_sb_cache[date] = payload
-                return jsonify(payload)
-        except Exception:
-            pass  # Fall through to ScoreboardV3
-
     try:
         from nba_api.stats.endpoints import scoreboardv3
 
@@ -706,7 +671,7 @@ def get_scoreboard():
         if gh_df.empty:
             payload = {"games": [], "date": date}
             if is_past:
-                _past_sb_cache[date] = payload
+                _past_sb_cache[date] = {"payload": payload, "ts": _time.time()}
             elif is_today:
                 _today_sb_cache.update({"payload": payload, "ts": _time.time(), "date": _game_today})
             else:
@@ -771,7 +736,7 @@ def get_scoreboard():
 
         payload = {"games": games, "date": date}
         if is_past:
-            _past_sb_cache[date] = payload
+            _past_sb_cache[date] = {"payload": payload, "ts": _time.time()}
         elif is_today:
             _today_sb_cache.update({"payload": payload, "ts": _time.time(), "date": _game_today})
         else:
@@ -806,37 +771,22 @@ def get_top_performers():
         except Exception as e:
             return jsonify({"error": str(e), "players": [], "date": ""}), 200
     else:
-        # Get game IDs for this historical date — try DB first to avoid
-        # nba_api calls that get rate-limited on cloud IPs.
         actual_date = date
         raw_games = []
         try:
-            conn = get_conn()
-            cur  = conn.cursor()
-            cur.execute("SELECT game_id FROM games WHERE game_date = %s", (date,))
-            db_rows = cur.fetchall()
-            cur.close()
-            conn.close()
-            raw_games = [{"gameId": r["game_id"]} for r in db_rows]
-        except Exception:
-            pass
-
-        if not raw_games:
-            # Fall back to nba_api with a timeout so we don't hang forever
-            try:
-                from nba_api.stats.endpoints import scoreboardv3
-                dt = _dt.strptime(date, "%Y-%m-%d")
-                board = scoreboardv3.ScoreboardV3(
-                    game_date=dt.strftime("%Y-%m-%d"),
-                    league_id="00",
-                    timeout=30,
-                )
-                gh_df = board.game_header.get_data_frame()
-                raw_games = [{"gameId": str(r.get("gameId", "") or r.get("GAME_ID", ""))}
-                             for _, r in gh_df.iterrows()
-                             if r.get("gameId") or r.get("GAME_ID")]
-            except Exception as e:
-                return jsonify({"error": str(e), "players": [], "date": date}), 200
+            from nba_api.stats.endpoints import scoreboardv3
+            dt = _dt.strptime(date, "%Y-%m-%d")
+            board = scoreboardv3.ScoreboardV3(
+                game_date=dt.strftime("%Y-%m-%d"),
+                league_id="00",
+                timeout=30,
+            )
+            gh_df = board.game_header.get_data_frame()
+            raw_games = [{"gameId": str(r.get("gameId", "") or r.get("GAME_ID", ""))}
+                         for _, r in gh_df.iterrows()
+                         if r.get("gameId") or r.get("GAME_ID")]
+        except Exception as e:
+            return jsonify({"error": str(e), "players": [], "date": date}), 200
 
     def get_gid(g):
         return g.get("gameId") or g.get("GAME_ID") or ""
