@@ -844,6 +844,53 @@ def get_top_performers():
     return jsonify({"players": top5, "date": actual_date})
 
 
+# ── /api/preview/records/<away>/<home> ───────────────────────────
+@app.route("/api/preview/records/<away>/<home>")
+def preview_records(away, home):
+    """Returns regular-season W/L records for both teams from the games table."""
+    away = away.upper()
+    home = home.upper()
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT
+                team_abbr,
+                COUNT(*) FILTER (WHERE won) AS wins,
+                COUNT(*) FILTER (WHERE NOT won) AS losses
+            FROM (
+                SELECT
+                    home_team_abbr AS team_abbr,
+                    home_score > away_score AS won
+                FROM games
+                WHERE season_type = 'Regular Season'
+                  AND status = 'Final'
+                  AND home_team_abbr = ANY(%s)
+                UNION ALL
+                SELECT
+                    away_team_abbr AS team_abbr,
+                    away_score > home_score AS won
+                FROM games
+                WHERE season_type = 'Regular Season'
+                  AND status = 'Final'
+                  AND away_team_abbr = ANY(%s)
+            ) t
+            GROUP BY team_abbr
+        """, ([away, home], [away, home]))
+        rows = {r["team_abbr"]: r for r in cur.fetchall()}
+        conn.close()
+
+        def rec(abbr):
+            r = rows.get(abbr)
+            return {"wins": r["wins"], "losses": r["losses"]} if r else {"wins": None, "losses": None}
+
+        return jsonify({"away": rec(away), "home": rec(home)})
+    except Exception as e:
+        return jsonify({"away": {"wins": None, "losses": None},
+                        "home": {"wins": None, "losses": None},
+                        "error": str(e)}), 200
+
+
 # ── /api/preview/team-stats/<abbr> ───────────────────────────────
 @app.route("/api/preview/team-stats/<abbr>")
 def preview_team_stats(abbr):

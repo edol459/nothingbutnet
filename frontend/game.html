@@ -17,6 +17,7 @@
 <meta name="twitter:image" content="https://ydkball.net/logo.png">
 <link rel="icon" type="image/png" href="/logo.png">
 <link rel="apple-touch-icon" href="/logo.png">
+<script src="/team-colors.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -495,6 +496,13 @@ async function loadGame() {
 // ── Main render ───────────────────────────────────────────────────
 function render(box, pbp) {
   if (!box && !pbp) { document.getElementById('game-scoreboard').innerHTML = '<div class="error-state">Game data unavailable.</div>'; return; }
+  const awayAbbr = box?.awayTeam?.teamTricode || '';
+  const homeAbbr = box?.homeTeam?.teamTricode || '';
+  if (awayAbbr && homeAbbr) {
+    const { awayColor, homeColor } = resolveTeamColors(awayAbbr, homeAbbr);
+    document.documentElement.style.setProperty('--away-color', awayColor);
+    document.documentElement.style.setProperty('--home-color', homeColor);
+  }
   renderScoreboard(box);
   renderTabs(box);
   renderPanels(box, pbp);
@@ -761,8 +769,8 @@ function buildPbpRow(a, awayAbbr, homeAbbr) {
   // Team dot color
   const tc = a.teamTricode || '';
   let dotColor = 'var(--ink4)';
-  if (tc === awayAbbr) dotColor = 'var(--orange)';
-  else if (tc === homeAbbr) dotColor = 'var(--ink2)';
+  if (tc === awayAbbr) dotColor = 'var(--away-color)';
+  else if (tc === homeAbbr) dotColor = 'var(--home-color)';
 
   return `<div class="pbp-row">
     <div class="pbp-clock">${clock}</div>

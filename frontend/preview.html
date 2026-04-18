@@ -17,6 +17,7 @@
 <meta name="twitter:image" content="https://ydkball.net/logo.png">
 <link rel="icon" type="image/png" href="/logo.png">
 <link rel="apple-touch-icon" href="/logo.png">
+<script src="/team-colors.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -648,13 +649,39 @@ async function loadH2H() {
   }
 }
 
+// ── Load regular-season records from DB ─────────────────────────
+async function loadRecords() {
+  try {
+    const r = await fetch(`${API}/api/preview/records/${AWAY}/${HOME}`);
+    const data = await r.json();
+    const awayRec = data.away.wins != null ? `${data.away.wins}-${data.away.losses}` : '';
+    const homeRec = data.home.wins != null ? `${data.home.wins}-${data.home.losses}` : '';
+    // Patch record elements already in the DOM
+    const recEls = document.querySelectorAll('.hero-record');
+    if (recEls[0]) recEls[0].textContent = awayRec;
+    if (recEls[1]) recEls[1].textContent = homeRec;
+    // If records weren't rendered (were empty strings), insert them now
+    if (!recEls.length) {
+      const infos = document.querySelectorAll('.hero-team-info');
+      if (infos[0] && awayRec) infos[0].insertAdjacentHTML('beforeend', `<div class="hero-record">${awayRec}</div>`);
+      if (infos[1] && homeRec) infos[1].insertAdjacentHTML('beforeend', `<div class="hero-record">${homeRec}</div>`);
+    }
+  } catch(e) { /* silently keep whatever was rendered */ }
+}
+
 // ── Boot ────────────────────────────────────────────────────────
 if (!AWAY || !HOME) {
   document.getElementById('hero').innerHTML = `<div class="state-msg" style="color:rgba(255,255,255,0.4)">No game specified.</div>`;
 } else {
+  // Apply team colors before first render so CSS vars are correct immediately
+  const { awayColor, homeColor } = resolveTeamColors(AWAY, HOME);
+  document.documentElement.style.setProperty('--away-color', awayColor);
+  document.documentElement.style.setProperty('--home-color', homeColor);
+
   renderHero(AWAY_REC, HOME_REC, TIP);
   loadStats();
   loadH2H();
+  loadRecords();
 }
 </script>
 <script>
