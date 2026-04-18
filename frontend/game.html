@@ -484,9 +484,10 @@ async function loadGame() {
     GAME_DATA = {box, pbp};
     render(box, pbp);
     if (box && box.gameStatus === 2) {
-      POLL_TIMER = setInterval(loadGame, 15000);
+      if (POLL_TIMER) clearTimeout(POLL_TIMER);
+      POLL_TIMER = setTimeout(loadGame, 15000);
     } else if (POLL_TIMER) {
-      clearInterval(POLL_TIMER); POLL_TIMER = null;
+      clearTimeout(POLL_TIMER); POLL_TIMER = null;
     }
   } catch(e) {
     document.getElementById('game-scoreboard').innerHTML = `<div class="error-state">Failed to load game.</div>`;
