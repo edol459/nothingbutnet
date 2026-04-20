@@ -715,7 +715,6 @@
   }
   .state-loading {
     padding: 32px 0;
-    text-align: center;
     font-size: 0.82rem;
     color: var(--ink-3);
   }
@@ -812,7 +811,7 @@
   }
   .btn-reply-card:hover { color: var(--ink); background: rgba(0,0,0,0.04); }
   .btn-reply-card svg { width: 12px; height: 12px; flex-shrink: 0; }
-  .reply-section-card { display: none; padding-left: 44px; margin-top: 4px; }
+  .reply-section-card { display: none; padding-left: 44px; margin-top: 4px; grid-column: 1 / -1; }
   .reply-section-card.open { display: block; }
   .reply-item-card {
     display: grid; grid-template-columns: 24px 1fr;
@@ -1273,7 +1272,7 @@ function buildReviewCard(r, i, { showLikes = false } = {}) {
       <div class="review-card-footer">
         <button class="btn-reply-card" data-review-id="${r.id}">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2 4h16v10H6l-4 4V4z"/></svg>
-          Reply
+          ${r.reply_count > 0 ? `${r.reply_count} repl${r.reply_count === 1 ? 'y' : 'ies'}` : 'Reply'}
         </button>
       </div>
     </div>

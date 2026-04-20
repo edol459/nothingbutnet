@@ -1068,7 +1068,7 @@ function reviewItemHTML(r) {
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
             <path d="M2 4h16v10H6l-4 4V4z"/>
           </svg>
-          Reply
+          ${r.reply_count > 0 ? `${r.reply_count} repl${r.reply_count === 1 ? 'y' : 'ies'}` : 'Reply'}
         </button>
       </div>
     </div>
