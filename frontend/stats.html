@@ -2565,10 +2565,33 @@ document.getElementById('season-select').addEventListener('change', function() {
 });
 
 // ── Season type select ────────────────────────────────────────
+function syncImpactTabVisibility() {
+  const isPlayoffs = ST.seasonType === 'Playoffs';
+  const impactBtn  = document.querySelector('.stat-cat-btn[data-cat="impact"]');
+  if (!impactBtn) return;
+  impactBtn.style.display = isPlayoffs ? 'none' : '';
+  // If Impact was active when switching to Playoffs, fall back to General
+  if (isPlayoffs && ST.statCat === 'impact') {
+    ST.statCat   = 'general';
+    ST.statGroup = Object.keys(STAT_CATS['general'].subs)[0];
+    ST.sortCol   = STAT_CATS['general'].subs[ST.statGroup].defaultSort;
+    document.querySelectorAll('.stat-cat-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === 'general'));
+    renderSubTabs('general');
+  }
+  // Playoffs have far fewer minutes played — default to 0, regular season to 500
+  const defaultMin = isPlayoffs ? 0 : 500;
+  ST.minMin = defaultMin;
+  const slider = document.getElementById('min-slider');
+  const label  = document.getElementById('min-value');
+  if (slider) slider.value = String(defaultMin);
+  if (label)  label.textContent = defaultMin > 0 ? `${defaultMin} min` : 'All players';
+}
+
 document.getElementById('season-type-select').addEventListener('change', function() {
   ST.seasonType = this.value;
   const display = ST.season.replace('-', '–');
   document.getElementById('page-subtitle').textContent = `${display} · ${ST.seasonType}`;
+  syncImpactTabVisibility();
   loadStats();
 });
 
@@ -3265,6 +3288,7 @@ populateSeasonDropdown(document.getElementById('season-select'), ST.season).then
   document.getElementById('page-subtitle').textContent = `${display} · ${ST.seasonType}`;
 });
 
+syncImpactTabVisibility();
 loadStats();
 </script>
 <script>
