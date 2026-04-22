@@ -70,7 +70,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
   width: 72px; height: 72px; border-radius: 50%;
   object-fit: cover; border: 2px solid var(--rule);
   background: var(--paper3); flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: space-evenly;
   font-family: var(--ff-serif); font-size: 2rem; color: var(--ink3);
   overflow: hidden; position: relative;
 }
@@ -79,7 +79,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .profile-avatar-wrap.editable { cursor: pointer; }
 .profile-avatar-overlay {
   display: none; position: absolute; inset: 0; border-radius: 50%;
-  background: rgba(0,0,0,0.45); align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.45); align-items: center; justify-content: space-evenly;
   font-family: var(--ff-mono); font-size: 9px; letter-spacing: 0.05em;
   text-transform: uppercase; color: #fff; text-align: center; line-height: 1.3;
 }
@@ -105,7 +105,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .team-cell img { width: 34px; height: 34px; object-fit: contain; }
 .team-cell-abbr { font-family: var(--ff-mono); font-size: 9px; color: var(--ink3); letter-spacing: 0.04em; }
 .team-none-cell {
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: space-evenly;
   padding: 8px; border-radius: 6px; cursor: pointer;
   border: 1.5px solid transparent; font-family: var(--ff-mono);
   font-size: 10px; color: var(--ink4); letter-spacing: 0.04em;
@@ -115,7 +115,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .team-none-cell.selected { border-color: var(--orange); background: var(--paper2); }
 .nav-auth-avatar-initial {
   width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid var(--rule);
-  background: var(--paper3); display: flex; align-items: center; justify-content: center;
+  background: var(--paper3); display: flex; align-items: center; justify-content: space-evenly;
   font-family: var(--ff-serif); font-size: 13px; color: var(--ink3);
 }
 .profile-info { flex: 1; min-width: 0; }
@@ -188,7 +188,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .ri-logo {
   width: 32px; height: 32px; object-fit: contain;
 }
-.ri-logo-fallback { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.ri-logo-fallback { width: 32px; height: 32px; display: flex; align-items: center; justify-content: space-evenly; font-size: 16px; }
 .ri-vs { font-family: var(--ff-mono); font-size: 9px; color: var(--ink4); }
 .ri-body { min-width: 0; }
 .ri-matchup { font-family: var(--ff-serif); font-size: 15px; color: var(--ink); line-height: 1.2; margin-bottom: 2px; transition: color 0.15s; }
@@ -219,7 +219,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .ri-reply-avatar {
   width: 22px; height: 22px; border-radius: 50%;
   background: var(--paper3); display: flex; align-items: center;
-  justify-content: center; font-size: 10px; color: var(--ink4);
+  justify-content: space-evenly; font-size: 10px; color: var(--ink4);
   flex-shrink: 0; overflow: hidden;
 }
 .ri-reply-avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
@@ -262,7 +262,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 /* ── Friends list ── */
 .friend-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--paper3); }
 .friend-item:last-child { border-bottom: none; }
-.friend-avatar { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--rule); background: var(--paper3); display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--ink3); flex-shrink: 0; overflow: hidden; }
+.friend-avatar { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--rule); background: var(--paper3); display: flex; align-items: center; justify-content: space-evenly; font-size: 14px; color: var(--ink3); flex-shrink: 0; overflow: hidden; }
 .friend-avatar img { width: 100%; height: 100%; border-radius: 50%; }
 .friend-name { font-size: 14px; font-weight: 600; color: var(--ink); flex: 1; cursor: pointer; }
 .friend-name:hover { color: var(--orange); }
@@ -280,7 +280,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .search-result-item:last-child { border-bottom: none; }
 
 /* ── Edit name modal ── */
-.modal-overlay { position: fixed; inset: 0; background: rgba(12,12,13,0.5); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(12,12,13,0.5); z-index: 200; display: flex; align-items: center; justify-content: space-evenly; padding: 24px; }
 .modal { background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; width: 100%; max-width: 400px; padding: 28px; }
 .modal h2 { font-family: var(--ff-serif); font-size: 1.4rem; margin-bottom: 6px; }
 .modal p { font-size: 13px; color: var(--ink3); margin-bottom: 18px; line-height: 1.5; }
@@ -323,19 +323,19 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
   background: var(--paper2); border: 1px solid var(--rule);
   position: relative; cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  display: flex; flex-direction: column; align-items: center; justify-content: space-evenly;
 }
 .fav-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.10); border-color: var(--orange); }
 .fav-card-inner {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  display: flex; flex-direction: column; align-items: center; justify-content: space-evenly;
   gap: 0; padding: 0; width: 100%; height: 100%;
 }
 .fav-logos {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
+  display: flex; align-items: center; justify-content: space-evenly; gap: 8px;
   flex: 1; width: 100%; padding: 16px 10px 10px;
 }
 .fav-logo { width: 62px; height: 62px; object-fit: contain; flex-shrink: 0; }
-.fav-logo-fallback { width: 62px; height: 62px; display: flex; align-items: center; justify-content: center; font-size: 26px; }
+.fav-logo-fallback { width: 62px; height: 62px; display: flex; align-items: center; justify-content: space-evenly; font-size: 26px; }
 .fav-vs { font-family: var(--ff-mono); font-size: 9px; color: var(--ink4); }
 .fav-info {
   width: 100%; text-align: center; padding: 8px 8px 12px;
@@ -350,7 +350,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
   position: absolute; top: 6px; right: 6px;
   width: 18px; height: 18px; border-radius: 50%;
   background: var(--paper); border: 1px solid var(--rule);
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: space-evenly;
   cursor: pointer; opacity: 0; transition: opacity 0.15s, border-color 0.15s;
   font-size: 11px; color: var(--ink3); line-height: 1;
   z-index: 2;
@@ -361,7 +361,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .fav-slot {
   aspect-ratio: 2/3; border-radius: 8px;
   border: 1.5px dashed var(--rule);
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: space-evenly;
   cursor: pointer; transition: border-color 0.15s, background 0.15s;
   color: var(--ink4);
 }
@@ -403,7 +403,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
   .nav-auth { padding: 13px 0; }
   .nav-auth-name { display: none; }
   .nav-tabs {
-    position: static; transform: none; top: auto; left: auto; order: 10; flex: 0 0 100%; justify-content: center; overflow-x: auto; scrollbar-width: none;
+    position: static; transform: none; top: auto; left: auto; order: 10; flex: 0 0 100%; justify-content: space-evenly; overflow-x: auto; scrollbar-width: none;
     flex-wrap: nowrap; border-top: 1px solid var(--rule);
     padding: 7px 0 9px; gap: 0;
   }

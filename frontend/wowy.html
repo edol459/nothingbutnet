@@ -141,7 +141,7 @@ nav {
 .player-card-check {
   position: absolute; top: 5px; right: 5px;
   width: 13px; height: 13px; background: var(--orange);
-  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; display: flex; align-items: center; justify-content: space-evenly;
   opacity: 0; transition: opacity 0.12s;
 }
 .player-card.selected .player-card-check { opacity: 1; }
@@ -159,7 +159,7 @@ nav {
 .player-headshot-fallback {
   width: 52px; height: 52px; border-radius: 50%;
   background: var(--paper3); border: 2px solid var(--rule);
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: space-evenly;
   font-family: var(--ff-mono); font-size: 13px; color: var(--ink3);
 }
 .player-card-name {
@@ -187,7 +187,7 @@ nav {
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 .state-msg {
   flex: 1; display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
+  align-items: center; justify-content: space-evenly;
   gap: 12px; padding: 80px 32px;
   font-family: var(--ff-mono); font-size: 12px;
   color: var(--ink3); letter-spacing: 0.04em;
@@ -304,7 +304,7 @@ table.wt tbody td.td-lineup { text-align: left; }
 /* ── Shot profile heatmap ────────────────────────────────────── */
 .shot-heatmap-wrap {
   display: flex; gap: 20px; padding: 16px 28px 8px;
-  justify-content: center; flex-wrap: wrap; flex-shrink: 0;
+  justify-content: space-evenly; flex-wrap: wrap; flex-shrink: 0;
 }
 .shot-zone-wrap {
   padding: 16px 28px 4px; flex-shrink: 0;
@@ -312,7 +312,7 @@ table.wt tbody td.td-lineup { text-align: left; }
 .court-3d-outer {
   perspective: 700px;
   perspective-origin: 50% 110%;
-  display: flex; justify-content: center;
+  display: flex; justify-content: space-evenly;
 }
 .court-3d-inner {
   transform: rotateX(44deg);
@@ -421,7 +421,7 @@ table.wt tbody td.td-lineup { text-align: left; }
   .nav-wordmark { padding: 13px 0; }
   .nav-auth { padding: 13px 0; }
   .nav-tabs {
-    position: static; transform: none; top: auto; left: auto; order: 10; flex: 0 0 100%; justify-content: center; overflow-x: auto; scrollbar-width: none;
+    position: static; transform: none; top: auto; left: auto; order: 10; flex: 0 0 100%; justify-content: space-evenly; overflow-x: auto; scrollbar-width: none;
     flex-wrap: nowrap; border-top: 1px solid var(--rule);
     padding: 7px 0 9px; gap: 0;
   }
