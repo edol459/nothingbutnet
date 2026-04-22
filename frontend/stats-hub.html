@@ -51,8 +51,8 @@ nav {
 .nav-wordmark {
   font-family: var(--ff-serif); font-size: 20px;
   color: var(--ink); text-decoration: none;
-  display: flex; align-items: center; gap: 8px;
-  margin-right: 12px; letter-spacing: -0.01em;
+  display: flex; align-items: center; gap: 0;
+  margin-right: 12px; letter-spacing: -0.01em; flex-shrink: 0;
 }
 .nav-logo { height: 26px; width: auto; }
 .nav-wordmark span { color: var(--orange); }
@@ -81,13 +81,13 @@ nav {
   border: 1.5px solid var(--rule); display: block;
 }
 .nav-signout-btn {
-  font-family: var(--ff-mono); font-size: 11px;
-  letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--ink4); background: none; border: none;
-  padding: 6px 10px; border-radius: 4px; cursor: pointer;
-  transition: color .15s, background .15s;
+  font-family: var(--ff-mono); font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--ink3); background: none; border: none;
+  padding: 4px 6px; cursor: pointer;
+  transition: color .15s;
 }
-.nav-signout-btn:hover { color: var(--ink); background: var(--paper2); }
+.nav-signout-btn:hover { color: var(--ink); }
 
 /* ── Page ────────────────────────────────────────────── */
 .page { padding-top: var(--nav-h); }
