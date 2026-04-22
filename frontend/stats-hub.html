@@ -94,7 +94,7 @@ nav {
 .hub-wrap { max-width: 1080px; margin: 0 auto; padding: 0 36px 72px; }
 
 /* ── Hero ────────────────────────────────────────────── */
-.hub-hero { padding: 56px 0 40px; }
+.hub-hero { padding: 40px 0 40px; }
 .hub-eyebrow {
   font-family: var(--ff-mono); font-size: 10px;
   letter-spacing: 0.12em; text-transform: uppercase;
@@ -268,8 +268,9 @@ nav {
   }
   .nav-tabs::-webkit-scrollbar { display: none; }
   .nav-tab { white-space: nowrap; padding: 5px 12px; }
-  .tool-card { grid-template-columns: 1fr; }
-  .tool-preview { display: none; }
+  .tool-card { grid-template-columns: 1fr; min-height: unset; gap: 14px; padding: 18px 18px 16px; }
+  .tool-name { font-size: 22px; }
+  .tool-cta { padding-top: 10px; }
   .hub-wrap { padding: 0 16px 48px; }
   .hub-hero { padding: 40px 0 28px; }
 }
@@ -291,7 +292,6 @@ nav {
   <div class="hub-wrap">
 
     <header class="hub-hero">
-      <div class="hub-eyebrow">ydkball · Stats</div>
       <h1 class="hub-headline">The <em>stats</em> desk.</h1>
       <p class="hub-dek">A variety of analytical tools for any question you're trying to answer.</p>
     </header>
