@@ -1425,10 +1425,14 @@ def game_page():
 def builder_page():
     return app.send_static_file("builder.html")
 
-# ── Serve stats.html (renamed from index.html) ────────────────────
-# Add this AFTER renaming your old index.html → stats.html
-@app.route("/stats.html")
 @app.route("/stats")
+@app.route("/stats-hub")
+@app.route("/stats-hub.html")
+def stats_hub():
+    return app.send_static_file("stats-hub.html")
+
+@app.route("/leaderboard")
+@app.route("/stats.html")
 def stats_page():
     return app.send_static_file("stats.html")
 

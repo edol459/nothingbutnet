@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stats — ydkball</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/night-mode.css">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --paper:     #F5F0E8;
+  --paper2:    #eeecea;
+  --paper3:    #e5e2dc;
+  --bg-card:   #FDFAF4;
+  --rule:      #d8d5cf;
+  --ink:       #0c0c0d;
+  --ink2:      #2a2a2e;
+  --ink3:      #6b6b78;
+  --ink4:      #a8a8b3;
+  --orange:    #e8530a;
+  --orange-lt: #fff0ea;
+  --green:     #1a7a4a;
+  --red:       #c0392b;
+  --ff-serif:  'DM Serif Display', Georgia, serif;
+  --ff-sans:   'Instrument Sans', system-ui, sans-serif;
+  --ff-mono:   'DM Mono', 'Courier New', monospace;
+  --nav-h: 56px;
+}
+
+body {
+  font-family: var(--ff-sans);
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Nav ─────────────────────────────────────────────── */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  height: var(--nav-h);
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  display: flex; align-items: center;
+  padding: 0 24px; gap: 8px;
+}
+.nav-wordmark {
+  font-family: var(--ff-serif); font-size: 20px;
+  color: var(--ink); text-decoration: none;
+  display: flex; align-items: center; gap: 8px;
+  margin-right: 12px; letter-spacing: -0.01em;
+}
+.nav-logo { height: 26px; width: auto; }
+.nav-wordmark span { color: var(--orange); }
+.nav-tabs { display: flex; gap: 2px; }
+.nav-tab {
+  font-family: var(--ff-mono); font-size: 11px;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink3); text-decoration: none;
+  padding: 6px 14px; border-radius: 4px;
+  transition: color .15s, background .15s;
+}
+.nav-tab:hover  { color: var(--ink); background: var(--paper2); }
+.nav-tab.active { color: var(--ink); background: var(--paper3); }
+.nav-auth { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.nav-signin-btn {
+  font-family: var(--ff-mono); font-size: 11px;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink3); text-decoration: none;
+  padding: 6px 14px; border-radius: 4px;
+  border: 1px solid var(--rule);
+  transition: color .15s, background .15s;
+}
+.nav-signin-btn:hover { color: var(--ink); background: var(--paper2); }
+
+/* ── Page ────────────────────────────────────────────── */
+.page { padding-top: var(--nav-h); }
+.hub-wrap { max-width: 1080px; margin: 0 auto; padding: 0 36px 72px; }
+
+/* ── Hero ────────────────────────────────────────────── */
+.hub-hero { padding: 56px 0 40px; }
+.hub-eyebrow {
+  font-family: var(--ff-mono); font-size: 10px;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink4); margin-bottom: 14px;
+}
+.hub-headline {
+  font-family: var(--ff-serif);
+  font-size: clamp(30px, 3vw, 60px);
+  letter-spacing: -0.02em; line-height: 1.05;
+  color: var(--ink); margin-bottom: 18px; max-width: 720px;
+}
+.hub-headline em { color: var(--orange); font-style: italic; }
+.hub-dek {
+  font-family: var(--ff-sans); font-size: 15.5px;
+  color: var(--ink2); line-height: 1.55; max-width: 580px;
+}
+.hub-rule { height: 1px; background: var(--rule); border: none; }
+
+/* ── Grid ────────────────────────────────────────────── */
+.hub-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+  margin-top: 28px;
+}
+
+/* ── Tool card ───────────────────────────────────────── */
+.tool-card {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+  background: var(--bg-card);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 24px 26px;
+  text-decoration: none;
+  color: inherit;
+  min-height: 220px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.tool-card:hover {
+  border-color: var(--orange);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.07);
+}
+.tool-card-left { display: flex; flex-direction: column; }
+.tool-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.tool-icon { color: var(--ink); flex-shrink: 0; }
+.tool-badge {
+  font-family: var(--ff-mono); font-size: 8.5px;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 2px;
+  border: 1px solid var(--orange); color: var(--orange);
+  line-height: 1.4;
+}
+.tool-name {
+  font-family: var(--ff-serif); font-size: 28px;
+  color: var(--ink); letter-spacing: -0.02em; line-height: 1;
+  margin-bottom: 10px;
+}
+.tool-blurb {
+  font-family: var(--ff-sans); font-size: 13.5px;
+  color: var(--ink2); line-height: 1.55; flex: 1;
+}
+.tool-cta {
+  margin-top: auto; padding-top: 14px;
+  font-family: var(--ff-mono); font-size: 10px;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--orange);
+}
+.tool-preview {
+  background: var(--paper);
+  border: 1px solid var(--paper3);
+  border-radius: 6px;
+  padding: 14px;
+  overflow: hidden;
+}
+
+/* ── Coming soon ─────────────────────────────────────── */
+.coming-soon {
+  border: 1.5px dashed var(--rule);
+  border-radius: 10px;
+  padding: 24px 26px;
+  min-height: 220px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 8px;
+}
+.coming-soon-label {
+  font-family: var(--ff-mono); font-size: 10px;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink4);
+}
+.coming-soon-title {
+  font-family: var(--ff-serif); font-size: 20px;
+  color: var(--ink3); letter-spacing: -0.01em;
+}
+.coming-soon-sub {
+  font-family: var(--ff-sans); font-size: 12px;
+  color: var(--ink4); text-align: center; max-width: 240px;
+}
+
+/* ── Mini preview atoms ──────────────────────────────── */
+.mini-eyebrow {
+  font-family: var(--ff-mono); font-size: 10px;
+  letter-spacing: 0.10em; text-transform: uppercase;
+  color: var(--ink4); margin-bottom: 8px;
+}
+/* leaderboard */
+.mini-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 0; border-bottom: 1px solid var(--paper3);
+}
+.mini-row:last-child { border-bottom: none; }
+.mini-rank { font-family: var(--ff-mono); font-size: 9px; color: var(--ink4); width: 14px; flex-shrink: 0; }
+.mini-name { flex: 1; font-family: var(--ff-sans); font-size: 11.5px; font-weight: 600; color: var(--ink); }
+.mini-team { font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); }
+.mini-val  { font-family: var(--ff-mono); font-size: 11px; font-weight: 500; color: var(--ink); }
+/* on/off player cards */
+.mini-wc-row { display: flex; justify-content: center; gap: 20px; padding: 8px 0 6px; }
+.mini-wc { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.mini-wc img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 2px solid var(--rule); }
+.mini-wc-name { font-family: var(--ff-sans); font-size: 10px; font-weight: 600; color: var(--ink3); }
+.mini-wc-val { font-family: var(--ff-mono); font-size: 11px; font-weight: 500; }
+.mini-wc.on img { border-color: var(--orange); }
+.mini-wc.on .mini-wc-name { color: var(--orange); }
+.mini-wc.off img { border-color: var(--rule); filter: grayscale(0.8) opacity(0.45); }
+.mini-wc.off .mini-wc-name { color: var(--ink4); text-decoration: line-through; }
+.mini-wc-val.pos { color: var(--green); }
+.mini-wc-val.neg { color: var(--red); }
+.mini-wc-labels { display: flex; justify-content: center; gap: 20px; padding-top: 6px; border-top: 1px solid var(--paper3); }
+.mini-wc-label { font-family: var(--ff-mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; width: 48px; text-align: center; }
+.mini-wc-label.on  { color: var(--orange); }
+.mini-wc-label.off { color: var(--ink4); }
+/* compare bars */
+.mini-cmp-row { margin-bottom: 8px; }
+.mini-cmp-labels { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+.mini-cmp-lbl { font-family: var(--ff-mono); font-size: 9px; color: var(--ink4); letter-spacing: 0.08em; }
+.mini-cmp-val { font-family: var(--ff-mono); font-size: 9.5px; color: var(--ink); font-weight: 500; }
+.mini-cmp-bars { display: flex; gap: 2px; align-items: center; height: 4px; }
+.mini-cmp-a { height: 3px; background: var(--ink); border-radius: 1px; }
+.mini-cmp-gap { height: 1px; background: var(--paper3); min-width: 4px; }
+.mini-cmp-b { height: 3px; background: var(--orange); border-radius: 1px; }
+/* builder chips */
+.mini-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+.mini-chip {
+  font-family: var(--ff-mono); font-size: 9px;
+  background: var(--ink); color: var(--paper);
+  padding: 2px 7px; border-radius: 10px; letter-spacing: 0.03em;
+}
+.mini-result {
+  display: flex; align-items: baseline; gap: 8px;
+  padding-top: 6px; border-top: 1px solid var(--paper3);
+}
+.mini-result-rank { font-family: var(--ff-mono); font-size: 9px; color: var(--ink4); }
+.mini-result-name { font-family: var(--ff-sans); font-size: 12px; font-weight: 600; color: var(--ink); }
+.mini-result-team { font-family: var(--ff-mono); font-size: 9px; color: var(--ink4); }
+.mini-result-val  { margin-left: auto; font-family: var(--ff-mono); font-size: 13px; color: var(--orange); font-weight: 500; }
+
+/* ── Responsive ──────────────────────────────────────── */
+@media (max-width: 820px) {
+  .hub-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .tool-card { grid-template-columns: 1fr; }
+  .tool-preview { display: none; }
+  .hub-wrap { padding: 0 16px 48px; }
+  .hub-hero { padding: 40px 0 28px; }
+  nav { padding: 0 16px; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <nav>
+    <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
+    <div class="nav-tabs">
+      <a class="nav-tab" href="/">Home</a>
+      <a class="nav-tab" href="/reviews">BasketBoxd</a>
+      <a class="nav-tab active" href="/stats">Stats</a>
+    </div>
+    <div class="nav-auth" id="nav-auth-slot"></div>
+  </nav>
+
+  <div class="hub-wrap">
+
+    <header class="hub-hero">
+      <div class="hub-eyebrow">ydkball · Stats</div>
+      <h1 class="hub-headline">The <em>stats</em> desk.</h1>
+      <p class="hub-dek">A variety of analytical tools for any question you're trying to answer.</p>
+    </header>
+
+    <hr class="hub-rule">
+
+    <div class="hub-grid">
+
+      <!-- Stats Table -->
+      <a class="tool-card" href="/leaderboard">
+        <div class="tool-card-left">
+          <div class="tool-card-header">
+            <svg class="tool-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/>
+            </svg>
+          </div>
+          <div class="tool-name">Stats Tables</div>
+          <p class="tool-blurb">Player stats tables. Per Game, Totals, Advanced, Tracking. Sort, filter, and dig in.</p>
+          <span class="tool-cta">Open Stats Tables →</span>
+        </div>
+        <div class="tool-preview">
+          <div class="mini-eyebrow">PPG · 2025–26</div>
+          <div class="mini-row"><span class="mini-rank">1</span><span class="mini-name">SGA</span><span class="mini-team">OKC</span><span class="mini-val">31.8</span></div>
+          <div class="mini-row"><span class="mini-rank">2</span><span class="mini-name">Luka Dončić</span><span class="mini-team">DAL</span><span class="mini-val">30.1</span></div>
+          <div class="mini-row"><span class="mini-rank">3</span><span class="mini-name">Jayson Tatum</span><span class="mini-team">BOS</span><span class="mini-val">28.4</span></div>
+          <div class="mini-row"><span class="mini-rank">4</span><span class="mini-name">Ant Edwards</span><span class="mini-team">MIN</span><span class="mini-val">27.9</span></div>
+        </div>
+      </a>
+
+      <!-- WoWY -->
+      <a class="tool-card" href="/wowy">
+        <div class="tool-card-left">
+          <div class="tool-card-header">
+            <svg class="tool-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="9" cy="12" r="5.5"/><circle cx="15" cy="12" r="5.5"/>
+              <path d="M6 12h3M15 10v4M13 12h4"/>
+            </svg>
+          </div>
+          <div class="tool-name">WoWY</div>
+          <p class="tool-blurb">With-or-without-you on/off splits. See how a team performs when any player sits.</p>
+          <span class="tool-cta">Open WoWY →</span>
+        </div>
+        <div class="tool-preview">
+          <div class="mini-eyebrow">Example · Jokić · NRtg</div>
+          <div class="mini-wc-row">
+            <div class="mini-wc on">
+              <img src="https://cdn.nba.com/headshots/nba/latest/260x190/203999.png" alt="">
+              <span class="mini-wc-name">Jokić</span>
+              <span class="mini-wc-val pos">+9.1</span>
+            </div>
+            <div class="mini-wc off">
+              <img src="https://cdn.nba.com/headshots/nba/latest/260x190/203999.png" alt="">
+              <span class="mini-wc-name">Jokić</span>
+              <span class="mini-wc-val neg">−6.4</span>
+            </div>
+          </div>
+          <div class="mini-wc-labels">
+            <span class="mini-wc-label on">ON</span>
+            <span class="mini-wc-label off">OFF</span>
+          </div>
+        </div>
+      </a>
+
+      <!-- Compare -->
+      <a class="tool-card" href="/compare">
+        <div class="tool-card-left">
+          <div class="tool-card-header">
+            <svg class="tool-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 20V8M20 20V4M12 20V12"/><path d="M2 20h20"/>
+            </svg>
+          </div>
+          <div class="tool-name">Compare</div>
+          <p class="tool-blurb">Side-by-side player comparison. Stack any two seasons across every stat that matters.</p>
+          <span class="tool-cta">Open Compare →</span>
+        </div>
+        <div class="tool-preview">
+          <div class="mini-eyebrow">SGA vs Jokić</div>
+          <div class="mini-cmp-row">
+            <div class="mini-cmp-labels"><span class="mini-cmp-val">31.8</span><span class="mini-cmp-lbl">PTS</span><span class="mini-cmp-val">28.2</span></div>
+            <div class="mini-cmp-bars"><div class="mini-cmp-a" style="flex:0.92"></div><div class="mini-cmp-gap"></div><div class="mini-cmp-b" style="flex:0.65"></div></div>
+          </div>
+          <div class="mini-cmp-row">
+            <div class="mini-cmp-labels"><span class="mini-cmp-val">6.1</span><span class="mini-cmp-lbl">AST</span><span class="mini-cmp-val">10.0</span></div>
+            <div class="mini-cmp-bars"><div class="mini-cmp-a" style="flex:0.55"></div><div class="mini-cmp-gap"></div><div class="mini-cmp-b" style="flex:0.95"></div></div>
+          </div>
+          <div class="mini-cmp-row">
+            <div class="mini-cmp-labels"><span class="mini-cmp-val">5.2</span><span class="mini-cmp-lbl">REB</span><span class="mini-cmp-val">13.8</span></div>
+            <div class="mini-cmp-bars"><div class="mini-cmp-a" style="flex:0.35"></div><div class="mini-cmp-gap"></div><div class="mini-cmp-b" style="flex:0.98"></div></div>
+          </div>
+        </div>
+      </a>
+
+      <!-- Builder -->
+      <a class="tool-card" href="/builder">
+        <div class="tool-card-left">
+          <div class="tool-card-header">
+            <svg class="tool-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h14M18 18h2"/>
+              <circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>
+            </svg>
+            <span class="tool-badge">BETA</span>
+          </div>
+          <div class="tool-name">Builder</div>
+          <p class="tool-blurb">Build a custom player composite. Pick any stats, weight by impact, rank the league.</p>
+          <span class="tool-cta">Open Builder →</span>
+        </div>
+        <div class="tool-preview">
+          <div class="mini-eyebrow">Example · "Two-way guard"</div>
+          <div class="mini-chips">
+            <span class="mini-chip">STL</span>
+            <span class="mini-chip">DRtg</span>
+            <span class="mini-chip">AST/TO</span>
+            <span class="mini-chip">TS%</span>
+            <span class="mini-chip">3P%</span>
+          </div>
+          <div class="mini-result">
+            <span class="mini-result-rank">#1</span>
+            <span class="mini-result-name">Jrue Holiday</span>
+            <span class="mini-result-team">BOS</span>
+            <span class="mini-result-val">94.2</span>
+          </div>
+        </div>
+      </a>
+
+      <!-- Coming soon -->
+      <div class="coming-soon">
+        <div class="coming-soon-label">Reserved · TBA</div>
+        <div class="coming-soon-title">More tools soon.</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+function initNavAuth() {
+  const slot = document.getElementById('nav-auth-slot');
+  if (!slot) return;
+  const token = localStorage.getItem('ydkball_token');
+  if (!token) {
+    slot.innerHTML = '<a class="nav-signin-btn" href="/profile">Sign in</a>';
+    return;
+  }
+  fetch('/auth/me', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(r => r.ok ? r.json() : null)
+    .then(user => {
+      if (!user) { slot.innerHTML = '<a class="nav-signin-btn" href="/profile">Sign in</a>'; return; }
+      const serverNight = user.night_mode === true;
+      const localNight = localStorage.getItem('ydkball_night') === '1';
+      if (serverNight !== localNight) {
+        if (serverNight) { document.documentElement.classList.add('night-mode'); localStorage.setItem('ydkball_night', '1'); }
+        else { document.documentElement.classList.remove('night-mode'); localStorage.removeItem('ydkball_night'); }
+      }
+      const av = user.avatar_url
+        ? `<img src="${user.avatar_url}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;">`
+        : `<span style="width:28px;height:28px;border-radius:50%;background:var(--orange);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--ff-mono);font-size:12px;font-weight:600;">${(user.username||'?')[0].toUpperCase()}</span>`;
+      slot.innerHTML = `<a href="/profile" style="display:flex;align-items:center;gap:8px;text-decoration:none;">${av}</a>`;
+    })
+    .catch(() => { slot.innerHTML = '<a class="nav-signin-btn" href="/profile">Sign in</a>'; });
+}
+initNavAuth();
+</script>
+</body>
+</html>
