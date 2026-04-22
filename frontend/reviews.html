@@ -797,6 +797,17 @@
   }
   .attended-badge svg { width: 11px; height: 11px; flex-shrink: 0; }
 
+  /* Like button */
+  .btn-like {
+    display: flex; align-items: center; gap: 4px;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--ink-3); background: none; border: none;
+    cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: color 0.12s, background 0.12s;
+  }
+  .btn-like:hover { color: var(--ink); background: rgba(0,0,0,0.04); }
+  .btn-like.liked { color: var(--orange); }
+  .btn-like svg { width: 13px; height: 13px; flex-shrink: 0; }
+
   /* Reply section */
   .review-card-footer { display: flex; align-items: center; gap: 2px; margin-top: 8px; }
   .btn-reply-card {
@@ -1241,15 +1252,14 @@ document.querySelectorAll('.tab').forEach(btn => {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // SHARED REVIEW CARD RENDERER
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function buildReviewCard(r, i, { showLikes = false } = {}) {
+function buildReviewCard(r, i) {
   const div = document.createElement('div');
   div.className = 'review-card';
   div.style.animationDelay = `${i * 0.04}s`;
   div.style.cursor = 'pointer';
   div.addEventListener('click', () => goToGame(r.game_id));
-  const likeBadge = showLikes && r.like_count > 0
-    ? `<span style="font-family:var(--mono);font-size:0.7rem;color:var(--ink-3);margin-left:4px">♥ ${r.like_count}</span>`
-    : '';
+  const heartIcon = `<svg viewBox="0 0 20 20" fill="${r.liked_by_me ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8"><path d="M10 17s-7-4.35-7-9a4 4 0 0 1 7-2.646A4 4 0 0 1 17 8c0 4.65-7 9-7 9z"/></svg>`;
+  const likeLabel = r.like_count > 0 ? r.like_count : '';
   div.innerHTML = `
     ${avatarEl(r.display_name, r.avatar_url, 40, r.user_id, r.favorite_team)}
     <div class="review-body">
@@ -1257,7 +1267,6 @@ function buildReviewCard(r, i, { showLikes = false } = {}) {
         <a href="/profile/${r.user_id}" class="reviewer-name" onclick="event.stopPropagation()" style="text-decoration:none;color:inherit">${r.display_name}</a>
         <span class="review-action">reviewed</span>
         <span class="review-game-link" onclick="goToGame('${r.game_id}')">${r.away_team_abbr} @ ${r.home_team_abbr}</span>
-        ${likeBadge}
       </div>
       ${scoreline(r)}
       <div class="review-rating-row">
@@ -1270,6 +1279,9 @@ function buildReviewCard(r, i, { showLikes = false } = {}) {
         ${r.tags ? r.tags.map(tagPillHTML).join('') : ''}
       </div>` : ''}
       <div class="review-card-footer">
+        <button class="btn-like${r.liked_by_me ? ' liked' : ''}" data-review-id="${r.id}" title="Like this review">
+          ${heartIcon}<span class="like-count">${likeLabel}</span>
+        </button>
         <button class="btn-reply-card" data-review-id="${r.id}">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2 4h16v10H6l-4 4V4z"/></svg>
           ${r.reply_count > 0 ? `${r.reply_count} repl${r.reply_count === 1 ? 'y' : 'ies'}` : 'Reply'}
@@ -1278,6 +1290,21 @@ function buildReviewCard(r, i, { showLikes = false } = {}) {
     </div>
     <div class="reply-section-card" id="reply-section-card-${r.id}" data-review-id="${r.id}"></div>
   `;
+
+  // Like button
+  div.querySelector('.btn-like').addEventListener('click', async e => {
+    e.stopPropagation();
+    if (!currentUser) { window.location.href = `/auth/google/login?next=${encodeURIComponent(window.location.pathname)}`; return; }
+    const btn = e.currentTarget;
+    const res = await fetch(`/api/reviews/${r.id}/like`, { method: 'POST' });
+    if (!res.ok) return;
+    const data = await res.json();
+    btn.classList.toggle('liked', data.liked);
+    const svg = btn.querySelector('svg');
+    if (svg) svg.setAttribute('fill', data.liked ? 'currentColor' : 'none');
+    const countEl = btn.querySelector('.like-count');
+    if (countEl) countEl.textContent = data.like_count > 0 ? data.like_count : '';
+  });
 
   // Reply button — stop propagation so card navigation doesn't fire
   div.querySelector('.btn-reply-card').addEventListener('click', e => {
@@ -1305,7 +1332,7 @@ async function loadMostLiked(append = false) {
   if (reviews.length === 0 && !append) {
     feed.innerHTML = `<div class="state-empty"><p>No liked reviews yet.<br>Start liking reviews to see them here!</p></div>`;
   } else {
-    reviews.forEach((r, i) => feed.appendChild(buildReviewCard(r, i, { showLikes: true })));
+    reviews.forEach((r, i) => feed.appendChild(buildReviewCard(r, i)));
   }
 
   likedState.offset += reviews.length;

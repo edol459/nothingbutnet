@@ -550,6 +550,150 @@ def run_builder():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# ── /api/builder/pctiles ──────────────────────────────────────
+
+@app.route("/api/builder/pctiles", methods=["GET"])
+def builder_pctiles():
+    """
+    Return per-player percentile data for client-side matching in the Builder.
+
+    Query params:
+      season, season_type, selected (comma-sep stat keys, max 10), min_minutes
+
+    Response:
+      {
+        "players": [
+          { "player_id": 123, "player_name": "...", "position_group": "G",
+            "team_abbr": "GSW", "min": 1200, "pctiles": {"pts": 91.2, ...} }
+        ],
+        "impact_weights": { "pts": 0.62, ... },
+        "season": "2024-25",
+        "n": 320
+      }
+    """
+    season      = request.args.get("season",      DEFAULT_SEASON)
+    season_type = request.args.get("season_type", DEFAULT_SEASON_TYPE)
+    raw_sel     = request.args.get("selected",    "")
+    selected    = [s.strip() for s in raw_sel.split(",") if s.strip()]
+    min_minutes = int(request.args.get("min_minutes", 500))
+    raw_pos     = request.args.get("positions", "")
+    positions   = [p.strip() for p in raw_pos.split(",") if p.strip()]
+
+    if not selected:
+        return jsonify({"error": "No stats selected"}), 400
+
+    # Load win-correlation weights for impact mode
+    impact_weights = {}
+    season_key = season.replace('-', '_')
+    corr_path  = os.path.join(
+        os.path.dirname(__file__), 'ingest', 'data',
+        f'win_correlations_{season_key}.json'
+    )
+    if os.path.exists(corr_path):
+        with open(corr_path) as f:
+            corr_data = json.load(f)
+        raw_w = corr_data.get('weights', corr_data.get('correlations', {}))
+        for stat in selected:
+            if stat in raw_w:
+                impact_weights[stat] = round(abs(float(raw_w[stat])), 4)
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+
+        cur.execute("""
+            SELECT stat_key, pctile_map
+            FROM player_pctiles
+            WHERE season = %s AND season_type = %s AND stat_key = ANY(%s)
+        """, (season, season_type, selected))
+        pct_maps = {r["stat_key"]: r["pctile_map"] for r in cur.fetchall()}
+
+        # Use substring matching so compound groups (GF, FC) are included
+        if positions:
+            pos_conditions = " OR ".join(["p.position_group ILIKE %s"] * len(positions))
+            pos_clause = f"AND ({pos_conditions})"
+            pos_param  = [f"%{p}%" for p in positions]
+        else:
+            pos_clause = ""
+            pos_param  = []
+        cur.execute(f"""
+            SELECT ps.*, p.player_name, p.position_group
+            FROM player_seasons ps
+            JOIN players p ON ps.player_id = p.player_id
+            WHERE ps.season = %s AND ps.season_type = %s AND ps.min >= %s
+            {pos_clause}
+        """, [season, season_type, min_minutes] + pos_param)
+        players = cur.fetchall()
+        cur.close(); conn.close()
+
+        # Stats stored as season totals — divide by GP for per-game display value
+        TOTAL_KEYS = {
+            'drives', 'drive_fga', 'drive_fgm', 'drive_pts', 'drive_passes', 'drive_pf', 'drive_tov',
+            'bad_pass_tov', 'lost_ball_tov', 'passes_made', 'passes_received', 'ast_pts_created',
+            'potential_ast', 'touches', 'paint_touches', 'elbow_touches',
+            'pull_up_fga', 'pull_up_fgm', 'pull_up_fg3a', 'cs_fga', 'cs_fgm', 'cs_fg3a',
+            'contested_shots', 'contested_2pt', 'contested_3pt', 'deflections',
+            'def_rim_fga', 'def_rim_fgm', 'screen_ast_pts',
+            'cd_fga_vt', 'cd_fga_tg', 'cd_fga_op', 'cd_fga_wo',
+            'cd_fgm_vt', 'cd_fgm_tg', 'cd_fgm_op', 'cd_fgm_wo',
+            'iso_fga', 'pnr_bh_fga', 'transition_fga', 'pts_paint',
+        }
+
+        def get_raw_value(row, stat):
+            if stat == 'pot_ast_per_bad_pass_tov':
+                pa  = row.get('potential_ast')
+                bpt = row.get('bad_pass_tov')
+                if pa is not None and bpt and float(bpt) > 0:
+                    return round(float(pa) / float(bpt), 2)
+                return None
+            val = row.get(stat)
+            if val is None:
+                return None
+            val = float(val)
+            if stat in TOTAL_KEYS:
+                gp = row.get('gp')
+                if gp and float(gp) > 0:
+                    val = val / float(gp)
+            return round(val, 3)
+
+        result = []
+        for p in players:
+            pid = str(p["player_id"])
+            pctiles = {}
+            values  = {}
+            covered = 0
+            for stat in selected:
+                pmap = pct_maps.get(stat, {})
+                pct  = pmap.get(pid) or pmap.get(int(pid))
+                if pct is not None:
+                    pctiles[stat] = round(float(pct), 1)
+                    covered += 1
+                raw = get_raw_value(p, stat)
+                if raw is not None:
+                    values[stat] = raw
+            if covered < len(selected) * 0.8:
+                continue
+            result.append({
+                "player_id":      int(p["player_id"]),
+                "player_name":    p["player_name"],
+                "position_group": p["position_group"],
+                "team_abbr":      p["team_abbr"],
+                "min":            float(p["min"]),
+                "pctiles":        pctiles,
+                "values":         values,
+            })
+
+        return jsonify({
+            "players":        result,
+            "impact_weights": impact_weights,
+            "season":         season,
+            "n":              len(result),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 """
 ADD THESE ROUTES TO backend/server.py
 Paste them before the `
@@ -2278,30 +2422,57 @@ def get_top_rated_games():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/reviews/most-liked")
 def get_most_liked_reviews():
-    limit  = min(int(request.args.get("limit", 20)), 100)
-    offset = int(request.args.get("offset", 0))
+    limit   = min(int(request.args.get("limit", 20)), 100)
+    offset  = int(request.args.get("offset", 0))
+    user    = current_user()
+    user_id = user["id"] if user else None
     try:
         conn = get_conn()
         cur  = conn.cursor()
-        cur.execute("""
-            SELECT
-                gr.id, gr.game_id, gr.rating, gr.review_text,
-                gr.created_at, gr.updated_at,
-                COALESCE(gr.tags, '[]'::jsonb) AS tags,
-                gr.attended,
-                u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team,
-                g.game_date, g.home_team_abbr, g.away_team_abbr,
-                g.home_score, g.away_score,
-                COUNT(rl.review_id) AS like_count,
-                (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
-            FROM game_reviews gr
-            JOIN users u  ON gr.user_id = u.id
-            JOIN games g  ON gr.game_id = g.game_id
-            LEFT JOIN review_likes rl ON rl.review_id = gr.id
-            GROUP BY gr.id, u.id, g.game_id
-            ORDER BY like_count DESC, gr.created_at DESC
-            LIMIT %s OFFSET %s
-        """, (limit, offset))
+        if user_id:
+            cur.execute("""
+                SELECT
+                    gr.id, gr.game_id, gr.rating, gr.review_text,
+                    gr.created_at, gr.updated_at,
+                    COALESCE(gr.tags, '[]'::jsonb) AS tags,
+                    gr.attended,
+                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team,
+                    g.game_date, g.home_team_abbr, g.away_team_abbr,
+                    g.home_score, g.away_score,
+                    COUNT(rl.review_id)                AS like_count,
+                    BOOL_OR(rl_me.user_id IS NOT NULL) AS liked_by_me,
+                    (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
+                FROM game_reviews gr
+                JOIN users u  ON gr.user_id = u.id
+                JOIN games g  ON gr.game_id = g.game_id
+                LEFT JOIN review_likes rl    ON rl.review_id    = gr.id
+                LEFT JOIN review_likes rl_me ON rl_me.review_id = gr.id
+                                            AND rl_me.user_id   = %s
+                GROUP BY gr.id, u.id, g.game_id
+                ORDER BY like_count DESC, gr.created_at DESC
+                LIMIT %s OFFSET %s
+            """, (user_id, limit, offset))
+        else:
+            cur.execute("""
+                SELECT
+                    gr.id, gr.game_id, gr.rating, gr.review_text,
+                    gr.created_at, gr.updated_at,
+                    COALESCE(gr.tags, '[]'::jsonb) AS tags,
+                    gr.attended,
+                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team,
+                    g.game_date, g.home_team_abbr, g.away_team_abbr,
+                    g.home_score, g.away_score,
+                    COUNT(rl.review_id) AS like_count,
+                    FALSE               AS liked_by_me,
+                    (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
+                FROM game_reviews gr
+                JOIN users u  ON gr.user_id = u.id
+                JOIN games g  ON gr.game_id = g.game_id
+                LEFT JOIN review_likes rl ON rl.review_id = gr.id
+                GROUP BY gr.id, u.id, g.game_id
+                ORDER BY like_count DESC, gr.created_at DESC
+                LIMIT %s OFFSET %s
+            """, (limit, offset))
         rows = cur.fetchall()
         cur.execute("SELECT COUNT(*) FROM game_reviews")
         total = cur.fetchone()["count"]
@@ -2328,26 +2499,57 @@ def get_most_liked_reviews():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/reviews/recent")
 def get_recent_reviews():
-    limit  = min(int(request.args.get("limit", 20)), 100)
-    offset = int(request.args.get("offset", 0))
+    limit   = min(int(request.args.get("limit", 20)), 100)
+    offset  = int(request.args.get("offset", 0))
+    user    = current_user()
+    user_id = user["id"] if user else None
     try:
         conn = get_conn()
         cur  = conn.cursor()
-        cur.execute("""
-            SELECT
-                gr.id, gr.game_id, gr.rating, gr.review_text,
-                gr.created_at, gr.updated_at,
-                COALESCE(gr.tags, '[]'::jsonb) AS tags,
-                u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team,
-                g.game_date, g.home_team_abbr, g.away_team_abbr,
-                g.home_score, g.away_score,
-                (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
-            FROM game_reviews gr
-            JOIN users u  ON gr.user_id = u.id
-            JOIN games g  ON gr.game_id = g.game_id
-            ORDER BY gr.created_at DESC
-            LIMIT %s OFFSET %s
-        """, (limit, offset))
+        if user_id:
+            cur.execute("""
+                SELECT
+                    gr.id, gr.game_id, gr.rating, gr.review_text,
+                    gr.created_at, gr.updated_at,
+                    COALESCE(gr.tags, '[]'::jsonb) AS tags,
+                    gr.attended,
+                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team,
+                    g.game_date, g.home_team_abbr, g.away_team_abbr,
+                    g.home_score, g.away_score,
+                    COUNT(rl.review_id)                        AS like_count,
+                    BOOL_OR(rl_me.user_id IS NOT NULL)         AS liked_by_me,
+                    (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
+                FROM game_reviews gr
+                JOIN users u  ON gr.user_id = u.id
+                JOIN games g  ON gr.game_id = g.game_id
+                LEFT JOIN review_likes rl    ON rl.review_id    = gr.id
+                LEFT JOIN review_likes rl_me ON rl_me.review_id = gr.id
+                                            AND rl_me.user_id   = %s
+                GROUP BY gr.id, u.id, g.game_id
+                ORDER BY gr.created_at DESC
+                LIMIT %s OFFSET %s
+            """, (user_id, limit, offset))
+        else:
+            cur.execute("""
+                SELECT
+                    gr.id, gr.game_id, gr.rating, gr.review_text,
+                    gr.created_at, gr.updated_at,
+                    COALESCE(gr.tags, '[]'::jsonb) AS tags,
+                    gr.attended,
+                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team,
+                    g.game_date, g.home_team_abbr, g.away_team_abbr,
+                    g.home_score, g.away_score,
+                    COUNT(rl.review_id) AS like_count,
+                    FALSE               AS liked_by_me,
+                    (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
+                FROM game_reviews gr
+                JOIN users u  ON gr.user_id = u.id
+                JOIN games g  ON gr.game_id = g.game_id
+                LEFT JOIN review_likes rl ON rl.review_id = gr.id
+                GROUP BY gr.id, u.id, g.game_id
+                ORDER BY gr.created_at DESC
+                LIMIT %s OFFSET %s
+            """, (limit, offset))
         rows = cur.fetchall()
         cur.execute("SELECT COUNT(*) FROM game_reviews")
         total = cur.fetchone()["count"]
