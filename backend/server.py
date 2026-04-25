@@ -1145,9 +1145,72 @@ def get_scoreboard():
         return jsonify(payload)
 
     except Exception as e:
+        # ScoreboardV3 failed (rate-limited on cloud) — last resort: CDN season schedule
+        if not is_past:
+            try:
+                sched = _fetch_nba_schedule()
+                if sched:
+                    dt_obj   = _dt.strptime(date, "%Y-%m-%d")
+                    sched_key = f"{dt_obj.month:02d}/{dt_obj.day:02d}/{dt_obj.year} 00:00:00"
+                    game_dates = sched.get("leagueSchedule", {}).get("gameDates", [])
+                    target = next((gd for gd in game_dates if gd.get("gameDate") == sched_key), None)
+                    if target is not None:
+                        games = []
+                        for g in target.get("games", []):
+                            away = g.get("awayTeam", {})
+                            home = g.get("homeTeam", {})
+                            games.append({
+                                "gameId":         g.get("gameId", ""),
+                                "gameStatus":     1,
+                                "gameStatusText": g.get("gameStatusText", ""),
+                                "period":         0,
+                                "gameClock":      "",
+                                "gameTimeUTC":    g.get("gameTimeUTC", ""),
+                                "away": {"abbr": away.get("teamTricode", ""), "score": 0,
+                                         "wins": None, "losses": None},
+                                "home": {"abbr": home.get("teamTricode", ""), "score": 0,
+                                         "wins": None, "losses": None},
+                            })
+                        _enrich_games_with_records(games)
+                        if games:
+                            return jsonify({"games": games, "date": date})
+            except Exception:
+                pass
         return jsonify({"error": str(e), "games": [], "date": date}), 200
- 
- 
+
+
+# ── /api/news ─────────────────────────────────────────────────────
+_news_cache: dict = {}  # {"payload": list, "ts": float}
+
+@app.route("/api/news")
+def get_news():
+    import xml.etree.ElementTree as ET
+    if _news_cache.get("payload") and _time.time() - _news_cache.get("ts", 0) < 300:
+        return jsonify({"status": "ok", "items": _news_cache["payload"]})
+    try:
+        resp = _requests.get(
+            "https://www.espn.com/espn/rss/nba/news",
+            headers={"User-Agent": "Mozilla/5.0 (compatible; NothingButNet/1.0)"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+        items = []
+        for item in root.iter("item"):
+            title    = (item.findtext("title") or "").strip()
+            link     = (item.findtext("link") or "").strip()
+            pub_date = (item.findtext("pubDate") or "").strip()
+            if title:
+                items.append({"title": title, "link": link, "pubDate": pub_date})
+            if len(items) >= 10:
+                break
+        _news_cache["payload"] = items
+        _news_cache["ts"] = _time.time()
+        return jsonify({"status": "ok", "items": items})
+    except Exception as ex:
+        return jsonify({"status": "error", "message": str(ex)}), 200
+
+
 # ── /api/top-performers?date=YYYY-MM-DD ──────────────────────────
 @app.route("/api/top-performers")
 def get_top_performers():
