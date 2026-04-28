@@ -1980,6 +1980,7 @@ async function shareReviewCard(card, btn) {
   const replySection = clone.querySelector('.reply-section-card');
   if (replySection) replySection.remove();
   clone.querySelector('.review-tags')?.remove();
+  clone.querySelector('.avatar-team-badge')?.remove();
   wrapper.appendChild(clone);
 
   const brand = document.createElement('div');

@@ -1685,6 +1685,7 @@ async function shareReviewItem(item, btn) {
   const footer = clone.querySelector('.review-footer');
   if (footer) footer.remove();
   clone.querySelector('.review-tags')?.remove();
+  clone.querySelector('.avatar-team-badge')?.remove();
   wrapper.appendChild(clone);
 
   const brand = document.createElement('div');
