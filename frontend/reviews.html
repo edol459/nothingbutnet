@@ -1979,6 +1979,7 @@ async function shareReviewCard(card, btn) {
   if (footer) footer.remove();
   const replySection = clone.querySelector('.reply-section-card');
   if (replySection) replySection.remove();
+  clone.querySelector('.review-tags')?.remove();
   wrapper.appendChild(clone);
 
   const brand = document.createElement('div');

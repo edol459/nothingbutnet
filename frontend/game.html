@@ -1684,6 +1684,7 @@ async function shareReviewItem(item, btn) {
   clone.style.cssText = '';
   const footer = clone.querySelector('.review-footer');
   if (footer) footer.remove();
+  clone.querySelector('.review-tags')?.remove();
   wrapper.appendChild(clone);
 
   const brand = document.createElement('div');

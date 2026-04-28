@@ -1751,6 +1751,7 @@ async function shareProfileReview(item, btn, r) {
   clone.style.cssText = 'cursor:default;border-bottom:none;';
   // Remove reply section row and any buttons from clone
   clone.querySelector('.review-item-reply-row')?.remove();
+  clone.querySelector('.review-tags')?.remove();
   clone.querySelectorAll('button').forEach(b => b.remove());
   wrapper.appendChild(clone);
 
