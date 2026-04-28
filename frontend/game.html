@@ -1699,12 +1699,17 @@ async function shareReviewItem(item, btn) {
     document.body.removeChild(wrapper);
     canvas.toBlob(async blob => {
       try {
-        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        const file = new File([blob], 'review.png', { type: 'image/png' });
+        if (navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ files: [file] });
+        } else {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        }
         btn.classList.add('copied');
-        btn.innerHTML = `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 10l4 4 8-8"/></svg> Copied!`;
+        btn.innerHTML = `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 10l4 4 8-8"/></svg>`;
         setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = origHTML; btn.disabled = false; }, 2000);
-      } catch {
-        window.open(canvas.toDataURL(), '_blank');
+      } catch (err) {
+        if (err.name !== 'AbortError') window.open(canvas.toDataURL(), '_blank');
         btn.innerHTML = origHTML;
         btn.disabled = false;
       }
