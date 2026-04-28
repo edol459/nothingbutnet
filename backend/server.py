@@ -1330,6 +1330,7 @@ def get_news():
             headers={"User-Agent": "Mozilla/5.0 (compatible; NothingButNet/1.0)"},
             timeout=10,
         )
+        print(f"[news] ESPN status={resp.status_code} len={len(resp.content)}", flush=True)
         resp.raise_for_status()
         root = ET.fromstring(resp.content)
         items = []
@@ -1341,10 +1342,15 @@ def get_news():
                 items.append({"title": title, "link": link, "pubDate": pub_date})
             if len(items) >= 10:
                 break
-        _news_cache["payload"] = items
-        _news_cache["ts"] = _time.time()
+        if items:
+            _news_cache["payload"] = items
+            _news_cache["ts"] = _time.time()
         return jsonify({"status": "ok", "items": items})
     except Exception as ex:
+        print(f"[news] error: {ex}", flush=True)
+        # Return stale cache rather than failing outright
+        if _news_cache.get("payload"):
+            return jsonify({"status": "ok", "items": _news_cache["payload"]})
         return jsonify({"status": "error", "message": str(ex)}), 200
 
 
