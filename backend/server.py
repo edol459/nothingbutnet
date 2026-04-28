@@ -741,6 +741,9 @@ _past_sb_cache: dict = {}   # date -> {"payload": dict, "ts": float}
 # ── Future-date cache (schedule can change — TTL 60 min) ──────────
 _future_sb_cache: dict = {}  # date -> {"payload": dict, "ts": float}
 
+# ── ESPN injury report cache (TTL 30 min) ────────────────────────
+_injury_cache: dict = {"data": {}, "ts": 0.0}
+
 # ── Full season schedule from CDN (cached 2 h — used for future dates) ──
 _schedule_cache: dict = {"data": None, "ts": 0.0}
 
@@ -1345,6 +1348,158 @@ def get_news():
         return jsonify({"status": "error", "message": str(ex)}), 200
 
 
+# ── Injury helpers ───────────────────────────────────────────────
+def _norm_name(name: str) -> str:
+    n = name.lower().strip()
+    for suffix in (" jr.", " sr.", " ii", " iii", " iv", " v"):
+        n = n.replace(suffix, "")
+    return n.strip()
+
+
+def _fetch_injury_report() -> dict:
+    """Fetch player injury statuses from ESPN. Returns {norm_name: status_lower}.
+    Cached 30 minutes; returns stale data on error."""
+    now = _time.time()
+    if now - _injury_cache["ts"] < 1800:
+        return _injury_cache["data"]
+    try:
+        url  = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
+        resp = _requests.get(url, timeout=8)
+        resp.raise_for_status()
+        injured = {}
+        for team_entry in resp.json().get("injuries", []):
+            for inj in team_entry.get("injuries", []):
+                name   = inj.get("athlete", {}).get("displayName", "").strip()
+                status = inj.get("status", "").lower()
+                if name:
+                    injured[_norm_name(name)] = status
+        _injury_cache["data"] = injured
+        _injury_cache["ts"]   = now
+        return injured
+    except Exception:
+        return _injury_cache["data"]
+
+
+def _is_out(player_name: str, injury_report: dict) -> bool:
+    """True if player is Out / Doubtful / Injured Reserve / Suspension."""
+    if not injury_report or not player_name:
+        return False
+    status = injury_report.get(_norm_name(player_name), "")
+    return status in ("out", "doubtful", "injured reserve", "out for season",
+                      "suspension", "not with team", "inactive")
+
+
+def _box_star(team_data: dict):
+    """Top P+R+A player ID from a CDN boxscore team dict (must have played ≥1 min)."""
+    best_id, best_total = None, -1
+    for p in team_data.get("players", []):
+        s = p.get("statistics", {})
+        min_str = s.get("minutes", "PT0M0.00S") or "PT0M0.00S"
+        try:
+            mins = float(min_str.replace("PT", "").replace("S", "").split("M")[0])
+        except Exception:
+            mins = 0
+        if mins < 1:
+            continue
+        total = (int(s.get("points", 0) or 0)
+                 + int(s.get("reboundsTotal", 0) or 0)
+                 + int(s.get("assists", 0) or 0))
+        if total > best_total:
+            best_total = total
+            best_id    = p.get("personId")
+    return best_id
+
+
+# ── /api/game-posters ────────────────────────────────────────────
+@app.route("/api/game-posters", methods=["POST"])
+def get_game_posters():
+    """
+    Returns best-fit player headshot IDs for each team per game.
+
+    Final games   → actual P+R+A leader from CDN boxscore.
+    Upcoming/live → highest season P+R+A among non-injured players.
+
+    Body:    {"games": [{"gameId":"...","away":"LAL","home":"BOS","status":3}, ...]}
+    Returns: {"posters": {"<gameId>": {"away": <playerId>, "home": <playerId>}}}
+    """
+    body  = request.get_json(force=True, silent=True) or {}
+    games = body.get("games", [])
+    if not games:
+        return jsonify({"posters": {}})
+
+    posters: dict = {}
+
+    # ── Final games: CDN boxscore actual leaders ──────────────────
+    final_games    = [g for g in games if int(g.get("status", 1) or 1) == 3]
+    nonfinal_games = [g for g in games if int(g.get("status", 1) or 1) != 3]
+
+    if final_games:
+        boxscores = _fetch_boxscores_parallel([g["gameId"] for g in final_games])
+        for g in final_games:
+            gid = g.get("gameId", "")
+            box = boxscores.get(gid)
+            if box:
+                posters[gid] = {
+                    "away": _box_star(box.get("awayTeam", {})),
+                    "home": _box_star(box.get("homeTeam", {})),
+                }
+            else:
+                nonfinal_games.append(g)  # CDN miss → fall back to season stats
+
+    # ── Upcoming / live: season stats + ESPN injury filter ────────
+    if nonfinal_games:
+        now    = _dt.utcnow()
+        season = (f"{now.year}-{str(now.year + 1)[2:]}"
+                  if now.month >= 10
+                  else f"{now.year - 1}-{str(now.year)[2:]}")
+
+        teams_needed = {(g.get("away") or "").upper() for g in nonfinal_games} | \
+                       {(g.get("home") or "").upper() for g in nonfinal_games}
+        teams_needed.discard("")
+
+        team_candidates: dict[str, list] = {}
+        try:
+            conn = get_conn()
+            cur  = conn.cursor()
+            for abbr in teams_needed:
+                cur.execute("""
+                    SELECT ps.player_id, p.player_name,
+                           COALESCE(ps.pts,0)+COALESCE(ps.ast,0)+COALESCE(ps.reb,0) AS total
+                    FROM player_seasons ps
+                    JOIN players p ON p.player_id = ps.player_id
+                    WHERE ps.team_abbr = %s
+                      AND ps.season = %s
+                      AND ps.season_type = 'Regular Season'
+                      AND COALESCE(ps.gp,0) >= 5
+                    ORDER BY total DESC
+                    LIMIT 5
+                """, (abbr, season))
+                team_candidates[abbr] = cur.fetchall()
+            cur.close(); conn.close()
+        except Exception as e:
+            return jsonify({"error": str(e), "posters": posters}), 500
+
+        injury_report = _fetch_injury_report()
+
+        def best_season_id(abbr):
+            for row in team_candidates.get(abbr, []):
+                if not _is_out(row["player_name"], injury_report):
+                    return row["player_id"]
+            rows = team_candidates.get(abbr, [])
+            return rows[0]["player_id"] if rows else None
+
+        for g in nonfinal_games:
+            gid = g.get("gameId", "")
+            if not gid:
+                continue
+            posters[gid] = {
+                "away": best_season_id((g.get("away") or "").upper()),
+                "home": best_season_id((g.get("home") or "").upper()),
+            }
+
+    return jsonify({"posters": posters})
+
+
 # ── /api/top-performers?date=YYYY-MM-DD ──────────────────────────
 @app.route("/api/top-performers")
 def get_top_performers():
@@ -1407,6 +1562,25 @@ def get_top_performers():
     # Fetch all boxscores in parallel, then collect player lines
     boxscores = _fetch_boxscores_parallel(game_ids)
     all_players = []
+    game_stars  = {}  # gameId → {away: playerId, home: playerId} — top scorer per team
+
+    def _top_scorer_id(team_data):
+        best_id, best_pts = None, -1
+        for p in team_data.get("players", []):
+            s = p.get("statistics", {})
+            min_str = s.get("minutes", "PT0M0.00S") or "PT0M0.00S"
+            try:
+                mins = float(min_str.replace("PT","").replace("S","").split("M")[0])
+            except Exception:
+                mins = 0
+            if mins < 1:
+                continue
+            pts = int(s.get("points", 0) or 0)
+            if pts > best_pts:
+                best_pts = pts
+                best_id  = p.get("personId")
+        return best_id
+
     for gid, box in boxscores.items():
         if not box:
             continue
@@ -1418,6 +1592,11 @@ def get_top_performers():
 
         game_status = box.get("gameStatus", 1)
         is_live     = game_status == 2
+
+        game_stars[gid] = {
+            "away": _top_scorer_id(away),
+            "home": _top_scorer_id(home),
+        }
 
         for team, abbr in [(away, away_abbr), (home, home_abbr)]:
             for p in team.get("players", []):
@@ -1450,7 +1629,7 @@ def get_top_performers():
     all_players.sort(key=lambda x: x["total"], reverse=True)
     top5 = all_players[:5]
 
-    return jsonify({"players": top5, "date": actual_date})
+    return jsonify({"players": top5, "date": actual_date, "game_stars": game_stars})
 
 
 # ── /api/preview/records/<away>/<home> ───────────────────────────

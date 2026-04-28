@@ -21,6 +21,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/night-mode.css">
+<script src="/team-colors.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -354,12 +355,12 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
   background: var(--paper2); border: 1px solid var(--rule);
   position: relative; cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
-  display: flex; flex-direction: column; align-items: center; justify-content: space-evenly;
+  display: flex; flex-direction: column;
 }
 .fav-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.10); border-color: var(--orange); }
 .fav-card-inner {
-  display: flex; flex-direction: column; align-items: center; justify-content: space-evenly;
-  gap: 0; padding: 0; width: 100%; height: 100%;
+  flex: 1; display: flex; flex-direction: column;
+  min-height: 0; width: 100%;
 }
 .fav-logos {
   display: flex; align-items: center; justify-content: space-evenly; gap: 8px;
@@ -368,10 +369,30 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .fav-logo { width: 62px; height: 62px; object-fit: contain; flex-shrink: 0; }
 .fav-logo-fallback { width: 62px; height: 62px; display: flex; align-items: center; justify-content: space-evenly; font-size: 26px; }
 .fav-vs { font-family: var(--ff-mono); font-size: 9px; color: var(--ink4); }
+.fav-poster {
+  position: relative; width: 100%; height: 100px; flex-shrink: 0; overflow: hidden;
+}
+.fav-poster-bg { position: absolute; inset: 0; }
+.fav-poster-logo {
+  position: absolute; width: 44px; height: 44px;
+  top: 50%; transform: translateY(-50%);
+  object-fit: contain;
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,0.25));
+  transition: opacity 0.2s;
+}
+.fav-poster-logo.away { left: 18px; }
+.fav-poster-logo.home { right: 18px; }
+.fav-poster-player {
+  position: absolute; width: 96px; height: 110px;
+  top: 0; object-fit: cover; object-position: top center; display: none;
+}
+.fav-poster-player.away { left: 0; }
+.fav-poster-player.home { right: 0; }
 .fav-info {
-  width: 100%; text-align: center; padding: 8px 8px 12px;
+  flex: 1; width: 100%; text-align: center; padding: 8px 8px 12px;
   border-top: 1px solid var(--rule);
   background: var(--paper3);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
 }
 .fav-teams { font-family: var(--ff-mono); font-size: 9px; color: var(--ink3); letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fav-score { font-family: var(--ff-serif); font-size: 14px; color: var(--ink); margin-top: 2px; font-weight: 600; }
@@ -413,10 +434,22 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .fav-picker-stars { font-size: 12px; color: var(--green); }
 
 @media (max-width: 640px) {
-  .fav-grid { gap: 6px; }
+  .fav-grid {
+    display: flex; flex-direction: row; flex-wrap: nowrap;
+    overflow-x: auto; gap: 8px;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .fav-grid::-webkit-scrollbar { display: none; }
+  .fav-card { flex-shrink: 0; width: 120px; aspect-ratio: 2/3; }
+  .fav-slot { flex-shrink: 0; width: 120px; aspect-ratio: 2/3; }
   .fav-logos { gap: 4px; padding: 10px 6px 8px; }
   .fav-logo { width: 28px; height: 28px; }
   .fav-logo-fallback { width: 28px; height: 28px; font-size: 14px; }
+  .fav-poster-player { width: 56px; height: 100%; }
+  .fav-poster-logo { width: 32px; height: 32px; }
+  .fav-poster-logo.away { left: 10px; }
+  .fav-poster-logo.home { right: 10px; }
   .fav-score { font-size: 11px; }
   .fav-teams { font-size: 8px; }
   .fav-info { padding: 5px 4px 8px; }
@@ -754,6 +787,8 @@ function renderProfile() {
     <div id="tab-friends" style="display:none"></div>
     ${isOwn ? '<div id="tab-find" style="display:none"></div>' : ''}
   `;
+
+  loadFavPosters(PROFILE.favorites || []);
 
   // Tab switching
   document.querySelectorAll('.profile-tab').forEach(btn => {
@@ -1156,6 +1191,84 @@ function favLogoEl(abbr) {
     : `<div class="fav-logo-fallback">🏀</div>`;
 }
 
+function buildFavPoster(awayAbbr, homeAbbr, gameId) {
+  let awayColor      = getTeamColor(awayAbbr, 'primary');
+  const homeColor    = getTeamColor(homeAbbr, 'primary');
+  const [ar,ag,ab]   = hexToRgb(awayColor);
+  const [hr,hg,hb]   = hexToRgb(homeColor);
+  if (Math.sqrt((ar-hr)**2+(ag-hg)**2+(ab-hb)**2) < 80) {
+    awayColor = getTeamColor(awayAbbr, 'secondary');
+  }
+  const bg       = `linear-gradient(90deg,${awayColor} 0%,${awayColor} 45%,${homeColor} 55%,${homeColor} 100%)`;
+  const awayLogo = favLogoUrl(awayAbbr) || '';
+  const homeLogo = favLogoUrl(homeAbbr) || '';
+  return `<div class="fav-poster" data-game-id="${gameId}">
+    <div class="fav-poster-bg" style="background:${bg}"></div>
+    ${awayLogo ? `<img class="fav-poster-logo away" src="${awayLogo}" alt="${awayAbbr}">` : ''}
+    ${homeLogo ? `<img class="fav-poster-logo home" src="${homeLogo}" alt="${homeAbbr}">` : ''}
+    <img class="fav-poster-player away" alt="">
+    <img class="fav-poster-player home" alt="">
+  </div>`;
+}
+
+function buildFavCardHtml(g, isOwn) {
+  const awayWin  = (g.away_score ?? 0) > (g.home_score ?? 0);
+  const score    = g.home_score != null
+    ? `${awayWin ? g.away_score : g.home_score}–${awayWin ? g.home_score : g.away_score}`
+    : '';
+  const dateStr  = g.game_date ? fmtShortDate(g.game_date) : '';
+  const removeBtn = isOwn
+    ? `<div class="fav-remove${_favEditMode ? ' visible' : ''}" onclick="removeFavGame(event,'${g.game_id}')">×</div>`
+    : '';
+  return `
+    <div class="fav-card" onclick="goToGame('${g.game_id}')">
+      ${removeBtn}
+      <div class="fav-card-inner">
+        ${buildFavPoster(g.away_team_abbr, g.home_team_abbr, g.game_id)}
+        <div class="fav-info">
+          <div class="fav-teams">${g.away_team_abbr} @ ${g.home_team_abbr}</div>
+          ${score    ? `<div class="fav-score">${score}</div>`     : ''}
+          ${dateStr  ? `<div class="fav-date">${dateStr}</div>`    : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
+async function loadFavPosters(favorites) {
+  if (!favorites || !favorites.length) return;
+  const base = 'https://cdn.nba.com/headshots/nba/latest/1040x760/';
+  try {
+    const res  = await fetch('/api/game-posters', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        games: favorites.map(g => ({
+          gameId: g.game_id,
+          away:   g.away_team_abbr,
+          home:   g.home_team_abbr,
+          status: 3,
+        })),
+      }),
+    });
+    const data    = await res.json();
+    const posters = data.posters || {};
+    Object.entries(posters).forEach(([gameId, stars]) => {
+      const posterEl = document.querySelector(`.fav-poster[data-game-id="${gameId}"]`);
+      if (!posterEl) return;
+      ['away', 'home'].forEach(side => {
+        const playerId = stars[side];
+        if (!playerId) return;
+        const playerImg = posterEl.querySelector(`.fav-poster-player.${side}`);
+        const logoImg   = posterEl.querySelector(`.fav-poster-logo.${side}`);
+        if (!playerImg) return;
+        playerImg.onload  = () => { playerImg.style.display = 'block'; if (logoImg) logoImg.style.opacity = '0'; };
+        playerImg.onerror = () => { playerImg.style.display = 'none'; };
+        playerImg.src = base + playerId + '.png';
+      });
+    });
+  } catch(e) { /* silent — gradient fallback already showing */ }
+}
+
 let _favEditMode = false;
 let _favPickingSlot = null;
 
@@ -1175,35 +1288,9 @@ function buildFavoritesHtml(favorites, isOwn) {
   for (let pos = 1; pos <= 4; pos++) {
     const g = slots[pos];
     if (g) {
-      const awayWin = (g.away_score ?? 0) > (g.home_score ?? 0);
-      const score   = (g.home_score != null)
-        ? `${awayWin ? g.away_score : g.home_score}–${awayWin ? g.home_score : g.away_score}`
-        : '';
-      const dateStr = g.game_date ? fmtShortDate(g.game_date) : '';
-      const removeBtn = (isOwn && _favEditMode)
-        ? `<div class="fav-remove visible" onclick="removeFavGame(event,'${g.game_id}')">×</div>`
-        : (isOwn ? `<div class="fav-remove" onclick="removeFavGame(event,'${g.game_id}')">×</div>` : '');
-      cardsHtml += `
-        <div class="fav-card" onclick="goToGame('${g.game_id}')">
-          ${removeBtn}
-          <div class="fav-card-inner">
-            <div class="fav-logos">
-              ${favLogoEl(g.away_team_abbr)}
-              <span class="fav-vs">@</span>
-              ${favLogoEl(g.home_team_abbr)}
-            </div>
-            <div class="fav-info">
-              <div class="fav-teams">${g.away_team_abbr} @ ${g.home_team_abbr}</div>
-              ${score ? `<div class="fav-score">${score}</div>` : ''}
-              ${dateStr ? `<div class="fav-date">${dateStr}</div>` : ''}
-            </div>
-          </div>
-        </div>`;
+      cardsHtml += buildFavCardHtml(g, isOwn);
     } else if (isOwn) {
-      cardsHtml += `
-        <div class="fav-slot" onclick="openFavPicker(${pos})">
-          <span class="fav-slot-plus">+</span>
-        </div>`;
+      cardsHtml += `<div class="fav-slot" onclick="openFavPicker(${pos})"><span class="fav-slot-plus">+</span></div>`;
     }
   }
 
@@ -1230,35 +1317,13 @@ function toggleFavEdit() {
   for (let pos = 1; pos <= 4; pos++) {
     const g = slots[pos];
     if (g) {
-      const awayWin = (g.away_score ?? 0) > (g.home_score ?? 0);
-      const score   = (g.home_score != null)
-        ? `${awayWin ? g.away_score : g.home_score}–${awayWin ? g.home_score : g.away_score}`
-        : '';
-      const dateStr = g.game_date ? fmtShortDate(g.game_date) : '';
-      const removeBtn = _favEditMode
-        ? `<div class="fav-remove visible" onclick="removeFavGame(event,'${g.game_id}')">×</div>`
-        : `<div class="fav-remove" onclick="removeFavGame(event,'${g.game_id}')">×</div>`;
-      html += `
-        <div class="fav-card" onclick="goToGame('${g.game_id}')">
-          ${removeBtn}
-          <div class="fav-card-inner">
-            <div class="fav-logos">
-              ${favLogoEl(g.away_team_abbr)}
-              <span class="fav-vs">@</span>
-              ${favLogoEl(g.home_team_abbr)}
-            </div>
-            <div class="fav-info">
-              <div class="fav-teams">${g.away_team_abbr} @ ${g.home_team_abbr}</div>
-              ${score ? `<div class="fav-score">${score}</div>` : ''}
-              ${dateStr ? `<div class="fav-date">${dateStr}</div>` : ''}
-            </div>
-          </div>
-        </div>`;
+      html += buildFavCardHtml(g, true);
     } else {
       html += `<div class="fav-slot" onclick="openFavPicker(${pos})"><span class="fav-slot-plus">+</span></div>`;
     }
   }
   grid.innerHTML = html;
+  loadFavPosters(PROFILE.favorites || []);
 }
 
 function goToGame(gameId) {

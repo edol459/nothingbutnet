@@ -23,6 +23,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/night-mode.css">
+<script src="/team-colors.js"></script>
 <style>
 /* ── Reset & tokens ─────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -316,6 +317,42 @@ nav {
   background: var(--paper3);
   margin: 4px 0;
 }
+
+.card-poster {
+  margin: -13px -12px 11px;
+  height: 74px;
+  border-radius: 8px 8px 0 0;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+}
+.card-poster-bg {
+  position: absolute;
+  inset: 0;
+}
+.card-poster-logo {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  top: 50%;
+  transform: translateY(-50%);
+  object-fit: contain;
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,0.25));
+  transition: opacity 0.2s;
+}
+.card-poster-logo.away { left: 16px; }
+.card-poster-logo.home { right: 16px; }
+.card-poster-player {
+  position: absolute;
+  width: 72px;
+  height: 84px;
+  top: 0;
+  object-fit: cover;
+  object-position: top center;
+  display: none;
+}
+.card-poster-player.away { left: 0; }
+.card-poster-player.home { right: 0; }
 
 /* loading / empty state inside strip */
 .strip-state {
@@ -712,7 +749,7 @@ nav {
   border: 1px solid var(--rule);
   border-radius: 4px;
   padding: 5px 10px;
-  margin-left: 20px;
+  margin-left: 15px;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
@@ -894,6 +931,30 @@ const TEAM_IDS = {
 function teamLogoUrl(abbr) {
   const id = TEAM_IDS[abbr];
   return id ? `https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg` : null;
+}
+
+function buildPoster(awayAbbr, homeAbbr) {
+  let awayColor      = getTeamColor(awayAbbr, 'primary');
+  const homeColor    = getTeamColor(homeAbbr, 'primary');
+
+  // If primaries are too similar, use away's secondary
+  const [ar, ag, ab] = hexToRgb(awayColor);
+  const [hr, hg, hb] = hexToRgb(homeColor);
+  if (Math.sqrt((ar-hr)**2 + (ag-hg)**2 + (ab-hb)**2) < 80) {
+    awayColor = getTeamColor(awayAbbr, 'secondary');
+  }
+
+  const bg = `linear-gradient(90deg,${awayColor} 0%,${awayColor} 45%,${homeColor} 55%,${homeColor} 100%)`;
+
+  const awayLogo = teamLogoUrl(awayAbbr) || '';
+  const homeLogo = teamLogoUrl(homeAbbr) || '';
+  return `<div class="card-poster">
+    <div class="card-poster-bg" style="background:${bg}"></div>
+    ${awayLogo ? `<img class="card-poster-logo away" src="${awayLogo}" alt="${awayAbbr}">` : ''}
+    ${homeLogo ? `<img class="card-poster-logo home" src="${homeLogo}" alt="${homeAbbr}">` : ''}
+    <img class="card-poster-player away" alt="">
+    <img class="card-poster-player home" alt="">
+  </div>`;
 }
 
 // ── Date helpers ──────────────────────────────────────────────
@@ -1079,6 +1140,9 @@ async function loadScoreboard() {
     // Load ratings for final games
     loadCardRatings(games.filter(g => g.gameStatus === 3).map(g => g.gameId));
 
+    // Load player headshots (injury-aware, season-stats ranked)
+    loadGamePosters(games);
+
     // Auto-refresh live games
     if (games.some(g => g.gameStatus === 2) && !SB.date) {
       SB.liveTimer = setTimeout(() => { SB.loading = false; loadScoreboard(); }, 30000);
@@ -1174,12 +1238,58 @@ function buildCard(g) {
     data-time="${tipText}"
     data-away-rec="${awayRec}"
     data-home-rec="${homeRec}">
+    ${buildPoster(away.abbr, home.abbr)}
     ${statusHtml}
     ${teamRow(away.abbr, awayScore, awayWon, homeWon, awayRec)}
     <div class="card-divider"></div>
     ${teamRow(home.abbr, homeScore, homeWon, awayWon, homeRec)}
     ${reviewRow}
   </div>`;
+}
+
+// ── Game Posters ──────────────────────────────────────────────
+async function loadGamePosters(games) {
+  if (!games || !games.length) return;
+  const base = 'https://cdn.nba.com/headshots/nba/latest/1040x760/';
+  try {
+    const res  = await fetch(`${API}/api/game-posters`, {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({
+        games: games.map(g => ({
+          gameId: g.gameId,
+          away:   g.away?.abbr || '',
+          home:   g.home?.abbr || '',
+          status: g.gameStatus,
+        })),
+      }),
+    });
+    const data    = await res.json();
+    const posters = data.posters || {};
+
+    Object.entries(posters).forEach(([gameId, stars]) => {
+      const card = document.querySelector(`.game-card[data-game-id="${gameId}"]`);
+      if (!card) return;
+      const poster = card.querySelector('.card-poster');
+      if (!poster) return;
+
+      ['away', 'home'].forEach(side => {
+        const playerId = stars[side];
+        if (!playerId) return;
+        const playerImg = poster.querySelector(`.card-poster-player.${side}`);
+        const logoImg   = poster.querySelector(`.card-poster-logo.${side}`);
+        if (!playerImg) return;
+        playerImg.onload  = () => {
+          playerImg.style.display = 'block';
+          if (logoImg) logoImg.style.opacity = '0';
+        };
+        playerImg.onerror = () => { playerImg.style.display = 'none'; };
+        playerImg.src = base + playerId + '.png';
+      });
+    });
+  } catch(e) {
+    // silent — logo fallback already showing
+  }
 }
 
 // ── Top Performers ────────────────────────────────────────────
