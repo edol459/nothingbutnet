@@ -1319,39 +1319,54 @@ def get_scoreboard():
 # ── /api/news ─────────────────────────────────────────────────────
 _news_cache: dict = {}  # {"payload": list, "ts": float}
 
+_NEWS_SOURCES = [
+    ("https://news.google.com/rss/search?q=NBA+basketball&hl=en-US&gl=US&ceid=US:en", None),
+]
+
+def _parse_rss(content, default_source):
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(content)
+    items = []
+    for item in root.iter("item"):
+        title    = (item.findtext("title") or "").strip()
+        link     = (item.findtext("link") or "").strip()
+        pub_date = (item.findtext("pubDate") or "").strip()
+        source   = (item.findtext("source") or default_source or "NBA").strip()
+        # Google News titles end with " - Source Name"; strip it when we have the source
+        if source and title.endswith(f" - {source}"):
+            title = title[: -len(f" - {source}")].strip()
+        if title:
+            items.append({"title": title, "link": link, "pubDate": pub_date, "source": source})
+        if len(items) >= 10:
+            break
+    return items
+
 @app.route("/api/news")
 def get_news():
-    import xml.etree.ElementTree as ET
     if _news_cache.get("payload") and _time.time() - _news_cache.get("ts", 0) < 300:
         return jsonify({"status": "ok", "items": _news_cache["payload"]})
-    try:
-        resp = _requests.get(
-            "https://www.espn.com/espn/rss/nba/news",
-            headers={"User-Agent": "Mozilla/5.0 (compatible; NothingButNet/1.0)"},
-            timeout=10,
-        )
-        print(f"[news] ESPN status={resp.status_code} len={len(resp.content)}", flush=True)
-        resp.raise_for_status()
-        root = ET.fromstring(resp.content)
-        items = []
-        for item in root.iter("item"):
-            title    = (item.findtext("title") or "").strip()
-            link     = (item.findtext("link") or "").strip()
-            pub_date = (item.findtext("pubDate") or "").strip()
-            if title:
-                items.append({"title": title, "link": link, "pubDate": pub_date})
-            if len(items) >= 10:
-                break
-        if items:
-            _news_cache["payload"] = items
-            _news_cache["ts"] = _time.time()
-        return jsonify({"status": "ok", "items": items})
-    except Exception as ex:
-        print(f"[news] error: {ex}", flush=True)
-        # Return stale cache rather than failing outright
-        if _news_cache.get("payload"):
-            return jsonify({"status": "ok", "items": _news_cache["payload"]})
-        return jsonify({"status": "error", "message": str(ex)}), 200
+    for url, default_source in _NEWS_SOURCES:
+        try:
+            resp = _requests.get(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; NothingButNet/1.0)"},
+                timeout=10,
+            )
+            print(f"[news] {default_source or 'Google'} status={resp.status_code} len={len(resp.content)}", flush=True)
+            if resp.status_code != 200 or not resp.content:
+                continue
+            items = _parse_rss(resp.content, default_source)
+            if items:
+                _news_cache["payload"] = items
+                _news_cache["ts"] = _time.time()
+                return jsonify({"status": "ok", "items": items})
+            print(f"[news] {default_source or 'Google'} returned 0 items", flush=True)
+        except Exception as ex:
+            print(f"[news] {default_source or 'Google'} error: {ex}", flush=True)
+    print("[news] all sources failed", flush=True)
+    if _news_cache.get("payload"):
+        return jsonify({"status": "ok", "items": _news_cache["payload"]})
+    return jsonify({"status": "error", "message": "all news sources unavailable"}), 200
 
 
 # ── Injury helpers ───────────────────────────────────────────────

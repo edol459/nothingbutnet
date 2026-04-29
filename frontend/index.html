@@ -1381,7 +1381,7 @@ async function loadNews() {
     container.innerHTML = `<div class="news-list">${
       data.items.slice(0, 8).map(item => `
         <a class="news-item" href="${item.link}" target="_blank" rel="noopener noreferrer">
-          <div class="news-source">ESPN</div>
+          <div class="news-source">${item.source || 'NBA'}</div>
           <div class="news-title">${item.title || ''}</div>
           <div class="news-meta">${timeAgo(item.pubDate)}</div>
         </a>`).join('')
