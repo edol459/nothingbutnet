@@ -13,6 +13,7 @@ Usage in server.py:
 """
 
 import os
+import secrets
 from flask import Blueprint, redirect, url_for, session, jsonify, request
 from authlib.integrations.flask_client import OAuth
 
@@ -68,9 +69,41 @@ def upsert_user(google_id: str, email: str, display_name: str, picture_url: str 
     return user
 
 
+def _get_user_from_mobile_token(token: str) -> dict | None:
+    """Return a minimal user dict if the mobile token matches a user row."""
+    if not token:
+        return None
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT id, google_id, email, display_name FROM users WHERE mobile_token = %s",
+            (token,)
+        )
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if row:
+            return {
+                "id":           row["id"],
+                "google_id":    row["google_id"],
+                "email":        row["email"],
+                "display_name": row["display_name"],
+                "created_at":   "",
+            }
+    except Exception:
+        pass
+    return None
+
+
 def current_user() -> dict | None:
-    """Return the user dict from the session, or None if not logged in."""
-    return session.get("user")
+    """Return the user dict from the session or mobile Bearer token, or None."""
+    user = session.get("user")
+    if user:
+        return user
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        return _get_user_from_mobile_token(auth_header[7:].strip())
+    return None
 
 
 def login_required(f):
@@ -89,9 +122,10 @@ def login_required(f):
 @auth_bp.route("/google/login")
 def google_login():
     """Redirect the user to Google's OAuth consent screen."""
-    # Store a 'next' URL so we can redirect back after login
     next_url = request.args.get("next", "/")
     session["oauth_next"] = next_url
+    if request.args.get("mobile") == "1":
+        session["oauth_mobile"] = True
     # Use OAUTH_REDIRECT_URI env var if set (recommended for production).
     # Falls back to building the URI from the request, preferring https in
     # production (FLASK_ENV=production) and http locally.
@@ -128,6 +162,20 @@ def google_callback():
         "created_at":       str(user.get("created_at", "")),
     }
     session.permanent = True
+
+    # Mobile app flow: issue a persistent token and redirect to custom scheme
+    if session.pop("oauth_mobile", False):
+        mobile_token = secrets.token_urlsafe(32)
+        try:
+            conn = get_conn()
+            cur  = conn.cursor()
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_token TEXT")
+            cur.execute("UPDATE users SET mobile_token = %s WHERE id = %s", (mobile_token, user["id"]))
+            conn.commit()
+            cur.close(); conn.close()
+        except Exception:
+            pass
+        return redirect(f"ydkball://auth-complete?token={mobile_token}")
 
     next_url = session.pop("oauth_next", "/")
     return redirect(next_url)

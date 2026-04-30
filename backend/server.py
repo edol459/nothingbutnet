@@ -3829,8 +3829,9 @@ def _safe(v):
 
 @app.route("/api/trends")
 def get_trends():
-    season = request.args.get("season", DEFAULT_SEASON)
-    n      = int(request.args.get("n", 5))
+    season    = request.args.get("season", DEFAULT_SEASON)
+    n         = int(request.args.get("n", 5))
+    team_days = int(request.args.get("team_days", 10))
     if n not in (5, 10, 15):
         n = 5
 
@@ -3838,12 +3839,56 @@ def get_trends():
         conn = get_conn()
         cur  = conn.cursor()
 
+        # Eligible players: team played within last `team_days` days AND
+        # player appeared in at least one of their team's last `n` games.
+        cur.execute("""
+            WITH
+            team_game_dates AS (
+                SELECT DISTINCT
+                    SUBSTRING(matchup FROM 1 FOR 3) AS team_abbr,
+                    game_date
+                FROM player_gamelogs
+                WHERE season = %s AND matchup IS NOT NULL
+            ),
+            team_ranked AS (
+                SELECT
+                    team_abbr, game_date,
+                    ROW_NUMBER() OVER (PARTITION BY team_abbr ORDER BY game_date DESC) AS team_rn,
+                    MAX(game_date) OVER (PARTITION BY team_abbr) AS team_last_date
+                FROM team_game_dates
+            ),
+            recent_team_dates AS (
+                SELECT team_abbr, game_date
+                FROM team_ranked
+                WHERE team_rn <= %s
+                  AND team_last_date >= CURRENT_DATE - (%s * INTERVAL '1 day')
+            ),
+            player_current_team AS (
+                SELECT DISTINCT ON (player_id)
+                    player_id,
+                    SUBSTRING(matchup FROM 1 FOR 3) AS team_abbr
+                FROM player_gamelogs
+                WHERE season = %s AND matchup IS NOT NULL
+                ORDER BY player_id, game_date DESC
+            )
+            SELECT DISTINCT pg.player_id
+            FROM player_gamelogs pg
+            JOIN player_current_team pct ON pct.player_id = pg.player_id
+            JOIN recent_team_dates rtd
+                ON rtd.team_abbr = pct.team_abbr
+               AND rtd.game_date = pg.game_date
+            WHERE pg.season = %s
+        """, (season, n, team_days, season, season))
+        eligible_ids = [r["player_id"] for r in cur.fetchall()]
+
         results = {}
         all_player_ids = set()
 
         for stat in TREND_STATS:
             col = stat["key"]
-            # ts_pct and pts require a minimum FGA to be a valid data point
+            if not eligible_ids:
+                results[col] = {"label": stat["label"], "risers": [], "fallers": []}
+                continue
             fga_gate = "AND fga >= 5" if col in ("ts_pct", "pts") else ""
             cur.execute(f"""
                 WITH ranked AS (
@@ -3863,6 +3908,7 @@ def get_trends():
                       AND {col} IS NOT NULL
                       AND min IS NOT NULL
                       AND NOT ({col} = 'NaN'::real)
+                      AND player_id = ANY(%s)
                       {fga_gate}
                 ),
                 last_n AS (
@@ -3896,7 +3942,7 @@ def get_trends():
                 FROM last_n l
                 JOIN prior p ON p.player_id = l.player_id
                 ORDER BY delta DESC
-            """, (season, n, n, n))
+            """, (season, eligible_ids, n, n, n))
 
             rows = [dict(r) for r in cur.fetchall()]
             for r in rows:
@@ -3911,7 +3957,7 @@ def get_trends():
             )
             results[col] = {"label": stat["label"], "risers": risers, "fallers": fallers}
 
-        # Add most-recent team_abbr to every player row (parsed from matchup)
+        # Add most-recent team_abbr to every player row
         if all_player_ids:
             cur.execute("""
                 SELECT DISTINCT ON (player_id)
@@ -3930,7 +3976,7 @@ def get_trends():
 
         cur.close()
         conn.close()
-        return jsonify({"n": n, "season": season, "stats": results})
+        return jsonify({"n": n, "season": season, "team_days": team_days, "stats": results})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3975,7 +4021,7 @@ def get_trends_gamelog():
 @app.route("/trends")
 @app.route("/trends.html")
 def trends_page():
-    return "", 404
+    return app.send_static_file("trends.html")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

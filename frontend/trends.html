@@ -570,7 +570,7 @@ async function init() {
     const d = await r.json();
     season = d.season;
     document.getElementById('page-meta').textContent =
-      `${season} · All game types · min 10 mpg in last N`;
+      `${season} · Active players only · min 10 mpg in last N`;
   } catch (e) {
     document.getElementById('page-meta').textContent = 'Season data unavailable';
   }
