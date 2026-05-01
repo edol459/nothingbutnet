@@ -1020,6 +1020,25 @@ def _enrich_games_with_records(games):
                     wins[a] = wins.get(a, 0) + 1
             series_records[pair] = wins
 
+        # ── Review stats (avg_stars / review_count) ──────────────
+        game_ids = [str(g.get("gameId", "")) for g in games if g.get("gameId")]
+        review_stats: dict = {}
+        if game_ids:
+            cur.execute("""
+                SELECT game_id,
+                       review_count,
+                       CASE WHEN review_count > 0
+                            THEN ROUND(rating_sum::float / review_count / 2, 2)
+                            ELSE NULL END AS avg_stars
+                FROM games
+                WHERE game_id = ANY(%s)
+            """, (game_ids,))
+            for r in cur.fetchall():
+                review_stats[r["game_id"]] = {
+                    "avg_stars":    r["avg_stars"],
+                    "review_count": int(r["review_count"] or 0),
+                }
+
         cur.close()
         conn.close()
 
@@ -1041,6 +1060,10 @@ def _enrich_games_with_records(games):
                     away["wins"], away["losses"] = reg_records[away_abbr]
                 if home.get("wins") is None and home_abbr in reg_records:
                     home["wins"], home["losses"] = reg_records[home_abbr]
+
+            rs = review_stats.get(game_id, {})
+            g["avg_stars"]    = rs.get("avg_stars")
+            g["review_count"] = rs.get("review_count", 0)
 
     except Exception:
         pass
@@ -2926,15 +2949,32 @@ def get_most_liked_reviews():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/reviews/recent")
 def get_recent_reviews():
-    limit   = min(int(request.args.get("limit", 20)), 100)
-    offset  = int(request.args.get("offset", 0))
-    user    = current_user()
-    user_id = user["id"] if user else None
+    limit        = min(int(request.args.get("limit", 20)), 100)
+    offset       = int(request.args.get("offset", 0))
+    friends_only = request.args.get("friends") in ("1", "true")
+    user         = current_user()
+    user_id      = user["id"] if user else None
+
+    if friends_only and not user_id:
+        return jsonify({"reviews": [], "total": 0, "has_more": False})
+
+    # JOIN clause that restricts to accepted friends of user_id
+    friends_join   = ""
+    friends_params = []
+    if friends_only:
+        friends_join = """
+            JOIN friendships fr ON (
+                (fr.sender_id = %s AND fr.receiver_id = gr.user_id)
+                OR (fr.receiver_id = %s AND fr.sender_id = gr.user_id)
+            ) AND fr.status = 'accepted'
+        """
+        friends_params = [user_id, user_id]
+
     try:
         conn = get_conn()
         cur  = conn.cursor()
         if user_id:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT
                     gr.id, gr.game_id, gr.rating, gr.review_text,
                     gr.created_at, gr.updated_at,
@@ -2952,12 +2992,13 @@ def get_recent_reviews():
                 LEFT JOIN review_likes rl    ON rl.review_id    = gr.id
                 LEFT JOIN review_likes rl_me ON rl_me.review_id = gr.id
                                             AND rl_me.user_id   = %s
+                {friends_join}
                 GROUP BY gr.id, u.id, g.game_id
                 ORDER BY gr.created_at DESC
                 LIMIT %s OFFSET %s
-            """, (user_id, limit, offset))
+            """, friends_params + [user_id, limit, offset])
         else:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT
                     gr.id, gr.game_id, gr.rating, gr.review_text,
                     gr.created_at, gr.updated_at,
@@ -2973,12 +3014,13 @@ def get_recent_reviews():
                 JOIN users u  ON gr.user_id = u.id
                 JOIN games g  ON gr.game_id = g.game_id
                 LEFT JOIN review_likes rl ON rl.review_id = gr.id
+                {friends_join}
                 GROUP BY gr.id, u.id, g.game_id
                 ORDER BY gr.created_at DESC
                 LIMIT %s OFFSET %s
-            """, (limit, offset))
+            """, friends_params + [limit, offset])
         rows = cur.fetchall()
-        cur.execute("SELECT COUNT(*) FROM game_reviews")
+        cur.execute(f"SELECT COUNT(*) FROM game_reviews gr {friends_join}", friends_params)
         total = cur.fetchone()["count"]
         cur.close(); conn.close()
         result = []
