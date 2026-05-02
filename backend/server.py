@@ -959,37 +959,35 @@ def _fetch_boxscores_parallel(game_ids, timeout=8):
 
 def _enrich_games_with_records(games):
     """
-    Enrich scoreboard game dicts in-place with W-L / series records.
-    - Sets g['is_playoffs'] = True for playoff games (gameId starts with '004').
-    - Playoff games: adds g['away']['series_wins'] and g['home']['series_wins'].
-    - Regular season games: fills in wins/losses from DB if currently None.
-    Silently swallows errors so it never breaks the scoreboard response.
+    Enrich scoreboard game dicts in-place with W-L / series records and review stats.
+    Always sets avg_stars and review_count on every game, even if DB queries fail.
     """
     if not games:
         return
+
+    season = os.getenv("NBA_SEASON", "2025-26")
+    all_abbrs = set()
+    playoff_pairs = set()
+    for g in games:
+        away_abbr = g.get("away", {}).get("abbr", "")
+        home_abbr = g.get("home", {}).get("abbr", "")
+        if away_abbr: all_abbrs.add(away_abbr)
+        if home_abbr: all_abbrs.add(home_abbr)
+        game_id = str(g.get("gameId", ""))
+        is_po = game_id.startswith("004")
+        g["is_playoffs"] = is_po
+        if is_po and away_abbr and home_abbr:
+            playoff_pairs.add(tuple(sorted([away_abbr, home_abbr])))
+
+    reg_records    = {}
+    series_records = {}
+    review_stats   = {}
+
     try:
-        season = os.getenv("NBA_SEASON", "2025-26")
-        all_abbrs = set()
-        playoff_pairs = set()
-
-        for g in games:
-            away_abbr = g.get("away", {}).get("abbr", "")
-            home_abbr = g.get("home", {}).get("abbr", "")
-            if away_abbr:
-                all_abbrs.add(away_abbr)
-            if home_abbr:
-                all_abbrs.add(home_abbr)
-            game_id = str(g.get("gameId", ""))
-            is_po = game_id.startswith("004")
-            g["is_playoffs"] = is_po
-            if is_po and away_abbr and home_abbr:
-                playoff_pairs.add(tuple(sorted([away_abbr, home_abbr])))
-
         conn = get_conn()
         cur  = conn.cursor()
 
-        # ── Regular season W-L (fills in Nones from DB-first path) ──
-        reg_records = {}
+        # ── Regular season W-L ──
         if all_abbrs:
             abbr_list = list(all_abbrs)
             cur.execute("""
@@ -997,19 +995,15 @@ def _enrich_games_with_records(games):
                        SUM(CASE WHEN won THEN 1 ELSE 0 END)::int AS wins,
                        SUM(CASE WHEN NOT won THEN 1 ELSE 0 END)::int AS losses
                 FROM (
-                    SELECT home_team_abbr AS team_abbr,
-                           home_score > away_score AS won
+                    SELECT home_team_abbr AS team_abbr, home_score > away_score AS won
                     FROM games
                     WHERE season = %s AND season_type = 'Regular Season'
-                      AND status = 'Final'
-                      AND home_team_abbr = ANY(%s)
+                      AND status = 'Final' AND home_team_abbr = ANY(%s)
                     UNION ALL
-                    SELECT away_team_abbr AS team_abbr,
-                           away_score > home_score AS won
+                    SELECT away_team_abbr AS team_abbr, away_score > home_score AS won
                     FROM games
                     WHERE season = %s AND season_type = 'Regular Season'
-                      AND status = 'Final'
-                      AND away_team_abbr = ANY(%s)
+                      AND status = 'Final' AND away_team_abbr = ANY(%s)
                 ) sub
                 GROUP BY team_abbr
             """, (season, abbr_list, season, abbr_list))
@@ -1017,15 +1011,12 @@ def _enrich_games_with_records(games):
                 reg_records[r["team_abbr"]] = (int(r["wins"]), int(r["losses"]))
 
         # ── Playoff series records ──
-        series_records = {}
         for pair in playoff_pairs:
             t1, t2 = pair
             cur.execute("""
-                SELECT home_team_abbr, away_team_abbr,
-                       home_score, away_score
+                SELECT home_team_abbr, away_team_abbr, home_score, away_score
                 FROM games
-                WHERE season = %s AND season_type = 'Playoffs'
-                  AND status = 'Final'
+                WHERE season = %s AND season_type = 'Playoffs' AND status = 'Final'
                   AND ((home_team_abbr = %s AND away_team_abbr = %s)
                     OR (home_team_abbr = %s AND away_team_abbr = %s))
             """, (season, t1, t2, t2, t1))
@@ -1038,14 +1029,13 @@ def _enrich_games_with_records(games):
                     wins[a] = wins.get(a, 0) + 1
             series_records[pair] = wins
 
-        # ── Review stats (avg_stars / review_count) ──────────────
+        # ── Review stats ──
         game_ids = [str(g.get("gameId", "")) for g in games if g.get("gameId")]
-        review_stats: dict = {}
         if game_ids:
             cur.execute("""
                 SELECT game_id,
-                       COUNT(*)                              AS review_count,
-                       ROUND(AVG(rating)::float / 2, 2)     AS avg_stars
+                       COUNT(*)                          AS review_count,
+                       ROUND(AVG(rating)::float / 2, 2) AS avg_stars
                 FROM game_reviews
                 WHERE game_id = ANY(%s)
                 GROUP BY game_id
@@ -1058,32 +1048,31 @@ def _enrich_games_with_records(games):
 
         cur.close()
         conn.close()
+    except Exception as e:
+        print(f"[enrich] DB error: {e}", flush=True)
 
-        # ── Apply to games ──
-        for g in games:
-            away = g.get("away", {})
-            home = g.get("home", {})
-            away_abbr = away.get("abbr", "")
-            home_abbr = home.get("abbr", "")
-            game_id   = str(g.get("gameId", ""))
+    # ── Apply to games (always runs even if DB failed) ──
+    for g in games:
+        away      = g.get("away", {})
+        home      = g.get("home", {})
+        away_abbr = away.get("abbr", "")
+        home_abbr = home.get("abbr", "")
+        game_id   = str(g.get("gameId", ""))
 
-            if game_id.startswith("004") and away_abbr and home_abbr:
-                pair = tuple(sorted([away_abbr, home_abbr]))
-                sr   = series_records.get(pair, {})
-                away["series_wins"] = sr.get(away_abbr, 0)
-                home["series_wins"] = sr.get(home_abbr, 0)
-            else:
-                if away.get("wins") is None and away_abbr in reg_records:
-                    away["wins"], away["losses"] = reg_records[away_abbr]
-                if home.get("wins") is None and home_abbr in reg_records:
-                    home["wins"], home["losses"] = reg_records[home_abbr]
+        if game_id.startswith("004") and away_abbr and home_abbr:
+            pair = tuple(sorted([away_abbr, home_abbr]))
+            sr   = series_records.get(pair, {})
+            away["series_wins"] = sr.get(away_abbr, 0)
+            home["series_wins"] = sr.get(home_abbr, 0)
+        else:
+            if away.get("wins") is None and away_abbr in reg_records:
+                away["wins"], away["losses"] = reg_records[away_abbr]
+            if home.get("wins") is None and home_abbr in reg_records:
+                home["wins"], home["losses"] = reg_records[home_abbr]
 
-            rs = review_stats.get(game_id, {})
-            g["avg_stars"]    = rs.get("avg_stars")
-            g["review_count"] = rs.get("review_count", 0)
-
-    except Exception:
-        pass
+        rs = review_stats.get(game_id, {})
+        g["avg_stars"]    = rs.get("avg_stars")
+        g["review_count"] = rs.get("review_count", 0)
 
 
 # ── /api/scoreboard?date=YYYY-MM-DD ──────────────────────────────
