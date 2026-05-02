@@ -13,9 +13,10 @@ Endpoints:
 """
 
 import os
-# macOS 26 beta breaks Python SSL initialization — point to the system cert bundle early
-os.environ.setdefault("SSL_CERT_FILE", "/etc/ssl/cert.pem")
-os.environ.setdefault("REQUESTS_CA_BUNDLE", "/etc/ssl/cert.pem")
+import certifi
+# macOS 26 beta breaks Python SSL initialization — use certifi's static bundle to bypass it
+os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
 import json
 import math
 from datetime import date
