@@ -13,6 +13,9 @@ Endpoints:
 """
 
 import os
+# macOS 26 beta breaks Python SSL initialization — point to the system cert bundle early
+os.environ.setdefault("SSL_CERT_FILE", "/etc/ssl/cert.pem")
+os.environ.setdefault("REQUESTS_CA_BUNDLE", "/etc/ssl/cert.pem")
 import json
 import math
 from datetime import date
@@ -62,7 +65,8 @@ DEFAULT_SEASON_TYPE = os.getenv("NBA_SEASON_TYPE", get_current_season_type())
 
 
 def get_conn():
-    return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor,
+                            connect_timeout=10)
 
 def _fmt_game_time(val) -> str:
     """Return gameTimeUTC as a proper ISO 8601 UTC string (e.g. '2026-04-25T01:30:00Z').
@@ -146,6 +150,19 @@ def _ensure_tables():
         # Add night_mode preference column if it doesn't exist yet
         cur.execute("""
             ALTER TABLE users ADD COLUMN IF NOT EXISTS night_mode BOOLEAN DEFAULT FALSE
+        """)
+        # Backfill review_count / rating_sum from game_reviews (in case they drifted out of sync)
+        cur.execute("""
+            UPDATE games g
+            SET review_count = agg.cnt,
+                rating_sum   = agg.rsum
+            FROM (
+                SELECT game_id, COUNT(*) AS cnt, COALESCE(SUM(rating), 0) AS rsum
+                FROM game_reviews
+                GROUP BY game_id
+            ) agg
+            WHERE g.game_id = agg.game_id
+              AND (g.review_count != agg.cnt OR g.rating_sum != agg.rsum)
         """)
         conn.commit()
         cur.close(); conn.close()
@@ -1026,12 +1043,11 @@ def _enrich_games_with_records(games):
         if game_ids:
             cur.execute("""
                 SELECT game_id,
-                       review_count,
-                       CASE WHEN review_count > 0
-                            THEN ROUND(rating_sum::float / review_count / 2, 2)
-                            ELSE NULL END AS avg_stars
-                FROM games
+                       COUNT(*)                              AS review_count,
+                       ROUND(AVG(rating)::float / 2, 2)     AS avg_stars
+                FROM game_reviews
                 WHERE game_id = ANY(%s)
+                GROUP BY game_id
             """, (game_ids,))
             for r in cur.fetchall():
                 review_stats[r["game_id"]] = {
@@ -2564,6 +2580,14 @@ def submit_review(game_id):
         review["display_name"]  = user["display_name"]
         review["avatar_url"]    = (user_row["avatar_url"] if user_row else None) or ""
         review["favorite_team"] = (user_row["favorite_team"] if user_row else None) or ""
+
+        cur.execute("""
+            UPDATE games
+            SET review_count = (SELECT COUNT(*) FROM game_reviews WHERE game_id = %s),
+                rating_sum   = (SELECT COALESCE(SUM(rating), 0) FROM game_reviews WHERE game_id = %s)
+            WHERE game_id = %s
+        """, (game_id, game_id, game_id))
+
         conn.commit()
         cur.close(); conn.close()
         return jsonify({"review": _format_review(review)}), 201
@@ -2587,6 +2611,13 @@ def delete_review(game_id):
             RETURNING id
         """, (user["id"], game_id))
         deleted = cur.fetchone()
+        if deleted:
+            cur.execute("""
+                UPDATE games
+                SET review_count = (SELECT COUNT(*) FROM game_reviews WHERE game_id = %s),
+                    rating_sum   = (SELECT COALESCE(SUM(rating), 0) FROM game_reviews WHERE game_id = %s)
+                WHERE game_id = %s
+            """, (game_id, game_id, game_id))
         conn.commit()
         cur.close(); conn.close()
         if not deleted:
