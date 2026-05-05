@@ -1,11 +1,12 @@
 """
-ydkball — Google OAuth
+ydkball — Google OAuth + Sign in with Apple
 ==============================
 Registers a Flask Blueprint at /auth/* that handles:
-  GET /auth/google/login     → redirect to Google consent screen
-  GET /auth/google/callback  → handle token exchange, create/find user
-  GET /auth/me               → return current session user (or 401)
-  POST /auth/logout          → clear session
+  GET  /auth/google/login     → redirect to Google consent screen
+  GET  /auth/google/callback  → handle token exchange, create/find user
+  POST /auth/apple            → verify Apple identity token, create/find user
+  GET  /auth/me               → return current session user (or 401)
+  POST /auth/logout           → clear session
 
 Usage in server.py:
   from auth import auth_bp
@@ -14,8 +15,10 @@ Usage in server.py:
 
 import os
 import secrets
+import requests as _requests
 from flask import Blueprint, redirect, url_for, session, jsonify, request
 from authlib.integrations.flask_client import OAuth
+from authlib.jose import JsonWebToken, JsonWebKey
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
@@ -117,6 +120,76 @@ def login_required(f):
     return decorated
 
 
+# ── Apple Sign-In helpers ─────────────────────────────────────────────────────
+
+_apple_jwks_cache: dict | None = None
+
+def _get_apple_jwks() -> dict:
+    global _apple_jwks_cache
+    if _apple_jwks_cache is None:
+        resp = _requests.get("https://appleid.apple.com/auth/keys", timeout=10)
+        _apple_jwks_cache = resp.json()
+    return _apple_jwks_cache
+
+
+def verify_apple_token(id_token: str) -> dict:
+    jwks = _get_apple_jwks()
+    key_set = JsonWebKey.import_key_set(jwks)
+    jwt = JsonWebToken(["RS256"])
+    claims = jwt.decode(id_token, key_set)
+    claims.validate()
+    aud = claims.get("aud")
+    if isinstance(aud, list):
+        if "net.ydkball.ydkball" not in aud:
+            raise ValueError(f"Invalid audience: {aud}")
+    elif aud != "net.ydkball.ydkball":
+        raise ValueError(f"Invalid audience: {aud}")
+    return dict(claims)
+
+
+def upsert_apple_user(apple_id: str, email: str, display_name: str) -> dict:
+    conn = get_conn()
+    cur  = conn.cursor()
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS apple_id TEXT")
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_apple_id ON users(apple_id) WHERE apple_id IS NOT NULL")
+    # Try to find existing user by apple_id first
+    cur.execute("SELECT id FROM users WHERE apple_id = %s", (apple_id,))
+    existing = cur.fetchone()
+    if existing:
+        cur.execute("""
+            UPDATE users SET updated_at = NOW()
+            WHERE apple_id = %s
+            RETURNING id, google_id, apple_id, email, display_name, avatar_url, favorite_team, created_at
+        """, (apple_id,))
+    else:
+        # New Apple user — use a placeholder google_id so the NOT NULL constraint is met
+        placeholder_google_id = f"apple_{apple_id}"
+        safe_name = display_name or (email.split("@")[0] if email else "ydkball user")
+        cur.execute("""
+            INSERT INTO users (google_id, apple_id, email, display_name)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (google_id) DO UPDATE SET
+                apple_id   = EXCLUDED.apple_id,
+                updated_at = NOW()
+            RETURNING id, google_id, apple_id, email, display_name, avatar_url, favorite_team, created_at
+        """, (placeholder_google_id, apple_id, email, safe_name))
+    user = dict(cur.fetchone())
+    conn.commit()
+    cur.close(); conn.close()
+    return user
+
+
+def _issue_mobile_token(user_id: int) -> str:
+    mobile_token = secrets.token_urlsafe(32)
+    conn = get_conn()
+    cur  = conn.cursor()
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_token TEXT")
+    cur.execute("UPDATE users SET mobile_token = %s WHERE id = %s", (mobile_token, user_id))
+    conn.commit()
+    cur.close(); conn.close()
+    return mobile_token
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @auth_bp.route("/google/login")
@@ -165,20 +238,50 @@ def google_callback():
 
     # Mobile app flow: issue a persistent token and redirect to custom scheme
     if session.pop("oauth_mobile", False):
-        mobile_token = secrets.token_urlsafe(32)
         try:
-            conn = get_conn()
-            cur  = conn.cursor()
-            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_token TEXT")
-            cur.execute("UPDATE users SET mobile_token = %s WHERE id = %s", (mobile_token, user["id"]))
-            conn.commit()
-            cur.close(); conn.close()
+            mobile_token = _issue_mobile_token(user["id"])
         except Exception:
-            pass
+            mobile_token = secrets.token_urlsafe(32)
         return redirect(f"ydkball://auth-complete?token={mobile_token}")
 
     next_url = session.pop("oauth_next", "/")
     return redirect(next_url)
+
+
+@auth_bp.route("/apple", methods=["POST"])
+def apple_signin():
+    """Verify an Apple identity token (from the iOS native Sign in with Apple flow)
+    and return a mobile_token the app can use as a Bearer token."""
+    body = request.get_json() or {}
+    id_token  = body.get("identity_token", "").strip()
+    full_name = (body.get("full_name") or "").strip()
+
+    if not id_token:
+        return jsonify({"error": "identity_token required"}), 400
+
+    # Invalidate JWKS cache on failure so we re-fetch fresh keys next time
+    global _apple_jwks_cache
+    try:
+        claims = verify_apple_token(id_token)
+    except Exception:
+        _apple_jwks_cache = None
+        try:
+            claims = verify_apple_token(id_token)
+        except Exception as e:
+            return jsonify({"error": f"Invalid Apple token: {e}"}), 401
+
+    apple_id = claims.get("sub")
+    email    = claims.get("email", "")
+    if not apple_id:
+        return jsonify({"error": "Missing subject in token"}), 401
+
+    try:
+        user         = upsert_apple_user(apple_id, email, full_name)
+        mobile_token = _issue_mobile_token(user["id"])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"token": mobile_token})
 
 
 @auth_bp.route("/me")
