@@ -4408,6 +4408,12 @@ def impact_page():
     return app.send_static_file("impact.html")
 
 
+@app.route("/privacy")
+@app.route("/privacy.html")
+def privacy_page():
+    return app.send_static_file("privacy.html")
+
+
 # ── WoWY possession-data modes ─────────────────────────────────────────────────
 
 def _wowy_team_id(cur, player_ids: list, season: str):
