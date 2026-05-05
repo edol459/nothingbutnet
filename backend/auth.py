@@ -374,3 +374,19 @@ def logout_get():
     next_url = request.args.get("next", "/")
     session.clear()
     return redirect(next_url)
+
+
+@auth_bp.route("/me", methods=["DELETE"])
+@login_required
+def delete_account():
+    """Permanently delete the authenticated user's account and all their data."""
+    user = current_user()
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM users WHERE id = %s", (user["id"],))
+        conn.commit()
+    finally:
+        conn.close()
+    session.clear()
+    return jsonify({"ok": True})
