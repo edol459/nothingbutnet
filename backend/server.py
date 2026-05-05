@@ -1155,7 +1155,16 @@ def get_scoreboard():
             cdn_data  = cdn_resp.json()
             cdn_games = cdn_data.get("scoreboard", {}).get("games", [])
             cdn_date  = cdn_data.get("scoreboard", {}).get("gameDate", "")
-            if cdn_date == _game_today and cdn_games:
+            # Accept CDN data even if the date lags by one day — the CDN sometimes
+            # reports yesterday's date for a few hours after midnight ET.
+            from datetime import datetime as _datetime_cls
+            try:
+                cdn_dt   = _datetime_cls.strptime(cdn_date, "%Y-%m-%d")
+                today_dt = _datetime_cls.strptime(_game_today, "%Y-%m-%d")
+                date_ok  = abs((today_dt - cdn_dt).days) <= 1
+            except Exception:
+                date_ok = cdn_date == _game_today
+            if date_ok and cdn_games:
                 away_k = "awayTeam"; home_k = "homeTeam"
                 games = []
                 for g in cdn_games:
@@ -1176,10 +1185,10 @@ def get_scoreboard():
                     if int(g.get("gameStatus", 1) or 1) == 3 and g.get("gameId"):
                         _upsert_game_from_boxscore(g["gameId"], g)
                 _enrich_games_with_records(games)
-                payload = {"games": games, "date": cdn_date}
+                payload = {"games": games, "date": _game_today}
                 _today_sb_cache.update({"payload": payload, "ts": _time.time(), "date": _game_today})
                 return jsonify(payload)
-            # CDN is still on a past date — fall through to ScoreboardV3
+            # CDN date too far off or no games — fall through to ScoreboardV3
         except Exception:
             pass  # CDN failed — fall through to ScoreboardV3
 
