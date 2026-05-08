@@ -5835,49 +5835,105 @@ _wnba_team_stats_cache: dict = {}   # abbr → {"data": dict, "ts": float}
 
 @app.route("/api/wnba/team-stats/<abbr>")
 def get_wnba_team_stats(abbr):
-    """WNBA team season averages from ESPN. Cached 1 hour."""
+    """
+    WNBA team season averages, mirroring the NBA preview/team-stats approach.
+
+    Priority:
+      1. wnba_player_seasons — most recent season with ≥5 qualifying players
+         (shows current season once fetch_wnba_player_stats.py has run,
+          otherwise falls back to previous season automatically)
+      2. wnba_player_game_stats — current-season CDN ingest (pts/reb/ast only),
+         for expansion teams (TOR, POR) that have no historical season rows yet
+    """
     abbr = abbr.upper()
     cached = _wnba_team_stats_cache.get(abbr)
     if cached and _time.time() - cached["ts"] < 3600:
         return jsonify(cached["data"])
 
-    team_ids = _get_wnba_team_ids()
-    tid = team_ids.get(abbr)
-    if not tid:
-        return jsonify({"error": f"Unknown WNBA team: {abbr}"}), 404
+    result = None
 
+    # 1. wnba_player_seasons — most recent season with enough data
     try:
-        url  = (f"https://site.api.espn.com/apis/site/v2/sports/basketball"
-                f"/wnba/teams/{tid}/statistics")
-        resp = _requests.get(url, headers=_ESPN_HEADERS, timeout=10)
-        resp.raise_for_status()
-        cats = resp.json().get("results", {}).get("stats", {}).get("categories", [])
-
-        def _find(name):
-            for cat in cats:
-                for stat in cat.get("stats", []):
-                    if stat.get("name", "").lower() == name.lower():
-                        v = stat.get("value")
-                        return round(float(v), 1) if v is not None else None
-            return None
-
-        def _pct(name):
-            v = _find(name)
-            return round(v / 100, 4) if v is not None else None
-
-        result = {
-            "abbr":    abbr,
-            "ppg":     _find("avgPoints"),
-            "rpg":     _find("avgRebounds"),
-            "apg":     _find("avgAssists"),
-            "topg":    _find("avgTurnovers"),
-            "fg_pct":  _pct("fieldGoalPct"),
-            "fg3_pct": _pct("threePointFieldGoalPct"),
-        }
-        _wnba_team_stats_cache[abbr] = {"data": result, "ts": _time.time()}
-        return jsonify(result)
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT
+                season,
+                SUM(pts  * gp) AS tot_pts,
+                SUM(reb  * gp) AS tot_reb,
+                SUM(ast  * gp) AS tot_ast,
+                SUM(tov  * gp) AS tot_tov,
+                SUM(fgm  * gp) AS tot_fgm,
+                SUM(fga  * gp) AS tot_fga,
+                SUM(fg3m * gp) AS tot_fg3m,
+                SUM(fg3a * gp) AS tot_fg3a,
+                MAX(gp)        AS max_gp
+            FROM   wnba_player_seasons
+            WHERE  team = %s AND season_type = 'Regular Season' AND gp >= 5
+            GROUP  BY season
+            ORDER  BY season DESC
+            LIMIT  1
+        """, (abbr,))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if row and row["max_gp"]:
+            max_gp = float(row["max_gp"])
+            def safe_div(a, b): return round(a / b, 4) if b else None
+            result = {
+                "abbr":    abbr,
+                "ppg":     round(row["tot_pts"]  / max_gp, 1) if row["tot_pts"]  else None,
+                "rpg":     round(row["tot_reb"]  / max_gp, 1) if row["tot_reb"]  else None,
+                "apg":     round(row["tot_ast"]  / max_gp, 1) if row["tot_ast"]  else None,
+                "topg":    round(row["tot_tov"]  / max_gp, 1) if row["tot_tov"]  else None,
+                "fg_pct":  safe_div(row["tot_fgm"], row["tot_fga"]),
+                "fg3_pct": safe_div(row["tot_fg3m"], row["tot_fg3a"]),
+            }
     except Exception as e:
-        return jsonify({"error": str(e), "abbr": abbr}), 200
+        print(f"[wnba] team-stats seasons error {abbr}: {e}", flush=True)
+
+    # 2. wnba_player_game_stats — CDN auto-ingest (expansion teams TOR/POR)
+    if not result:
+        try:
+            season = _get_wnba_season()
+            conn = get_conn()
+            cur  = conn.cursor()
+            cur.execute("""
+                SELECT
+                    COUNT(DISTINCT game_id)     AS gp,
+                    ROUND(AVG(team_pts)::numeric, 1) AS ppg,
+                    ROUND(AVG(team_reb)::numeric, 1) AS rpg,
+                    ROUND(AVG(team_ast)::numeric, 1) AS apg
+                FROM (
+                    SELECT game_id,
+                           SUM(pts) AS team_pts,
+                           SUM(reb) AS team_reb,
+                           SUM(ast) AS team_ast
+                    FROM   wnba_player_game_stats
+                    WHERE  team = %s AND season = %s
+                    GROUP  BY game_id
+                ) game_totals
+            """, (abbr, season))
+            row = cur.fetchone()
+            cur.close(); conn.close()
+            if row and row["gp"] and int(row["gp"]) >= 1:
+                result = {
+                    "abbr":    abbr,
+                    "ppg":     float(row["ppg"]) if row["ppg"] else None,
+                    "rpg":     float(row["rpg"]) if row["rpg"] else None,
+                    "apg":     float(row["apg"]) if row["apg"] else None,
+                    "topg":    None,
+                    "fg_pct":  None,
+                    "fg3_pct": None,
+                }
+        except Exception as e:
+            print(f"[wnba] team-stats game_stats error {abbr}: {e}", flush=True)
+
+    if not result:
+        result = {"abbr": abbr, "ppg": None, "rpg": None, "apg": None,
+                  "topg": None, "fg_pct": None, "fg3_pct": None}
+
+    _wnba_team_stats_cache[abbr] = {"data": result, "ts": _time.time()}
+    return jsonify(result)
 
 
 if __name__ == "__main__":
