@@ -171,6 +171,37 @@ def _ensure_tables():
         cur.execute("""
             ALTER TABLE games ADD COLUMN IF NOT EXISTS league TEXT NOT NULL DEFAULT 'nba'
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS wnba_player_seasons (
+                player_id   INTEGER NOT NULL,
+                player_name TEXT    NOT NULL,
+                season      TEXT    NOT NULL,
+                season_type TEXT    NOT NULL DEFAULT 'Regular Season',
+                team        TEXT,
+                gp          INTEGER,
+                min         REAL,
+                pts         REAL,
+                reb         REAL,
+                ast         REAL,
+                stl         REAL,
+                blk         REAL,
+                tov         REAL,
+                fgm         REAL,
+                fga         REAL,
+                fg_pct      REAL,
+                fg3m        REAL,
+                fg3a        REAL,
+                fg3_pct     REAL,
+                ftm         REAL,
+                fta         REAL,
+                ft_pct      REAL,
+                oreb        REAL,
+                dreb        REAL,
+                eff         REAL,
+                updated_at  TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (player_id, season, season_type)
+            )
+        """)
         # Backfill review_count / rating_sum from game_reviews (in case they drifted out of sync)
         cur.execute("""
             UPDATE games g
@@ -5298,15 +5329,14 @@ def _wnba_box_star(event_id: str) -> tuple[str | None, str | None]:
         return None, None
 
 
-_wnba_team_star_cache: dict = {}  # abbr → {"id": str|None, "ts": float}
+_wnba_team_star_cache: dict = {}  # abbr → {"id": int|None, "ts": float}
 _WNBA_TEAM_STAR_TTL = 6 * 3600
 
 
-def _wnba_get_team_star(abbr: str) -> str | None:
+def _wnba_get_team_star(abbr: str) -> int | None:
     """
-    Return the ESPN player ID of the top P+R+A player for a WNBA team,
-    derived from their most recent Final game in our DB.
-    Cached 6 hours per team.
+    Return the WNBA CDN player ID of the top P+R+A player for a WNBA team
+    from wnba_player_seasons (most recent season). Cached 6 hours per team.
     """
     abbr = abbr.upper()
     cached = _wnba_team_star_cache.get(abbr)
@@ -5318,19 +5348,16 @@ def _wnba_get_team_star(abbr: str) -> str | None:
         conn = _get_db()
         cur  = conn.cursor()
         cur.execute("""
-            SELECT game_id, away_team_abbr, home_team_abbr
-            FROM   games
-            WHERE  league = 'wnba'
-              AND  status = 'Final'
-              AND  (home_team_abbr = %s OR away_team_abbr = %s)
-            ORDER  BY game_date DESC
+            SELECT player_id
+            FROM   wnba_player_seasons
+            WHERE  team = %s AND season_type = 'Regular Season'
+            ORDER  BY season DESC, (pts + reb + ast) DESC NULLS LAST
             LIMIT  1
-        """, (abbr, abbr))
+        """, (abbr,))
         row = cur.fetchone()
         cur.close(); conn.close()
         if row:
-            away_id, home_id = _wnba_box_star(row["game_id"])
-            player_id = away_id if row["away_team_abbr"] == abbr else home_id
+            player_id = int(row["player_id"])
     except Exception as e:
         print(f"[wnba] team_star error {abbr}: {e}", flush=True)
 
@@ -5341,12 +5368,11 @@ def _wnba_get_team_star(abbr: str) -> str | None:
 @app.route("/api/wnba/game-posters", methods=["POST"])
 def get_wnba_game_posters():
     """
-    Returns best-fit ESPN WNBA player IDs for scoreboard poster headers.
-    Final games → top P+R+A from boxscore.
-    Upcoming/live → first player from team roster.
+    Returns WNBA CDN player IDs (Integer) for scoreboard poster headers.
+    Uses wnba_player_seasons stats DB to find top P+R+A player per team.
 
     Body:    {"games": [{"gameId":"...","away":"NY","home":"IND","status":3}, ...]}
-    Returns: {"posters": {"<gameId>": {"away": "<espnId>", "home": "<espnId>"}}}
+    Returns: {"posters": {"<gameId>": {"away": <int|null>, "home": <int|null>}}}
     """
     body  = request.get_json(force=True, silent=True) or {}
     games = body.get("games", [])
@@ -5354,66 +5380,83 @@ def get_wnba_game_posters():
         return jsonify({"posters": {}})
 
     posters: dict = {}
-    team_ids = _get_wnba_team_ids()
-
-    final_games    = [g for g in games if int(g.get("status", 1) or 1) == 3]
-    nonfinal_games = [g for g in games if int(g.get("status", 1) or 1) != 3]
-
-    # Finals → boxscore actual leaders (parallel)
-    if final_games:
-        with ThreadPoolExecutor(max_workers=min(len(final_games), 6)) as pool:
-            futures = {pool.submit(_wnba_box_star, g["gameId"]): g for g in final_games}
-            for fut in as_completed(futures):
-                g = futures[fut]
-                away_id, home_id = fut.result()
-                posters[g["gameId"]] = {"away": away_id, "home": home_id}
-
-    # Non-finals → scoreboard leaders (top scorer for the team), fall back to roster
-    if nonfinal_games:
-        from datetime import date as _date, timedelta
-        date_map: dict[str, dict] = {}  # game_id → {away, home}
-        try:
-            for delta in [0, 1, -1]:
-                d = _date.today()
-                if delta:
-                    d = d + timedelta(days=delta)
-                url = (f"https://site.api.espn.com/apis/site/v2/sports/basketball/wnba"
-                       f"/scoreboard?dates={d.strftime('%Y%m%d')}")
-                resp = _requests.get(url, headers=_ESPN_HEADERS, timeout=8)
-                if resp.status_code != 200:
-                    continue
-                for event in resp.json().get("events", []):
-                    eid = str(event.get("id", ""))
-                    away_id, home_id = None, None
-                    for comp in event.get("competitions", [])[:1]:
-                        for ct in comp.get("competitors", []):
-                            ha = ct.get("homeAway", "")
-                            pid = None
-                            for cat in ct.get("leaders", []):
-                                ls = cat.get("leaders", [])
-                                if ls:
-                                    pid = ls[0].get("athlete", {}).get("id")
-                                    break
-                            if ha == "away":
-                                away_id = str(pid) if pid else None
-                            elif ha == "home":
-                                home_id = str(pid) if pid else None
-                    if away_id or home_id:
-                        date_map[eid] = {"away": away_id, "home": home_id}
-        except Exception as e:
-            print(f"[wnba] scoreboard leaders error: {e}", flush=True)
-
-        for g in nonfinal_games:
-            gid = g.get("gameId", "")
-            if gid in date_map:
-                posters[gid] = date_map[gid]
-            else:
-                # Fall back to DB-based team star (top P+R+A from most recent final)
-                away_id = _wnba_get_team_star(g.get("away", ""))
-                home_id = _wnba_get_team_star(g.get("home", ""))
-                posters[gid] = {"away": away_id, "home": home_id}
+    for g in games:
+        gid      = g.get("gameId", "")
+        away_id  = _wnba_get_team_star(g.get("away", ""))
+        home_id  = _wnba_get_team_star(g.get("home", ""))
+        posters[gid] = {"away": away_id, "home": home_id}
 
     return jsonify({"posters": posters})
+
+
+# ── /api/wnba/leaderboard ────────────────────────────────────────────────────
+
+@app.route("/api/wnba/leaderboard")
+def get_wnba_leaderboard():
+    """
+    Returns all WNBA players for a season sorted by a stat.
+    Query params: season (default most recent), season_type, sort (default pts), limit (default 50)
+    """
+    season      = request.args.get("season")
+    season_type = request.args.get("season_type", "Regular Season")
+    sort_col    = request.args.get("sort", "pts")
+    limit       = min(int(request.args.get("limit", 50)), 200)
+
+    allowed_sorts = {"pts", "reb", "ast", "stl", "blk", "tov", "min", "fg_pct",
+                     "fg3_pct", "ft_pct", "fgm", "fga", "fg3m", "fg3a", "eff"}
+    if sort_col not in allowed_sorts:
+        sort_col = "pts"
+
+    try:
+        conn = _get_db()
+        cur  = conn.cursor()
+        if not season:
+            cur.execute("SELECT MAX(season) FROM wnba_player_seasons WHERE season_type = %s", (season_type,))
+            row = cur.fetchone()
+            season = row["max"] if row else "2025"
+        cur.execute(f"""
+            SELECT player_id, player_name, team, season, season_type,
+                   gp, min, pts, reb, ast, stl, blk, tov,
+                   fgm, fga, fg_pct, fg3m, fg3a, fg3_pct,
+                   ftm, fta, ft_pct, oreb, dreb, eff
+            FROM   wnba_player_seasons
+            WHERE  season = %s AND season_type = %s
+            ORDER  BY {sort_col} DESC NULLS LAST
+            LIMIT  %s
+        """, (season, season_type, limit))
+        players = [dict(r) for r in cur.fetchall()]
+        cur.close(); conn.close()
+        return jsonify({"players": players, "season": season, "season_type": season_type})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/wnba/player-stats")
+def get_wnba_player_stats():
+    """Single-player WNBA stat row."""
+    player_id   = request.args.get("player_id")
+    season      = request.args.get("season")
+    season_type = request.args.get("season_type", "Regular Season")
+    if not player_id:
+        return jsonify({"error": "player_id required"}), 400
+    try:
+        conn = _get_db()
+        cur  = conn.cursor()
+        if not season:
+            cur.execute("SELECT MAX(season) FROM wnba_player_seasons WHERE season_type = %s", (season_type,))
+            row = cur.fetchone()
+            season = row["max"] if row else "2025"
+        cur.execute("""
+            SELECT * FROM wnba_player_seasons
+            WHERE player_id = %s AND season = %s AND season_type = %s
+        """, (player_id, season, season_type))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if not row:
+            return jsonify({"error": "Not found"}), 404
+        return jsonify({"stats": dict(row)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ── /api/wnba/team-stats/<abbr> ───────────────────────────────────────────────
