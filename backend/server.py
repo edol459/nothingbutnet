@@ -181,9 +181,26 @@ def _ensure_tables():
                 pts         INTEGER DEFAULT 0,
                 reb         INTEGER DEFAULT 0,
                 ast         INTEGER DEFAULT 0,
+                tov         INTEGER DEFAULT 0,
+                fgm         INTEGER DEFAULT 0,
+                fga         INTEGER DEFAULT 0,
+                fg3m        INTEGER DEFAULT 0,
+                fg3a        INTEGER DEFAULT 0,
                 PRIMARY KEY (player_id, game_id)
             )
         """)
+        # Add columns introduced after initial table creation (safe on existing DBs)
+        for col, defn in [
+            ("tov",  "INTEGER DEFAULT 0"),
+            ("fgm",  "INTEGER DEFAULT 0"),
+            ("fga",  "INTEGER DEFAULT 0"),
+            ("fg3m", "INTEGER DEFAULT 0"),
+            ("fg3a", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE wnba_player_game_stats ADD COLUMN IF NOT EXISTS {col} {defn}")
+            except Exception:
+                pass
         cur.execute("""
             CREATE TABLE IF NOT EXISTS wnba_player_seasons (
                 player_id   INTEGER NOT NULL,
@@ -5185,6 +5202,11 @@ def _wnba_cdn_ingest_game_bg(game_id: str, home_abbr: str, away_abbr: str):
                     _si(stats.get("points", 0)),
                     _si(stats.get("reboundsTotal", 0)),
                     _si(stats.get("assists", 0)),
+                    _si(stats.get("turnovers", 0)),
+                    _si(stats.get("fieldGoalsMade", 0)),
+                    _si(stats.get("fieldGoalsAttempted", 0)),
+                    _si(stats.get("threePointersMade", 0)),
+                    _si(stats.get("threePointersAttempted", 0)),
                 ))
 
         if not rows:
@@ -5195,9 +5217,14 @@ def _wnba_cdn_ingest_game_bg(game_id: str, home_abbr: str, away_abbr: str):
         for row in rows:
             cur.execute("""
                 INSERT INTO wnba_player_game_stats
-                    (player_id, player_name, team, game_id, season, pts, reb, ast)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (player_id, game_id) DO NOTHING
+                    (player_id, player_name, team, game_id, season,
+                     pts, reb, ast, tov, fgm, fga, fg3m, fg3a)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (player_id, game_id) DO UPDATE SET
+                    pts  = EXCLUDED.pts,  reb  = EXCLUDED.reb,
+                    ast  = EXCLUDED.ast,  tov  = EXCLUDED.tov,
+                    fgm  = EXCLUDED.fgm,  fga  = EXCLUDED.fga,
+                    fg3m = EXCLUDED.fg3m, fg3a = EXCLUDED.fg3a
             """, row)
         conn.commit()
         cur.close(); conn.close()
@@ -5851,82 +5878,86 @@ def get_wnba_team_stats(abbr):
         return jsonify(cached["data"])
 
     result = None
+    season = _get_wnba_season()
 
-    # 1. wnba_player_seasons — most recent season with enough data
+    # 1. wnba_player_game_stats — current-season CDN auto-ingest (full stat line)
+    #    Becomes available after the first completed game; always reflects live season.
     try:
         conn = get_conn()
         cur  = conn.cursor()
         cur.execute("""
             SELECT
-                season,
-                SUM(pts  * gp) AS tot_pts,
-                SUM(reb  * gp) AS tot_reb,
-                SUM(ast  * gp) AS tot_ast,
-                SUM(tov  * gp) AS tot_tov,
-                SUM(fgm  * gp) AS tot_fgm,
-                SUM(fga  * gp) AS tot_fga,
-                SUM(fg3m * gp) AS tot_fg3m,
-                SUM(fg3a * gp) AS tot_fg3a,
-                MAX(gp)        AS max_gp
-            FROM   wnba_player_seasons
-            WHERE  team = %s AND season_type = 'Regular Season' AND gp >= 5
-            GROUP  BY season
-            ORDER  BY season DESC
-            LIMIT  1
-        """, (abbr,))
+                COUNT(DISTINCT game_id)              AS gp,
+                ROUND(AVG(team_pts)::numeric,  1)    AS ppg,
+                ROUND(AVG(team_reb)::numeric,  1)    AS rpg,
+                ROUND(AVG(team_ast)::numeric,  1)    AS apg,
+                ROUND(AVG(team_tov)::numeric,  1)    AS topg,
+                SUM(team_fgm)                        AS tot_fgm,
+                SUM(team_fga)                        AS tot_fga,
+                SUM(team_fg3m)                       AS tot_fg3m,
+                SUM(team_fg3a)                       AS tot_fg3a
+            FROM (
+                SELECT game_id,
+                       SUM(pts)  AS team_pts, SUM(reb)  AS team_reb,
+                       SUM(ast)  AS team_ast, SUM(tov)  AS team_tov,
+                       SUM(fgm)  AS team_fgm, SUM(fga)  AS team_fga,
+                       SUM(fg3m) AS team_fg3m, SUM(fg3a) AS team_fg3a
+                FROM   wnba_player_game_stats
+                WHERE  team = %s AND season = %s
+                GROUP  BY game_id
+            ) game_totals
+        """, (abbr, season))
         row = cur.fetchone()
         cur.close(); conn.close()
-        if row and row["max_gp"]:
-            max_gp = float(row["max_gp"])
+        if row and row["gp"] and int(row["gp"]) >= 1:
             def safe_div(a, b): return round(a / b, 4) if b else None
             result = {
                 "abbr":    abbr,
-                "ppg":     round(row["tot_pts"]  / max_gp, 1) if row["tot_pts"]  else None,
-                "rpg":     round(row["tot_reb"]  / max_gp, 1) if row["tot_reb"]  else None,
-                "apg":     round(row["tot_ast"]  / max_gp, 1) if row["tot_ast"]  else None,
-                "topg":    round(row["tot_tov"]  / max_gp, 1) if row["tot_tov"]  else None,
-                "fg_pct":  safe_div(row["tot_fgm"], row["tot_fga"]),
+                "ppg":     float(row["ppg"])  if row["ppg"]  else None,
+                "rpg":     float(row["rpg"])  if row["rpg"]  else None,
+                "apg":     float(row["apg"])  if row["apg"]  else None,
+                "topg":    float(row["topg"]) if row["topg"] else None,
+                "fg_pct":  safe_div(row["tot_fgm"],  row["tot_fga"]),
                 "fg3_pct": safe_div(row["tot_fg3m"], row["tot_fg3a"]),
             }
     except Exception as e:
-        print(f"[wnba] team-stats seasons error {abbr}: {e}", flush=True)
+        print(f"[wnba] team-stats game_stats error {abbr}: {e}", flush=True)
 
-    # 2. wnba_player_game_stats — CDN auto-ingest (expansion teams TOR/POR)
+    # 2. wnba_player_seasons — most recent season (pre-season fallback, full stats)
     if not result:
         try:
-            season = _get_wnba_season()
             conn = get_conn()
             cur  = conn.cursor()
             cur.execute("""
                 SELECT
-                    COUNT(DISTINCT game_id)     AS gp,
-                    ROUND(AVG(team_pts)::numeric, 1) AS ppg,
-                    ROUND(AVG(team_reb)::numeric, 1) AS rpg,
-                    ROUND(AVG(team_ast)::numeric, 1) AS apg
-                FROM (
-                    SELECT game_id,
-                           SUM(pts) AS team_pts,
-                           SUM(reb) AS team_reb,
-                           SUM(ast) AS team_ast
-                    FROM   wnba_player_game_stats
-                    WHERE  team = %s AND season = %s
-                    GROUP  BY game_id
-                ) game_totals
-            """, (abbr, season))
+                    SUM(pts  * gp) AS tot_pts,  SUM(reb  * gp) AS tot_reb,
+                    SUM(ast  * gp) AS tot_ast,  SUM(tov  * gp) AS tot_tov,
+                    SUM(fgm  * gp) AS tot_fgm,  SUM(fga  * gp) AS tot_fga,
+                    SUM(fg3m * gp) AS tot_fg3m, SUM(fg3a * gp) AS tot_fg3a,
+                    MAX(gp)        AS max_gp
+                FROM   wnba_player_seasons
+                WHERE  team = %s AND season_type = 'Regular Season' AND gp >= 5
+                  AND  season = (
+                      SELECT MAX(season) FROM wnba_player_seasons
+                      WHERE  team = %s AND season_type = 'Regular Season' AND gp >= 5
+                  )
+            """, (abbr, abbr))
             row = cur.fetchone()
             cur.close(); conn.close()
-            if row and row["gp"] and int(row["gp"]) >= 1:
+            if row and row["max_gp"]:
+                max_gp = float(row["max_gp"])
+                def safe_div(a, b): return round(a / b, 4) if b else None
                 result = {
                     "abbr":    abbr,
-                    "ppg":     float(row["ppg"]) if row["ppg"] else None,
-                    "rpg":     float(row["rpg"]) if row["rpg"] else None,
-                    "apg":     float(row["apg"]) if row["apg"] else None,
-                    "topg":    None,
-                    "fg_pct":  None,
-                    "fg3_pct": None,
+                    "ppg":     round(row["tot_pts"]  / max_gp, 1) if row["tot_pts"]  else None,
+                    "rpg":     round(row["tot_reb"]  / max_gp, 1) if row["tot_reb"]  else None,
+                    "apg":     round(row["tot_ast"]  / max_gp, 1) if row["tot_ast"]  else None,
+                    "topg":    round(row["tot_tov"]  / max_gp, 1) if row["tot_tov"]  else None,
+                    "fg_pct":  safe_div(row["tot_fgm"], row["tot_fga"]),
+                    "fg3_pct": safe_div(row["tot_fg3m"], row["tot_fg3a"]),
                 }
         except Exception as e:
-            print(f"[wnba] team-stats game_stats error {abbr}: {e}", flush=True)
+            print(f"[wnba] team-stats seasons error {abbr}: {e}", flush=True)
 
     if not result:
         result = {"abbr": abbr, "ppg": None, "rpg": None, "apg": None,
