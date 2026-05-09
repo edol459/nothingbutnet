@@ -1314,10 +1314,9 @@ function buildCard(g) {
 async function loadGamePosters(games) {
   if (!games || !games.length) return;
   const isWnba = SB.league === 'wnba';
-  if (isWnba) return; // WNBA CDN headshots are blocked; team logos already show in poster
   const endpoint   = isWnba ? `${API}/api/wnba/game-posters` : `${API}/api/game-posters`;
   const headshotFn = isWnba
-    ? id => `https://a.espncdn.com/i/headshots/wnba/players/full/${id}.png`
+    ? id => `https://ak-static.cms.nba.com/wp-content/uploads/headshots/wnba/latest/260x190/${id}.png`
     : id => `https://cdn.nba.com/headshots/nba/latest/1040x760/${id}.png`;
   try {
     const res  = await fetch(endpoint, {
@@ -1391,8 +1390,10 @@ async function loadPerformers() {
 
     container.innerHTML = `<div class="performer-list">${
       players.map((p, i) => {
-        const headshotSrc = (!isWnba && p.player_id)
-          ? `https://cdn.nba.com/headshots/nba/latest/260x190/${p.player_id}.png`
+        const headshotSrc = p.player_id
+          ? (isWnba
+              ? `https://ak-static.cms.nba.com/wp-content/uploads/headshots/wnba/latest/260x190/${p.player_id}.png`
+              : `https://cdn.nba.com/headshots/nba/latest/260x190/${p.player_id}.png`)
           : null;
         const headshot = headshotSrc
           ? `<img class="performer-headshot" src="${headshotSrc}" alt="${p.name}" onerror="this.style.opacity=0">`
