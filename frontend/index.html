@@ -125,6 +125,28 @@ nav {
   border-bottom: 1px solid var(--rule);
 }
 
+/* ── League toggle tabs ──────────────────────────────────────── */
+.league-toggle {
+  display: flex;
+  gap: 6px;
+  padding: 14px 0 0;
+}
+.league-tab {
+  font-family: var(--ff-sans);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 5px 16px;
+  border-radius: 100px;
+  border: 1.5px solid var(--rule);
+  background: transparent;
+  color: var(--ink3);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  letter-spacing: 0.01em;
+}
+.league-tab:hover { background: var(--paper2); color: var(--ink); }
+.league-tab.active { background: var(--orange); border-color: var(--orange); color: #fff; }
+
 .section-title {
   font-family: var(--ff-serif);
   font-size: 26px;
@@ -874,6 +896,11 @@ nav {
 
   <!-- Scoreboard -->
   <div class="scoreboard-section">
+    <!-- League toggle -->
+    <div class="league-toggle">
+      <button class="league-tab active" id="tab-nba" onclick="switchLeague('nba')">NBA</button>
+      <button class="league-tab" id="tab-wnba" onclick="switchLeague('wnba')">WNBA</button>
+    </div>
     <!-- Calendar date strip -->
     <div class="cal-strip-wrap">
       <div class="cal-strip" id="cal-strip"></div>
@@ -939,21 +966,36 @@ function teamLogoUrl(abbr) {
   return id ? `https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg` : null;
 }
 
-function buildPoster(awayAbbr, homeAbbr) {
-  let awayColor      = getTeamColor(awayAbbr, 'primary');
-  const homeColor    = getTeamColor(homeAbbr, 'primary');
+// ── WNBA team ESPN ID map ─────────────────────────────────────
+const WNBA_ESPN_IDS = {
+  ATL:20, CHI:19, CON:18, DAL:3,
+  GS:129689, IND:5, LA:6, LV:17,
+  MIN:8, NY:9, PHX:11, POR:132052,
+  SEA:14, TOR:131935, WSH:16,
+};
+function wnbaTeamLogoUrl(abbr) {
+  const id = WNBA_ESPN_IDS[(abbr || '').toUpperCase()];
+  return id ? `https://a.espncdn.com/i/teamlogos/wnba/500/${id}.png` : null;
+}
 
-  // If primaries are too similar, use away's secondary
+function buildPoster(awayAbbr, homeAbbr) {
+  const isWnba = SB.league === 'wnba';
+  const getColor = (abbr, type) => isWnba ? getWnbaTeamColor(abbr, type) : getTeamColor(abbr, type);
+  const logoFn   = isWnba ? wnbaTeamLogoUrl : teamLogoUrl;
+
+  let awayColor   = getColor(awayAbbr, 'primary');
+  const homeColor = getColor(homeAbbr, 'primary');
+
   const [ar, ag, ab] = hexToRgb(awayColor);
   const [hr, hg, hb] = hexToRgb(homeColor);
   if (Math.sqrt((ar-hr)**2 + (ag-hg)**2 + (ab-hb)**2) < 80) {
-    awayColor = getTeamColor(awayAbbr, 'secondary');
+    awayColor = getColor(awayAbbr, 'secondary');
   }
 
   const bg = `linear-gradient(90deg,${awayColor} 0%,${awayColor} 45%,${homeColor} 55%,${homeColor} 100%)`;
 
-  const awayLogo = teamLogoUrl(awayAbbr) || '';
-  const homeLogo = teamLogoUrl(homeAbbr) || '';
+  const awayLogo = logoFn(awayAbbr) || '';
+  const homeLogo = logoFn(homeAbbr) || '';
   return `<div class="card-poster">
     <div class="card-poster-bg" style="background:${bg}"></div>
     ${awayLogo ? `<img class="card-poster-logo away" src="${awayLogo}" alt="${awayAbbr}">` : ''}
@@ -1019,7 +1061,21 @@ const SB = {
   date: null,          // null = today; 'YYYY-MM-DD' = specific day
   loading: false,
   liveTimer: null,
+  league: 'nba',
 };
+
+function switchLeague(league) {
+  if (SB.league === league) return;
+  SB.league = league;
+  SB.date = null;
+  clearTimeout(SB.liveTimer);
+  SB.loading = false;
+  document.getElementById('tab-nba').classList.toggle('active', league === 'nba');
+  document.getElementById('tab-wnba').classList.toggle('active', league === 'wnba');
+  buildCalStrip();
+  loadScoreboard();
+  loadPerformers();
+}
 
 // ── Calendar strip ────────────────────────────────────────────
 const CAL_DAYS_BACK = 14;   // how many past days to show
@@ -1092,8 +1148,9 @@ async function loadScoreboard() {
   gameStrip.innerHTML = '<div class="strip-state"><span class="spin"></span> Loading…</div>';
 
   try {
-    const qs = SB.date ? `?date=${SB.date}` : '';
-    const res = await fetch(`${API}/api/scoreboard${qs}`);
+    const qs       = SB.date ? `?date=${SB.date}` : '';
+    const endpoint = SB.league === 'wnba' ? `${API}/api/wnba/scoreboard${qs}` : `${API}/api/scoreboard${qs}`;
+    const res  = await fetch(endpoint);
     const data = await res.json();
     const games = data.games || [];
 
@@ -1127,8 +1184,8 @@ async function loadScoreboard() {
         const gid    = card.dataset.gameId;
         const status = parseInt(card.dataset.gameStatus || '3', 10);
         if (!gid) return;
-        if (status === 1) {
-          // Upcoming → preview page
+        if (status === 1 && SB.league !== 'wnba') {
+          // NBA upcoming → preview page
           const away    = card.dataset.away || '';
           const home    = card.dataset.home || '';
           const time    = card.dataset.time || '';
@@ -1136,7 +1193,7 @@ async function loadScoreboard() {
           const homeRec = card.dataset.homeRec || '';
           const qs = new URLSearchParams({ gameId: gid, away, home, time, awayRec, homeRec });
           window.location.href = `/preview?${qs}`;
-        } else {
+        } else if (status !== 1) {
           // Live or final → game detail page
           window.location.href = `/game?gameId=${gid}`;
         }
@@ -1196,7 +1253,7 @@ function buildCard(g) {
   }
 
   function teamRow(abbr, score, won, lost, rec) {
-    const logoUrl = teamLogoUrl(abbr);
+    const logoUrl = SB.league === 'wnba' ? wnbaTeamLogoUrl(abbr) : teamLogoUrl(abbr);
     const logoHtml = logoUrl
       ? `<img class="card-logo" src="${logoUrl}" alt="${abbr}" onerror="this.outerHTML='<div class=\\'card-logo-fallback\\'>🏀</div>'">`
       : `<div class="card-logo-fallback">🏀</div>`;
@@ -1256,9 +1313,13 @@ function buildCard(g) {
 // ── Game Posters ──────────────────────────────────────────────
 async function loadGamePosters(games) {
   if (!games || !games.length) return;
-  const base = 'https://cdn.nba.com/headshots/nba/latest/1040x760/';
+  const isWnba = SB.league === 'wnba';
+  const endpoint   = isWnba ? `${API}/api/wnba/game-posters` : `${API}/api/game-posters`;
+  const headshotFn = isWnba
+    ? id => `https://a.espncdn.com/i/headshots/wnba/players/full/${id}.png`
+    : id => `https://cdn.nba.com/headshots/nba/latest/1040x760/${id}.png`;
   try {
-    const res  = await fetch(`${API}/api/game-posters`, {
+    const res  = await fetch(endpoint, {
       method:  'POST',
       headers: {'Content-Type': 'application/json'},
       body:    JSON.stringify({
@@ -1290,7 +1351,7 @@ async function loadGamePosters(games) {
           if (logoImg) logoImg.style.opacity = '0';
         };
         playerImg.onerror = () => { playerImg.style.display = 'none'; };
-        playerImg.src = base + playerId + '.png';
+        playerImg.src = headshotFn(playerId);
       });
     });
   } catch(e) {
@@ -1307,8 +1368,10 @@ async function loadPerformers() {
   container.innerHTML = '<div class="performers-loading"><span class="spin"></span> Loading…</div>';
 
   const qs = SB.date ? `?date=${SB.date}` : '';
+  const isWnba = SB.league === 'wnba';
+  const perfEndpoint = isWnba ? `${API}/api/wnba/top-performers${qs}` : `${API}/api/top-performers${qs}`;
   try {
-    const res  = await fetch(`${API}/api/top-performers${qs}`);
+    const res  = await fetch(perfEndpoint);
     const data = await res.json();
     const players = data.players || [];
 
@@ -1327,8 +1390,13 @@ async function loadPerformers() {
 
     container.innerHTML = `<div class="performer-list">${
       players.map((p, i) => {
-        const headshot = p.player_id
-          ? `<img class="performer-headshot" src="https://cdn.nba.com/headshots/nba/latest/260x190/${p.player_id}.png" alt="${p.name}" onerror="this.style.opacity=0">`
+        const headshotSrc = p.player_id
+          ? (isWnba
+              ? `https://a.espncdn.com/i/headshots/wnba/players/full/${p.player_id}.png`
+              : `https://cdn.nba.com/headshots/nba/latest/260x190/${p.player_id}.png`)
+          : null;
+        const headshot = headshotSrc
+          ? `<img class="performer-headshot" src="${headshotSrc}" alt="${p.name}" onerror="this.style.opacity=0">`
           : '';
         return `<div class="performer-row" onclick="window.location.href='/game?gameId=${p.game_id}'">
           <span class="performer-rank ${rankClass(i)}">${i+1}</span>
