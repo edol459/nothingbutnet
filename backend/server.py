@@ -1270,31 +1270,29 @@ def get_scoreboard():
                 payload = {"games": games, "date": _game_today}
                 _today_sb_cache.update({"payload": payload, "ts": _time.time(), "date": _game_today})
                 return jsonify(payload)
-            # CDN date too far off or no games — fall through to ScoreboardV3
         except Exception:
-            pass  # CDN failed — fall through to ScoreboardV3
+            pass  # CDN failed — fall through to schedule then ScoreboardV3
 
-    # Future dates — cache for 60 min
+    # Future dates — serve from cache (60 min TTL) before fetching schedule
     if not is_past and not is_today and date in _future_sb_cache:
         entry = _future_sb_cache[date]
         if _time.time() - entry["ts"] < 3600:
             return jsonify(entry["payload"])
 
-    # Future dates — CDN season schedule (not rate-limited on cloud IPs)
-    if not is_past and not is_today:
+    # Today/future — CDN season schedule fallback (fast, cached 2h, works on cloud IPs).
+    # Tried before ScoreboardV3 so cold-start requests don't block for 15 s.
+    if not is_past:
         try:
             sched = _fetch_nba_schedule()
             if sched:
-                dt = _dt.strptime(date, "%Y-%m-%d")
-                # Schedule uses zero-padded "MM/DD/YYYY 00:00:00"
-                sched_key  = f"{dt.month:02d}/{dt.day:02d}/{dt.year} 00:00:00"
+                dt_sched  = _dt.strptime(date, "%Y-%m-%d")
+                sched_key = f"{dt_sched.month:02d}/{dt_sched.day:02d}/{dt_sched.year} 00:00:00"
                 game_dates = sched.get("leagueSchedule", {}).get("gameDates", [])
                 target     = next((gd for gd in game_dates if gd.get("gameDate") == sched_key), None)
                 if target is not None:
                     games = []
                     for g in target.get("games", []):
-                        away = g.get("awayTeam", {})
-                        home = g.get("homeTeam", {})
+                        away = g.get("awayTeam", {}); home = g.get("homeTeam", {})
                         games.append({
                             "gameId":         g.get("gameId", ""),
                             "gameStatus":     1,
@@ -1309,7 +1307,15 @@ def get_scoreboard():
                         })
                     _enrich_games_with_records(games)
                     payload = {"games": games, "date": date}
-                    _future_sb_cache[date] = {"payload": payload, "ts": _time.time()}
+                    if is_today:
+                        # Only seed cache if poller hasn't already set real (live/final) data
+                        cached = _today_sb_cache.get("payload", {})
+                        has_real = (_today_sb_cache.get("date") == _game_today
+                                    and any(g["gameStatus"] in (2, 3) for g in cached.get("games", [])))
+                        if not has_real:
+                            _today_sb_cache.update({"payload": payload, "ts": _time.time(), "date": _game_today})
+                    else:
+                        _future_sb_cache[date] = {"payload": payload, "ts": _time.time()}
                     return jsonify(payload)
         except Exception:
             pass  # Fall through to ScoreboardV3
@@ -1434,28 +1440,6 @@ def get_scoreboard():
             except Exception:
                 pass
         return jsonify({"error": str(e), "games": [], "date": date}), 200
-
-
-# ── /api/debug/nba-cdn ────────────────────────────────────────────
-@app.route("/api/debug/nba-cdn")
-def debug_nba_cdn():
-    """Temporary endpoint: tests cdn.nba.com accessibility from this server."""
-    results = {}
-    for label, url in [
-        ("live_sb", "https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json"),
-        ("schedule", "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json"),
-    ]:
-        try:
-            r = _requests.get(url, headers=_CDN_HEADERS, timeout=10)
-            results[label] = {"status": r.status_code, "bytes": len(r.content),
-                              "date": r.json().get("scoreboard", r.json().get("leagueSchedule", {})).get("gameDate", "N/A") if r.status_code == 200 else None}
-        except Exception as e:
-            results[label] = {"error": str(e)}
-    game_today = _compute_game_today()
-    results["game_today"] = game_today
-    results["cache_date"] = _today_sb_cache.get("date")
-    results["cache_games"] = len(_today_sb_cache.get("payload", {}).get("games", []))
-    return jsonify(results)
 
 
 # ── /api/news ─────────────────────────────────────────────────────
