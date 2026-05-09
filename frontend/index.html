@@ -966,16 +966,16 @@ function teamLogoUrl(abbr) {
   return id ? `https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg` : null;
 }
 
-// ── WNBA team ESPN ID map ─────────────────────────────────────
-const WNBA_ESPN_IDS = {
-  ATL:20, CHI:19, CON:18, DAL:3,
-  GS:129689, IND:5, LA:6, LV:17,
-  MIN:8, NY:9, PHX:11, POR:132052,
-  SEA:14, TOR:131935, WSH:16,
+// ── WNBA CDN team ID map ──────────────────────────────────────
+const WNBA_CDN_TEAM_IDS = {
+  ATL:1611661330, CHI:1611661329, CON:1611661323, DAL:1611661321,
+  GS:1611661331,  IND:1611661325, LA:1611661320,  LV:1611661319,
+  MIN:1611661324, NY:1611661313,  PHX:1611661317, POR:1611661327,
+  SEA:1611661328, TOR:1611661332, WSH:1611661322,
 };
 function wnbaTeamLogoUrl(abbr) {
-  const id = WNBA_ESPN_IDS[(abbr || '').toUpperCase()];
-  return id ? `https://a.espncdn.com/i/teamlogos/wnba/500/${id}.png` : null;
+  const id = WNBA_CDN_TEAM_IDS[(abbr || '').toUpperCase()];
+  return id ? `https://cdn.wnba.com/logos/wnba/${id}/global/L/logo.svg` : null;
 }
 
 function buildPoster(awayAbbr, homeAbbr) {
@@ -1314,6 +1314,7 @@ function buildCard(g) {
 async function loadGamePosters(games) {
   if (!games || !games.length) return;
   const isWnba = SB.league === 'wnba';
+  if (isWnba) return; // WNBA CDN headshots are blocked; team logos already show in poster
   const endpoint   = isWnba ? `${API}/api/wnba/game-posters` : `${API}/api/game-posters`;
   const headshotFn = isWnba
     ? id => `https://a.espncdn.com/i/headshots/wnba/players/full/${id}.png`
@@ -1390,10 +1391,8 @@ async function loadPerformers() {
 
     container.innerHTML = `<div class="performer-list">${
       players.map((p, i) => {
-        const headshotSrc = p.player_id
-          ? (isWnba
-              ? `https://a.espncdn.com/i/headshots/wnba/players/full/${p.player_id}.png`
-              : `https://cdn.nba.com/headshots/nba/latest/260x190/${p.player_id}.png`)
+        const headshotSrc = (!isWnba && p.player_id)
+          ? `https://cdn.nba.com/headshots/nba/latest/260x190/${p.player_id}.png`
           : null;
         const headshot = headshotSrc
           ? `<img class="performer-headshot" src="${headshotSrc}" alt="${p.name}" onerror="this.style.opacity=0">`
