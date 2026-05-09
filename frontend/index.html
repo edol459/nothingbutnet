@@ -971,7 +971,7 @@ const WNBA_CDN_TEAM_IDS = {
   ATL:1611661330, CHI:1611661329, CON:1611661323, DAL:1611661321,
   GS:1611661331,  IND:1611661325, LA:1611661320,  LV:1611661319,
   MIN:1611661324, NY:1611661313,  PHX:1611661317, POR:1611661327,
-  SEA:1611661328, TOR:1611661332, WSH:1611661322,
+  PDX:1611661327, SEA:1611661328, TOR:1611661332, WSH:1611661322,
 };
 function wnbaTeamLogoUrl(abbr) {
   const id = WNBA_CDN_TEAM_IDS[(abbr || '').toUpperCase()];
@@ -1159,9 +1159,10 @@ async function loadScoreboard() {
       return;
     }
 
-    // Sort: live first, upcoming next, final last; within each group sort by start time.
-    // Parse minutes-since-midnight from gameStatusText ("7:00 pm ET", "10:30 PM ET")
-    // since gameTimeUTC can be off by an hour due to NBA CDN EST/EDT bug.
+    // Sort: live first, upcoming next, final last.
+    // Within each group sort by start time (earlier start = further left).
+    // For upcoming: parse "7:00 pm ET" from gameStatusText (more reliable than gameTimeUTC).
+    // For live/final: use gameTimeUTC as tiebreaker (gameStatusText shows period, not tip time).
     const rank = {2:0, 1:1, 3:2};
     const statusToMins = s => {
       if (!s) return 9999;
@@ -1173,9 +1174,21 @@ async function loadScoreboard() {
       if (!pm && h === 12) h = 0;
       return h * 60 + min;
     };
+    const utcMs = g => {
+      if (!g.gameTimeUTC) return 9999999;
+      try {
+        let s = g.gameTimeUTC.trim().replace(' ', 'T');
+        if (!/Z|[+-]\d\d:?\d\d$/.test(s)) s += 'Z';
+        return new Date(s).getTime() || 9999999;
+      } catch { return 9999999; }
+    };
     games.sort((a, b) => {
       const statusDiff = (rank[a.gameStatus] ?? 9) - (rank[b.gameStatus] ?? 9);
-      return statusDiff !== 0 ? statusDiff : statusToMins(a.gameStatusText) - statusToMins(b.gameStatusText);
+      if (statusDiff !== 0) return statusDiff;
+      // Upcoming: parse display time from statusText (avoids EST/EDT UTC bug)
+      if (a.gameStatus === 1) return statusToMins(a.gameStatusText) - statusToMins(b.gameStatusText);
+      // Live / final: sort by UTC start time
+      return utcMs(a) - utcMs(b);
     });
 
     gameStrip.innerHTML = games.map(buildCard).join('');

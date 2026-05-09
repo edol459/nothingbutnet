@@ -1271,7 +1271,39 @@ def get_scoreboard():
                 _today_sb_cache.update({"payload": payload, "ts": _time.time(), "date": _game_today})
                 return jsonify(payload)
         except Exception:
-            pass  # CDN failed — fall through to schedule then ScoreboardV3
+            pass  # CDN failed — fall through to cached schedule then ScoreboardV3
+
+    # Today — fast fallback using season schedule IF already cached in memory.
+    # Avoids the 8.4 MB download; only serves if no live/final data is cached.
+    if is_today and _schedule_cache.get("data"):
+        try:
+            sched = _schedule_cache["data"]
+            dt_obj    = _dt.strptime(_game_today, "%Y-%m-%d")
+            sched_key = f"{dt_obj.month:02d}/{dt_obj.day:02d}/{dt_obj.year} 00:00:00"
+            target    = next(
+                (gd for gd in sched.get("leagueSchedule", {}).get("gameDates", [])
+                 if gd.get("gameDate") == sched_key),
+                None,
+            )
+            if target:
+                games = []
+                for g in target.get("games", []):
+                    away = g.get("awayTeam", {}); home = g.get("homeTeam", {})
+                    games.append({
+                        "gameId": g.get("gameId", ""), "gameStatus": 1,
+                        "gameStatusText": g.get("gameStatusText", ""),
+                        "period": 0, "gameClock": "",
+                        "gameTimeUTC": g.get("gameTimeUTC", ""),
+                        "away": {"abbr": away.get("teamTricode", ""), "score": 0,
+                                 "wins": None, "losses": None},
+                        "home": {"abbr": home.get("teamTricode", ""), "score": 0,
+                                 "wins": None, "losses": None},
+                    })
+                if games:
+                    _enrich_games_with_records(games)
+                    return jsonify({"games": games, "date": _game_today})
+        except Exception:
+            pass  # Fall through to ScoreboardV3
 
     # Future dates — cache for 60 min
     if not is_past and not is_today and date in _future_sb_cache:
@@ -5013,7 +5045,7 @@ def _get_wnba_season() -> str:
 
 
 # CDN tricode → app abbreviation (WNBA CDN uses different tricodes than our app)
-_WNBA_CDN_ABBR_MAP = {"LVA": "LV", "LAS": "LA", "NYL": "NY", "GSV": "GS", "WAS": "WSH"}
+_WNBA_CDN_ABBR_MAP = {"LVA": "LV", "LAS": "LA", "NYL": "NY", "GSV": "GS", "WAS": "WSH", "PDX": "POR"}
 
 # Static schedule cache (2026 season, refreshed every 2h)
 _wnba_cdn_schedule_cache: dict = {}   # {"dates": {dateStr: [game, ...]}, "ts": float}
