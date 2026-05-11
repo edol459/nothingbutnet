@@ -5368,7 +5368,12 @@ def get_wnba_scoreboard():
     if is_past and date_str in _wnba_past_sb_cache:
         return jsonify(_wnba_past_sb_cache[date_str]["payload"])
 
-    # Past — DB first
+    cdn_season = _get_wnba_season()  # e.g. "2026"
+    is_cdn_season = date_str >= f"{cdn_season}-01-01"  # CDN only has current season
+
+    # Past — DB first, but only trust it if the count matches the CDN schedule.
+    # If the server only saw some games finish before midnight (and the rest were
+    # upserted later / never), the DB can have fewer rows than actually played.
     if is_past:
         try:
             conn = get_conn()
@@ -5382,22 +5387,29 @@ def get_wnba_scoreboard():
             db_rows = cur.fetchall()
             cur.close(); conn.close()
             if db_rows:
-                games = [{
-                    "gameId": r["game_id"], "gameStatus": 3,
-                    "gameStatusText": "Final", "period": 0,
-                    "gameClock": "", "gameTimeUTC": "",
-                    "away": {"abbr": r["away_team_abbr"], "score": int(r["away_score"] or 0)},
-                    "home": {"abbr": r["home_team_abbr"], "score": int(r["home_score"] or 0)},
-                } for r in db_rows]
-                _enrich_wnba_games(games)
-                payload = {"games": games, "date": date_str}
-                _wnba_past_sb_cache[date_str] = {"payload": payload, "ts": _time.time()}
-                return jsonify(payload)
+                # For CDN-season dates, verify DB count against schedule so we
+                # don't return a partial list when only some games were upserted.
+                cdn_game_count = 0
+                if is_cdn_season:
+                    try:
+                        cdn_game_count = len(_wnba_cdn_schedule().get(date_str, []))
+                    except Exception:
+                        pass
+                if cdn_game_count == 0 or len(db_rows) >= cdn_game_count:
+                    games = [{
+                        "gameId": r["game_id"], "gameStatus": 3,
+                        "gameStatusText": "Final", "period": 0,
+                        "gameClock": "", "gameTimeUTC": "",
+                        "away": {"abbr": r["away_team_abbr"], "score": int(r["away_score"] or 0)},
+                        "home": {"abbr": r["home_team_abbr"], "score": int(r["home_score"] or 0)},
+                    } for r in db_rows]
+                    _enrich_wnba_games(games)
+                    payload = {"games": games, "date": date_str}
+                    _wnba_past_sb_cache[date_str] = {"payload": payload, "ts": _time.time()}
+                    return jsonify(payload)
+                # else: DB is incomplete — fall through to CDN schedule path
         except Exception:
             pass
-
-    cdn_season = _get_wnba_season()  # e.g. "2026"
-    is_cdn_season = date_str >= f"{cdn_season}-01-01"  # CDN only has current season
 
     # Today — try WNBA CDN live scoreboard first (2-min cache), then ESPN fallback
     if is_today:
