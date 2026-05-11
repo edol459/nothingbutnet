@@ -253,21 +253,24 @@ def _ensure_tables():
 _ensure_tables()
 
 def _fix_wnba_league_column():
-    """One-time fix: any game whose game_id starts with '10' was inserted by the
-    live-boxscore path without a league value and got the DB default 'nba'.
-    Correct them to 'wnba' so they don't appear in NBA browse results."""
+    """Fix games whose game_id starts with '10' but were inserted with wrong
+    league ('nba') or wrong season ('2025-26') by the live-boxscore path."""
     try:
+        wnba_season = _get_wnba_season()
         conn = get_conn()
         cur  = conn.cursor()
-        cur.execute("""
-            UPDATE games SET league = 'wnba'
-            WHERE game_id LIKE '10%' AND (league IS NULL OR league != 'wnba')
-        """)
+        cur.execute(
+            """UPDATE games
+               SET league = 'wnba', season = %s
+               WHERE game_id LIKE %s
+                 AND (league IS NULL OR league != 'wnba' OR season != %s)""",
+            (wnba_season, "10%", wnba_season)
+        )
         updated = cur.rowcount
         conn.commit()
         cur.close(); conn.close()
         if updated:
-            print(f"[startup] fixed league='wnba' for {updated} misclassified game(s)", flush=True)
+            print(f"[startup] fixed league/season for {updated} WNBA game(s)", flush=True)
     except Exception as e:
         print(f"[startup] _fix_wnba_league_column warning: {e}", flush=True)
 
@@ -2126,6 +2129,7 @@ def _upsert_game_from_boxscore(game_id: str, game: dict, league: str = "nba"):
             ON CONFLICT (game_id) DO UPDATE SET
                 home_score     = EXCLUDED.home_score,
                 away_score     = EXCLUDED.away_score,
+                season         = EXCLUDED.season,
                 season_type    = EXCLUDED.season_type,
                 league         = EXCLUDED.league,
                 status         = 'Final',
@@ -2134,9 +2138,10 @@ def _upsert_game_from_boxscore(game_id: str, game: dict, league: str = "nba"):
                OR games.home_score IS NULL
                OR games.season_type != EXCLUDED.season_type
                OR games.league != EXCLUDED.league
+               OR games.season != EXCLUDED.season
         """, (
             game_id,
-            os.getenv("NBA_SEASON", "2025-26"),
+            _get_wnba_season() if league == "wnba" else os.getenv("NBA_SEASON", "2025-26"),
             season_type,
             game_date,
             home_abbr, away_abbr,
