@@ -489,6 +489,7 @@ const HOME    = (params.get('home') || '').toUpperCase();
 const TIP     = params.get('time') || '';
 const AWAY_REC = params.get('awayRec') || '';
 const HOME_REC = params.get('homeRec') || '';
+const LEAGUE  = (params.get('league') || 'nba').toLowerCase();
 
 // Team ID → logo
 const TEAM_IDS = {
@@ -501,7 +502,16 @@ const TEAM_IDS = {
   POR:1610612757,SAC:1610612758,SAS:1610612759,TOR:1610612761,
   UTA:1610612762,WAS:1610612764,
 };
+const WNBA_IDS = {
+  ATL:1611661330,CHI:1611661329,CON:1611661323,DAL:1611661321,GS:1611661331,
+  IND:1611661325,LA:1611661320,LV:1611661319,MIN:1611661324,NY:1611661313,
+  PHX:1611661317,POR:1611661327,SEA:1611661328,TOR:1611661332,WSH:1611661322,
+};
 function logoUrl(abbr) {
+  if (LEAGUE === 'wnba') {
+    const id = WNBA_IDS[abbr];
+    return id ? `https://cdn.wnba.com/logos/wnba/${id}/global/L/logo.svg` : null;
+  }
   const id = TEAM_IDS[abbr];
   return id ? `https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg` : null;
 }
@@ -547,8 +557,8 @@ async function loadStats() {
   const el = document.getElementById('section-stats');
   try {
     const [ar, hr] = await Promise.all([
-      fetch(`${API}/api/preview/team-stats/${AWAY}`),
-      fetch(`${API}/api/preview/team-stats/${HOME}`),
+      fetch(`${API}${LEAGUE === 'wnba' ? `/api/wnba/team-stats/${AWAY}` : `/api/preview/team-stats/${AWAY}`}`),
+      fetch(`${API}${LEAGUE === 'wnba' ? `/api/wnba/team-stats/${HOME}` : `/api/preview/team-stats/${HOME}`}`),
     ]);
     const [as_, hs] = await Promise.all([ar.json(), hr.json()]);
     if (as_.error && hs.error) throw new Error('no stats');
@@ -606,7 +616,7 @@ async function loadStats() {
 async function loadH2H() {
   const el = document.getElementById('section-h2h');
   try {
-    const r = await fetch(`${API}/api/preview/h2h/${AWAY}/${HOME}`);
+    const r = await fetch(`${API}/api/preview/h2h/${AWAY}/${HOME}?league=${LEAGUE}`);
     const data = await r.json();
     const games = data.games || [];
 
@@ -653,7 +663,7 @@ async function loadH2H() {
 // ── Load regular-season records from DB ─────────────────────────
 async function loadRecords() {
   try {
-    const r = await fetch(`${API}/api/preview/records/${AWAY}/${HOME}`);
+    const r = await fetch(`${API}/api/preview/records/${AWAY}/${HOME}?league=${LEAGUE}`);
     const data = await r.json();
     const awayRec = data.away.wins != null ? `${data.away.wins}-${data.away.losses}` : '';
     const homeRec = data.home.wins != null ? `${data.home.wins}-${data.home.losses}` : '';

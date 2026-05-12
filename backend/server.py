@@ -6091,8 +6091,17 @@ def get_wnba_team_stats(abbr):
         result = {"abbr": abbr, "ppg": None, "rpg": None, "apg": None,
                   "topg": None, "fg_pct": None, "fg3_pct": None}
 
-    _wnba_team_stats_cache[abbr] = {"data": result, "ts": _time.time()}
-    return jsonify(result)
+    # Ensure all numeric values are JSON-serializable (guard against Decimal)
+    safe = {k: float(v) if v is not None and not isinstance(v, (int, float, str, bool)) else v
+            for k, v in result.items()}
+
+    try:
+        _wnba_team_stats_cache[abbr] = {"data": safe, "ts": _time.time()}
+        return jsonify(safe)
+    except Exception as e:
+        print(f"[wnba] team-stats jsonify error {abbr}: {e}", flush=True)
+        return jsonify({"abbr": abbr, "ppg": None, "rpg": None, "apg": None,
+                        "topg": None, "fg_pct": None, "fg3_pct": None})
 
 
 if __name__ == "__main__":

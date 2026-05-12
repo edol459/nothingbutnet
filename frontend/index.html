@@ -1198,16 +1198,16 @@ async function loadScoreboard() {
         const gid    = card.dataset.gameId;
         const status = parseInt(card.dataset.gameStatus || '3', 10);
         if (!gid) return;
-        if (status === 1 && SB.league !== 'wnba') {
-          // NBA upcoming → preview page
+        if (status === 1) {
+          // Upcoming → preview page (NBA or WNBA)
           const away    = card.dataset.away || '';
           const home    = card.dataset.home || '';
           const time    = card.dataset.time || '';
           const awayRec = card.dataset.awayRec || '';
           const homeRec = card.dataset.homeRec || '';
-          const qs = new URLSearchParams({ gameId: gid, away, home, time, awayRec, homeRec });
+          const qs = new URLSearchParams({ gameId: gid, away, home, time, awayRec, homeRec, league: SB.league });
           window.location.href = `/preview?${qs}`;
-        } else if (status !== 1) {
+        } else {
           // Live or final → game detail page
           window.location.href = `/game?gameId=${gid}`;
         }
