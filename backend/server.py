@@ -1286,7 +1286,7 @@ def get_scoreboard():
                 SELECT game_id, home_team_abbr, away_team_abbr,
                        home_score, away_score, status
                 FROM games
-                WHERE game_date = %s
+                WHERE game_date = %s AND (league IS NULL OR league = 'nba')
                 ORDER BY game_id
             """, (date,))
             db_rows = cur.fetchall()
