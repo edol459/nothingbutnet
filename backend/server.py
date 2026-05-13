@@ -916,7 +916,7 @@ _today_sb_cache: dict = {}   # {"payload": dict, "ts": float, "date": str}
 _sb_poller_stop   = _threading.Event()
 _sb_poller_thread = None
 _POLL_LIVE_S      = 30   # games in progress
-_POLL_SOON_S      = 60   # upcoming games today (pregame window)
+_POLL_SOON_S      = 20   # upcoming games today (pregame window)
 _POLL_IDLE_S      = 300  # no games today
 
 
@@ -948,6 +948,47 @@ def _parse_cdn_scoreboard(cdn_data: dict, game_today: str) -> dict | None:
     return {"games": games, "date": cdn_date}
 
 
+def _crosscheck_tipoff(games: list, nba: bool = True) -> None:
+    """For each upcoming game whose scheduled tipoff has passed, fetch its live
+    boxscore to get the real status.  The per-game boxscore CDN updates in
+    real-time while the scoreboard CDN can lag 10+ minutes on game starts.
+    Modifies game dicts in-place."""
+    import datetime as _dt_mod
+    now_utc = _dt_mod.datetime.now(_dt_mod.timezone.utc).replace(tzinfo=None)
+    for g in games:
+        if g.get("gameStatus") != 1:
+            continue
+        tipoff_str = g.get("gameTimeUTC", "")
+        if not tipoff_str:
+            continue
+        try:
+            tipoff = _dt.strptime(tipoff_str[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            continue
+        if now_utc < tipoff:
+            continue  # hasn't tipped yet
+        gid = g.get("gameId", "")
+        if not gid:
+            continue
+        try:
+            cdn_base = "https://cdn.nba.com" if nba else "https://cdn.wnba.com"
+            url = f"{cdn_base}/static/json/liveData/boxscore/boxscore_{gid}.json"
+            r = _requests.get(url, headers=_CDN_HEADERS, timeout=5)
+            r.raise_for_status()
+            box = r.json().get("game", {})
+            real_status = int(box.get("gameStatus", 1) or 1)
+            if real_status in (2, 3):
+                g["gameStatus"]     = real_status
+                g["gameStatusText"] = box.get("gameStatusText", g["gameStatusText"])
+                g["period"]         = box.get("period", g.get("period", 0))
+                g["gameClock"]      = box.get("gameClock", g.get("gameClock", ""))
+                away_box = box.get("awayTeam", {}); home_box = box.get("homeTeam", {})
+                g["away"]["score"]  = int(away_box.get("score", 0) or 0)
+                g["home"]["score"]  = int(home_box.get("score", 0) or 0)
+        except Exception:
+            pass
+
+
 def _sb_poller_tick() -> tuple[bool, bool, bool]:
     """One poll iteration. Returns (has_live_game, cdn_succeeded, has_upcoming_game)."""
     game_today = _compute_game_today()
@@ -961,6 +1002,7 @@ def _sb_poller_tick() -> tuple[bool, bool, bool]:
         r.raise_for_status()
         payload = _parse_cdn_scoreboard(r.json(), game_today)
         if payload:
+            _crosscheck_tipoff(payload["games"], nba=True)
             _today_sb_cache.update({"payload": payload, "ts": _time.time(), "date": game_today})
             has_live     = any(g["gameStatus"] == 2 for g in payload["games"])
             has_upcoming = any(g["gameStatus"] == 1 for g in payload["games"])
@@ -5194,7 +5236,7 @@ def _wnba_cdn_schedule() -> dict:
 def _wnba_cdn_scoreboard_today(game_today: str) -> list | None:
     """Fetch today's WNBA games from the live CDN. Returns game-list or None."""
     c = _wnba_cdn_today_cache
-    if c.get("date") == game_today and _time.time() - c.get("ts", 0) < 120:
+    if c.get("date") == game_today and _time.time() - c.get("ts", 0) < 30:
         return c["games"]
     try:
         resp = _requests.get(
@@ -5206,7 +5248,8 @@ def _wnba_cdn_scoreboard_today(game_today: str) -> list | None:
         if cdn_date != game_today:
             return None  # CDN still on prior date
         games = [_wnba_cdn_game_dict(g) for g in cdn_games]
-        for g, raw in zip(games, cdn_games):
+        _crosscheck_tipoff(games, nba=False)
+        for g in games:
             if g["gameStatus"] == 3 and g["gameId"]:
                 _upsert_wnba_game(g["gameId"], game_today,
                                   g["home"]["abbr"], g["away"]["abbr"],
@@ -5483,7 +5526,7 @@ def get_wnba_scoreboard():
     # Today — try WNBA CDN live scoreboard first (2-min cache), then ESPN fallback
     if is_today:
         c = _wnba_cdn_today_cache
-        if c.get("date") == _game_today and _time.time() - c.get("ts", 0) < 120:
+        if c.get("date") == _game_today and _time.time() - c.get("ts", 0) < 30:
             return jsonify({"games": c["games"], "date": date_str})
         games = _wnba_cdn_scoreboard_today(_game_today)
         if games is not None:
