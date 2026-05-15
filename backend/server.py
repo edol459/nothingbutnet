@@ -140,6 +140,34 @@ def _ensure_tables():
             CREATE INDEX IF NOT EXISTS idx_review_replies_review_id
             ON review_replies(review_id)
         """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_game_reviews_created_at
+            ON game_reviews(created_at DESC)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_game_reviews_user_id
+            ON game_reviews(user_id)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_game_reviews_game_id
+            ON game_reviews(game_id)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_review_likes_review_id
+            ON review_likes(review_id)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_review_likes_user_review
+            ON review_likes(user_id, review_id)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_friendships_sender
+            ON friendships(sender_id, status)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_friendships_receiver
+            ON friendships(receiver_id, status)
+        """)
         # Fix playoff games that were incorrectly stored as 'Regular Season'
         # due to the _season_type_from_game_id bug (was using game_id[2:4] instead of game_id[2])
         cur.execute("""
