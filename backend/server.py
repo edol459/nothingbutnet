@@ -1692,6 +1692,8 @@ def _box_star(team_data: dict):
 
 
 # ── /api/game-posters ────────────────────────────────────────────
+_game_posters_cache: dict = {}  # gameId -> {"away": int|None, "home": int|None}
+
 @app.route("/api/game-posters", methods=["POST"])
 def get_game_posters():
     """
@@ -1710,20 +1712,26 @@ def get_game_posters():
 
     posters: dict = {}
 
-    # ── Final games: CDN boxscore actual leaders ──────────────────
+    # ── Final games: CDN boxscore actual leaders (cached forever — result never changes) ──
     final_games    = [g for g in games if int(g.get("status", 1) or 1) == 3]
     nonfinal_games = [g for g in games if int(g.get("status", 1) or 1) != 3]
 
     if final_games:
-        boxscores = _fetch_boxscores_parallel([g["gameId"] for g in final_games])
+        uncached = [g for g in final_games if g.get("gameId") not in _game_posters_cache]
+        if uncached:
+            boxscores = _fetch_boxscores_parallel([g["gameId"] for g in uncached])
+            for g in uncached:
+                gid = g.get("gameId", "")
+                box = boxscores.get(gid)
+                if box:
+                    _game_posters_cache[gid] = {
+                        "away": _box_star(box.get("awayTeam", {})),
+                        "home": _box_star(box.get("homeTeam", {})),
+                    }
         for g in final_games:
             gid = g.get("gameId", "")
-            box = boxscores.get(gid)
-            if box:
-                posters[gid] = {
-                    "away": _box_star(box.get("awayTeam", {})),
-                    "home": _box_star(box.get("homeTeam", {})),
-                }
+            if gid in _game_posters_cache:
+                posters[gid] = _game_posters_cache[gid]
             else:
                 nonfinal_games.append(g)  # CDN miss → fall back to season stats
 
