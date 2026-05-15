@@ -3385,6 +3385,9 @@ def get_user_reviews(user_id):
     }
     order = order_map.get(sort, "g.game_date DESC")
 
+    viewer    = current_user()
+    viewer_id = viewer["id"] if viewer else -1
+
     try:
         conn = get_conn()
         cur  = conn.cursor()
@@ -3393,14 +3396,16 @@ def get_user_reviews(user_id):
                 gr.*, u.display_name, u.avatar_url, u.favorite_team,
                 g.game_date, g.home_team_abbr, g.away_team_abbr,
                 g.home_score, g.away_score, g.season, g.season_type,
-                (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
+                (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count,
+                (SELECT COUNT(*) FROM review_likes  rl WHERE rl.review_id = gr.id) AS like_count,
+                EXISTS(SELECT 1 FROM review_likes rl WHERE rl.review_id = gr.id AND rl.user_id = %s) AS liked_by_me
             FROM game_reviews gr
             JOIN users u ON gr.user_id = u.id
             JOIN games g ON gr.game_id = g.game_id
             WHERE {where}
             ORDER BY {order}
             LIMIT %s OFFSET %s
-        """, params + [limit, offset])
+        """, [viewer_id] + params + [limit, offset])
         rows = cur.fetchall()
         cur.execute(f"""
             SELECT COUNT(*) FROM game_reviews gr
