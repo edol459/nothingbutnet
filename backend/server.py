@@ -1535,7 +1535,7 @@ def get_scoreboard():
                 away_losses = away.get("losses")
                 home_wins   = home.get("wins")
                 home_losses = home.get("losses")
-                if is_past:
+                if is_past and (away_score > 0 or home_score > 0):
                     _upsert_game_from_boxscore(gid, box)
             else:
                 code = str(row.get("gameCode", "") or row.get("GAMECODE", "") or "")
@@ -1543,6 +1543,10 @@ def get_scoreboard():
                     teams = code.split("/")[1]
                     away_abbr = teams[:3] if len(teams) >= 6 else ""
                     home_abbr = teams[3:6] if len(teams) >= 6 else ""
+
+            # Skip past games with 0-0 scores — these are ghost playoff games that never happened
+            if is_past and away_score == 0 and home_score == 0:
+                continue
 
             if is_past:
                 game_status_id   = 3
@@ -2219,6 +2223,9 @@ def _upsert_game_from_boxscore(game_id: str, game: dict, league: str = "nba"):
     try:
         away = game.get("awayTeam", {})
         home = game.get("homeTeam", {})
+        # Never save ghost games (0-0 means the game was never played)
+        if int(away.get("score", 0) or 0) == 0 and int(home.get("score", 0) or 0) == 0:
+            return
         _raw_away = away.get("teamTricode", "")
         _raw_home = home.get("teamTricode", "")
         # Map raw WNBA CDN tricodes (e.g. PDX→POR, LVA→LV) to app abbreviations
