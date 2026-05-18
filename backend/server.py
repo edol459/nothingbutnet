@@ -199,6 +199,28 @@ def _ensure_tables():
             )
         """)
         cur.execute("""
+            CREATE TABLE IF NOT EXISTS game_lists (
+                id          SERIAL PRIMARY KEY,
+                user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                title       TEXT    NOT NULL,
+                description TEXT,
+                is_public   BOOLEAN DEFAULT TRUE,
+                created_at  TIMESTAMP DEFAULT NOW(),
+                updated_at  TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS game_list_items (
+                list_id   INTEGER REFERENCES game_lists(id) ON DELETE CASCADE,
+                game_id   TEXT    NOT NULL,
+                added_at  TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (list_id, game_id)
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_game_lists_user_id ON game_lists(user_id)
+        """)
+        cur.execute("""
             ALTER TABLE games ADD COLUMN IF NOT EXISTS league TEXT NOT NULL DEFAULT 'nba'
         """)
         cur.execute("""
@@ -3581,6 +3603,211 @@ def revenuecat_webhook():
         print(f"[webhook] revenuecat DB error: {e}", flush=True)
         return jsonify({"error": "db"}), 500
 
+    return jsonify({"ok": True})
+
+
+# ── Game Lists ────────────────────────────────────────────────
+
+def _list_is_owner(list_id: int, user_id: int, cur) -> bool:
+    cur.execute("SELECT user_id FROM game_lists WHERE id = %s", (list_id,))
+    row = cur.fetchone()
+    return row is not None and row["user_id"] == user_id
+
+
+def _format_list(row: dict, game_count: int = 0) -> dict:
+    return {
+        "id":          row["id"],
+        "userId":      row["user_id"],
+        "title":       row["title"],
+        "description": row.get("description"),
+        "isPublic":    row["is_public"],
+        "gameCount":   game_count,
+        "createdAt":   str(row.get("created_at", "")),
+    }
+
+
+@app.route("/api/me/lists", methods=["GET"])
+@login_required
+def get_my_lists():
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("""
+        SELECT gl.*, COUNT(gli.game_id) AS game_count
+        FROM game_lists gl
+        LEFT JOIN game_list_items gli ON gli.list_id = gl.id
+        WHERE gl.user_id = %s
+        GROUP BY gl.id
+        ORDER BY gl.updated_at DESC
+    """, (user["id"],))
+    lists = [_format_list(r, r["game_count"]) for r in cur.fetchall()]
+    cur.close(); conn.close()
+    return jsonify({"lists": lists})
+
+
+@app.route("/api/users/<int:user_id>/lists", methods=["GET"])
+def get_user_lists(user_id):
+    viewer = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    # Show all lists if viewing own profile, otherwise public only
+    if viewer and viewer["id"] == user_id:
+        cur.execute("""
+            SELECT gl.*, COUNT(gli.game_id) AS game_count
+            FROM game_lists gl
+            LEFT JOIN game_list_items gli ON gli.list_id = gl.id
+            WHERE gl.user_id = %s
+            GROUP BY gl.id ORDER BY gl.updated_at DESC
+        """, (user_id,))
+    else:
+        cur.execute("""
+            SELECT gl.*, COUNT(gli.game_id) AS game_count
+            FROM game_lists gl
+            LEFT JOIN game_list_items gli ON gli.list_id = gl.id
+            WHERE gl.user_id = %s AND gl.is_public = TRUE
+            GROUP BY gl.id ORDER BY gl.updated_at DESC
+        """, (user_id,))
+    lists = [_format_list(r, r["game_count"]) for r in cur.fetchall()]
+    cur.close(); conn.close()
+    return jsonify({"lists": lists})
+
+
+@app.route("/api/me/lists", methods=["POST"])
+@login_required
+def create_list():
+    user = current_user()
+    if not user.get("is_pro"):
+        return jsonify({"error": "Game Lists is a Pro feature."}), 403
+    body  = request.get_json(force=True, silent=True) or {}
+    title = (body.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "title is required"}), 400
+    if len(title) > 100:
+        return jsonify({"error": "title must be 100 characters or fewer"}), 400
+    desc = (body.get("description") or "").strip() or None
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO game_lists (user_id, title, description)
+        VALUES (%s, %s, %s) RETURNING *
+    """, (user["id"], title, desc))
+    row = cur.fetchone()
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"list": _format_list(row, 0)}), 201
+
+
+@app.route("/api/lists/<int:list_id>", methods=["GET"])
+def get_list_detail(list_id):
+    viewer = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("SELECT * FROM game_lists WHERE id = %s", (list_id,))
+    lst = cur.fetchone()
+    if not lst:
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    if not lst["is_public"] and (not viewer or viewer["id"] != lst["user_id"]):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+
+    cur.execute("""
+        SELECT gli.game_id, gli.added_at,
+               g.home_team_abbr, g.away_team_abbr,
+               g.home_score, g.away_score,
+               g.game_date, g.league
+        FROM game_list_items gli
+        LEFT JOIN games g ON g.game_id = gli.game_id
+        WHERE gli.list_id = %s
+        ORDER BY gli.added_at DESC
+    """, (list_id,))
+    games = []
+    for r in cur.fetchall():
+        games.append({
+            "gameId":       r["game_id"],
+            "addedAt":      str(r["added_at"]),
+            "homeTeamAbbr": r.get("home_team_abbr"),
+            "awayTeamAbbr": r.get("away_team_abbr"),
+            "homeScore":    r.get("home_score"),
+            "awayScore":    r.get("away_score"),
+            "gameDate":     str(r["game_date"]) if r.get("game_date") else None,
+            "league":       r.get("league", "nba"),
+        })
+    cur.close(); conn.close()
+    result = dict(_format_list(lst, len(games)))
+    result["games"] = games
+    return jsonify({"list": result})
+
+
+@app.route("/api/lists/<int:list_id>", methods=["PATCH"])
+@login_required
+def update_list(list_id):
+    user = current_user()
+    body  = request.get_json(force=True, silent=True) or {}
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    title = (body.get("title") or "").strip()
+    if title and len(title) > 100:
+        return jsonify({"error": "title must be 100 characters or fewer"}), 400
+    desc      = (body.get("description") or "").strip() or None
+    is_public = body.get("isPublic", True)
+    cur.execute("""
+        UPDATE game_lists
+        SET title = COALESCE(NULLIF(%s,''), title),
+            description = %s,
+            is_public = %s,
+            updated_at = NOW()
+        WHERE id = %s
+        RETURNING *
+    """, (title, desc, bool(is_public), list_id))
+    row = cur.fetchone()
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"list": _format_list(row)})
+
+
+@app.route("/api/lists/<int:list_id>", methods=["DELETE"])
+@login_required
+def delete_list(list_id):
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    cur.execute("DELETE FROM game_lists WHERE id = %s", (list_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/lists/<int:list_id>/games", methods=["POST"])
+@login_required
+def add_game_to_list(list_id):
+    user    = current_user()
+    body    = request.get_json(force=True, silent=True) or {}
+    game_id = (body.get("gameId") or "").strip()
+    if not game_id:
+        return jsonify({"error": "gameId required"}), 400
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    cur.execute("""
+        INSERT INTO game_list_items (list_id, game_id)
+        VALUES (%s, %s) ON CONFLICT DO NOTHING
+    """, (list_id, game_id))
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/lists/<int:list_id>/games/<game_id>", methods=["DELETE"])
+@login_required
+def remove_game_from_list(list_id, game_id):
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    cur.execute("DELETE FROM game_list_items WHERE list_id = %s AND game_id = %s",
+                (list_id, game_id))
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit(); cur.close(); conn.close()
     return jsonify({"ok": True})
 
 
