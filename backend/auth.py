@@ -80,7 +80,7 @@ def _get_user_from_mobile_token(token: str) -> dict | None:
         conn = get_conn()
         cur  = conn.cursor()
         cur.execute(
-            "SELECT id, google_id, email, display_name FROM users WHERE mobile_token = %s",
+            "SELECT id, google_id, email, display_name, is_pro FROM users WHERE mobile_token = %s",
             (token,)
         )
         row = cur.fetchone()
@@ -91,6 +91,7 @@ def _get_user_from_mobile_token(token: str) -> dict | None:
                 "google_id":    row["google_id"],
                 "email":        row["email"],
                 "display_name": row["display_name"],
+                "is_pro":       bool(row["is_pro"]),
                 "created_at":   "",
             }
     except Exception:
@@ -297,7 +298,7 @@ def me():
         conn = get_conn()
         cur  = conn.cursor()
         cur.execute(
-            "SELECT avatar_url, favorite_team, night_mode FROM users WHERE id = %s",
+            "SELECT avatar_url, favorite_team, night_mode, is_pro FROM users WHERE id = %s",
             (user["id"],)
         )
         row = cur.fetchone()
@@ -307,6 +308,7 @@ def me():
             user["avatar_url"]    = row["avatar_url"] or ""
             user["favorite_team"] = row["favorite_team"] or ""
             user["night_mode"]    = bool(row["night_mode"])
+            user["is_pro"]        = bool(row["is_pro"])
     except Exception:
         pass  # fall back to session values if DB is unavailable
 

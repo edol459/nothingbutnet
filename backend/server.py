@@ -176,9 +176,11 @@ def _ensure_tables():
             WHERE LEFT(game_id, 3) = '004'
               AND season_type != 'Playoffs'
         """)
-        # Add night_mode preference column if it doesn't exist yet
         cur.execute("""
             ALTER TABLE users ADD COLUMN IF NOT EXISTS night_mode BOOLEAN DEFAULT FALSE
+        """)
+        cur.execute("""
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS is_pro BOOLEAN DEFAULT FALSE
         """)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS content_reports (
@@ -2841,6 +2843,11 @@ def submit_review(game_id):
 
     review_text = (body.get("review_text") or "").strip() or None
 
+    # ── Character limit for free users ───────────────────────────
+    _FREE_REVIEW_LIMIT = 500
+    if review_text and not user.get("is_pro") and len(review_text) > _FREE_REVIEW_LIMIT:
+        return jsonify({"error": f"Review exceeds {_FREE_REVIEW_LIMIT} characters. Upgrade to Pro for unlimited length."}), 400
+
     # ── Profanity filter ──────────────────────────────────────────
     if review_text and _contains_slur(review_text):
         return jsonify({"error": "Your review contains language that isn't allowed. Please edit and resubmit."}), 400
@@ -3521,6 +3528,60 @@ def admin_page():
     return app.send_static_file("admin.html")
 
 # ── Run ───────────────────────────────────────────────────────
+
+
+# ── RevenueCat webhook ────────────────────────────────────────
+@app.route("/api/webhooks/revenuecat", methods=["POST"])
+def revenuecat_webhook():
+    """
+    RevenueCat sends events here when a subscription starts, renews, expires, etc.
+    We use the app_user_id (our user's numeric ID) to update is_pro in the DB.
+    Verify the shared secret via the Authorization header.
+    """
+    secret = os.getenv("REVENUECAT_WEBHOOK_SECRET", "")
+    if secret and request.headers.get("Authorization") != secret:
+        return jsonify({"error": "unauthorized"}), 401
+
+    body  = request.get_json(force=True, silent=True) or {}
+    event = body.get("event", {})
+    event_type   = event.get("type", "")
+    app_user_id  = event.get("app_user_id", "")
+
+    # app_user_id is the string we passed to Purchases.logIn — our user's numeric ID
+    try:
+        user_id = int(app_user_id)
+    except (ValueError, TypeError):
+        return jsonify({"ok": True})  # anonymous / non-integer ID, ignore
+
+    # Events that mean the user has an active subscription
+    active_events = {
+        "INITIAL_PURCHASE", "RENEWAL", "REACTIVATION",
+        "PRODUCT_CHANGE", "TRANSFER",
+    }
+    # Events that mean the subscription is no longer active
+    inactive_events = {
+        "CANCELLATION", "EXPIRATION", "BILLING_ISSUE",
+        "SUBSCRIBER_ALIAS",
+    }
+
+    if event_type in active_events:
+        is_pro = True
+    elif event_type in inactive_events:
+        is_pro = False
+    else:
+        return jsonify({"ok": True})  # unconcerned event type
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("UPDATE users SET is_pro = %s WHERE id = %s", (is_pro, user_id))
+        conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        print(f"[webhook] revenuecat DB error: {e}", flush=True)
+        return jsonify({"error": "db"}), 500
+
+    return jsonify({"ok": True})
 
 
 # ── Profile & Friends routes ──────────────────────────────────
