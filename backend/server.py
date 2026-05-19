@@ -2755,6 +2755,7 @@ def get_games():
         "reviews": "g.review_count",
     }
     order_col = SORT_MAP.get(sort, "g.game_date")
+    secondary_sort = ", g.review_count DESC" if sort == "rating" else ""
 
     filters = ["g.season = %s", "g.status = 'Final'", "g.league = %s"]
     params  = [season, league]
@@ -2784,7 +2785,7 @@ def get_games():
             SELECT g.*
             FROM games g
             WHERE {where}
-            ORDER BY {order_col} {direction} NULLS LAST
+            ORDER BY {order_col} {direction} NULLS LAST{secondary_sort}
             LIMIT %s OFFSET %s
         """, params + [limit, offset])
         games = [_format_game(dict(r)) for r in cur.fetchall()]
@@ -3268,7 +3269,8 @@ def get_top_rated_games():
               {s_filter}
               {st_filter}
               AND review_count >= %s
-            ORDER BY (rating_sum::float / NULLIF(review_count, 0)) DESC NULLS LAST
+            ORDER BY (rating_sum::float / NULLIF(review_count, 0)) DESC NULLS LAST,
+                     review_count DESC
             LIMIT %s
         """, [league] + s_params + st_params + [min_reviews, limit])
         games = [_format_game(dict(r)) for r in cur.fetchall()]
