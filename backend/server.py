@@ -37,6 +37,10 @@ CORS(app)
 def index():
     return app.send_static_file('index.html')
 
+@app.route('/.well-known/apple-app-site-association')
+def aasa():
+    return app.send_static_file('.well-known/apple-app-site-association'), 200, {'Content-Type': 'application/json'}
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
