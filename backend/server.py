@@ -2757,8 +2757,12 @@ def get_games():
     order_col = SORT_MAP.get(sort, "g.game_date")
     secondary_sort = ", g.review_count DESC" if sort == "rating" else ""
 
-    filters = ["g.season = %s", "g.status = 'Final'", "g.league = %s"]
-    params  = [season, league]
+    all_seasons = season.lower() in ("all", "")
+    filters = ["g.status = 'Final'", "g.league = %s"]
+    params  = [league]
+    if not all_seasons:
+        filters.insert(0, "g.season = %s")
+        params.insert(0, season)
     if season_type:
         filters.append("g.season_type = %s")
         params.append(season_type)

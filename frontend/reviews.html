@@ -1775,6 +1775,11 @@ populateSeasonDropdown(
   'games'
 ).then(() => {
   document.getElementById('filterSeasonType').value = '';
+  const sel = document.getElementById('filterSeason');
+  const allOpt = document.createElement('option');
+  allOpt.value = 'all';
+  allOpt.textContent = 'All Time';
+  sel.appendChild(allOpt);
 });
 
 // Top Rated season dropdown — prepend "All Time" after seasons are loaded
