@@ -5945,8 +5945,8 @@ def get_wnba_scoreboard():
             _wnba_cdn_today_cache.update({"games": games, "date": _game_today, "ts": _time.time()})
             return jsonify(payload)
 
-    # Non-today CDN season — try static schedule, then ESPN fallback
-    if is_cdn_season and not is_today:
+    # CDN season — try static schedule (covers both today-when-live-fails and future dates)
+    if is_cdn_season:
         schedule = _wnba_cdn_schedule()
         cdn_games = schedule.get(date_str)
         if cdn_games is not None:
