@@ -344,12 +344,92 @@ def _ensure_tables():
             WHERE g.game_id = agg.game_id
               AND (g.review_count != agg.cnt OR g.rating_sum != agg.rsum)
         """)
+        # Ball Knowledge XP system
+        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS xp INTEGER NOT NULL DEFAULT 0")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS xp_events (
+                id           SERIAL  PRIMARY KEY,
+                user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                event_type   TEXT    NOT NULL,
+                reference_id TEXT,
+                xp_amount    INTEGER NOT NULL,
+                created_at   TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_xp_events_user
+            ON xp_events(user_id)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_xp_events_user_type_ref
+            ON xp_events(user_id, event_type, reference_id)
+        """)
         conn.commit()
         cur.close(); conn.close()
     except Exception as e:
         print(f"[startup] _ensure_tables warning: {e}")
 
 _ensure_tables()
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Ball Knowledge — XP / rank system
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BALL_KNOWLEDGE_RANKS = [
+    {"level": 1,  "title": "Ball Newbie",   "xp_required": 0},
+    {"level": 2,  "title": "Casual",        "xp_required": 250},
+    {"level": 3,  "title": "Ball Novice",   "xp_required": 650},
+    {"level": 4,  "title": "Hooper",        "xp_required": 1250},
+    {"level": 5,  "title": "Court Vision",  "xp_required": 2200},
+    {"level": 6,  "title": "Film Room",     "xp_required": 3700},
+    {"level": 7,  "title": "Stat Head",     "xp_required": 6000},
+    {"level": 8,  "title": "Floor General", "xp_required": 9500},
+    {"level": 9,  "title": "Hall of Famer", "xp_required": 14500},
+    {"level": 10, "title": "Ball Knower",   "xp_required": 21000},
+]
+
+
+def get_rank_info(xp: int) -> dict:
+    current = BALL_KNOWLEDGE_RANKS[0]
+    next_rank = None
+    for i, rank in enumerate(BALL_KNOWLEDGE_RANKS):
+        if xp >= rank["xp_required"]:
+            current = rank
+            next_rank = BALL_KNOWLEDGE_RANKS[i + 1] if i + 1 < len(BALL_KNOWLEDGE_RANKS) else None
+        else:
+            break
+    xp_in_rank  = xp - current["xp_required"]
+    xp_for_rank = (next_rank["xp_required"] - current["xp_required"]) if next_rank else None
+    return {
+        "level":           current["level"],
+        "title":           current["title"],
+        "xp":              xp,
+        "xp_in_rank":      xp_in_rank,
+        "xp_for_rank":     xp_for_rank,
+        "next_rank_title": next_rank["title"] if next_rank else None,
+        "next_rank_xp":    next_rank["xp_required"] if next_rank else None,
+        "ranks":           BALL_KNOWLEDGE_RANKS,
+    }
+
+
+def _grant_xp(cur, user_id: int, event_type: str, reference_id: str, amount: int) -> int:
+    """Insert an xp_event and increment users.xp. Returns the new total xp, or -1 if already granted."""
+    cur.execute(
+        "SELECT 1 FROM xp_events WHERE user_id = %s AND event_type = %s AND reference_id = %s",
+        (user_id, event_type, reference_id)
+    )
+    if cur.fetchone():
+        return -1
+    cur.execute(
+        "INSERT INTO xp_events (user_id, event_type, reference_id, xp_amount) VALUES (%s, %s, %s, %s)",
+        (user_id, event_type, reference_id, amount)
+    )
+    cur.execute(
+        "UPDATE users SET xp = xp + %s WHERE id = %s RETURNING xp",
+        (amount, user_id)
+    )
+    return cur.fetchone()["xp"]
+
 
 def _fix_wnba_league_column():
     """Fix games whose game_id starts with '10' but were inserted with wrong
@@ -1200,11 +1280,6 @@ def start_sb_poller():
     global _sb_poller_thread
     if _sb_poller_thread and _sb_poller_thread.is_alive():
         return
-    # Warm the cache immediately so the first request is never slow
-    try:
-        _sb_poller_tick()
-    except Exception:
-        pass
     _sb_poller_stop.clear()
     _sb_poller_thread = _threading.Thread(
         target=_sb_poller_loop, daemon=True, name="ScoreboardPoller",
@@ -3107,11 +3182,77 @@ def toggle_review_like(review_id):
                 (user["id"], review_id)
             )
             liked = True
+            # Grant 5 XP to the review author (not if they liked their own review)
+            cur.execute("SELECT user_id FROM game_reviews WHERE id = %s", (review_id,))
+            review_row = cur.fetchone()
+            if review_row and review_row["user_id"] != user["id"]:
+                ref = f"{review_id}:{user['id']}"
+                _grant_xp(cur, review_row["user_id"], "review_like", ref, 5)
         cur.execute("SELECT COUNT(*) FROM review_likes WHERE review_id = %s", (review_id,))
         like_count = cur.fetchone()["count"]
         conn.commit()
         cur.close(); conn.close()
         return jsonify({"liked": liked, "like_count": int(like_count)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Ball Knowledge XP endpoints
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@app.route("/api/xp/app-open", methods=["POST"])
+@login_required
+def xp_app_open():
+    """Grant 10 XP for opening the app. Cooldown: once per 25 hours."""
+    user = current_user()
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT created_at FROM xp_events
+            WHERE user_id = %s AND event_type = 'app_open'
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (user["id"],))
+        last = cur.fetchone()
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        if last and (now - last["created_at"].replace(tzinfo=timezone.utc)) < timedelta(hours=25):
+            cur.close(); conn.close()
+            return jsonify({"granted": False, "reason": "cooldown"})
+        ref = now.strftime("%Y-%m-%dT%H")
+        new_xp = _grant_xp(cur, user["id"], "app_open", ref, 10)
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"granted": True, "xp_gained": 10, "total_xp": new_xp,
+                        "rank": get_rank_info(new_xp)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/xp/live-game-view/<game_id>", methods=["POST"])
+@login_required
+def xp_live_game_view(game_id):
+    """Grant 10 XP for viewing a live game. Once per game_id."""
+    user = current_user()
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        # Deny if game is already Final in our DB
+        cur.execute("SELECT status FROM games WHERE game_id = %s", (game_id,))
+        game_row = cur.fetchone()
+        if game_row and game_row["status"] == "Final":
+            cur.close(); conn.close()
+            return jsonify({"granted": False, "reason": "game_over"})
+        new_xp = _grant_xp(cur, user["id"], "live_game_view", game_id, 10)
+        if new_xp == -1:
+            cur.close(); conn.close()
+            return jsonify({"granted": False, "reason": "already_earned"})
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"granted": True, "xp_gained": 10, "total_xp": new_xp,
+                        "rank": get_rank_info(new_xp)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3626,6 +3767,52 @@ def admin_check():
     return jsonify({"is_admin": _is_admin(user)})
 
 
+@app.route("/api/admin/xp/migrate-likes", methods=["POST"])
+@login_required
+def admin_migrate_likes_xp():
+    """One-time backfill: grant 5 XP to review authors for all existing likes."""
+    user = current_user()
+    if not _is_admin(user):
+        return jsonify({"error": "forbidden"}), 403
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        # Find all likes that haven't generated an xp_event yet
+        cur.execute("""
+            SELECT rl.user_id AS liker_id, rl.review_id, gr.user_id AS author_id, rl.created_at
+            FROM review_likes rl
+            JOIN game_reviews gr ON gr.id = rl.review_id
+            WHERE gr.user_id != rl.user_id
+              AND NOT EXISTS (
+                  SELECT 1 FROM xp_events xe
+                  WHERE xe.user_id    = gr.user_id
+                    AND xe.event_type = 'review_like'
+                    AND xe.reference_id = (rl.review_id::text || ':' || rl.user_id::text)
+              )
+        """)
+        rows = cur.fetchall()
+        granted = 0
+        for row in rows:
+            ref = f"{row['review_id']}:{row['liker_id']}"
+            cur.execute(
+                "INSERT INTO xp_events (user_id, event_type, reference_id, xp_amount, created_at) "
+                "VALUES (%s, 'review_like', %s, 5, %s)",
+                (row["author_id"], ref, row["created_at"])
+            )
+            granted += 1
+        # Recompute xp for all affected authors from xp_events (source of truth)
+        cur.execute("""
+            UPDATE users u
+            SET xp = COALESCE((SELECT SUM(xp_amount) FROM xp_events WHERE user_id = u.id), 0)
+            WHERE EXISTS (SELECT 1 FROM xp_events WHERE user_id = u.id)
+        """)
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"granted": granted, "message": f"Backfilled {granted} like XP events."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Page routes ───────────────────────────────────────────────────
 @app.route("/reviews")
 @app.route("/reviews.html")
@@ -4121,7 +4308,7 @@ def get_user_profile(user_id):
         cur  = conn.cursor()
 
         cur.execute("""
-            SELECT id, display_name, avatar_url, favorite_team, display_name_set, created_at, is_pro
+            SELECT id, display_name, avatar_url, favorite_team, display_name_set, created_at, is_pro, xp
             FROM users WHERE id = %s
         """, (user_id,))
         user = cur.fetchone()
@@ -4195,6 +4382,7 @@ def get_user_profile(user_id):
 
         cur.close(); conn.close()
 
+        xp = int(user["xp"] or 0)
         return jsonify({
             "user": {
                 "id":               user["id"],
@@ -4212,11 +4400,12 @@ def get_user_profile(user_id):
                 "half_star_count": int(stats["half_star_count"] or 0),
                 "distribution":    dist,
             },
-            "favorites":     favorites,
-            "friend_count":  friend_count,
-            "friend_status": friend_status,
-            "is_own":        viewer and viewer["id"] == user_id,
-            "is_blocked":    is_blocked,
+            "ball_knowledge":  get_rank_info(xp),
+            "favorites":       favorites,
+            "friend_count":    friend_count,
+            "friend_status":   friend_status,
+            "is_own":          viewer and viewer["id"] == user_id,
+            "is_blocked":      is_blocked,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
