@@ -389,6 +389,16 @@ BALL_KNOWLEDGE_RANKS = [
 ]
 
 
+def _xp_to_level(xp: int) -> int:
+    level = 1
+    for rank in BALL_KNOWLEDGE_RANKS:
+        if xp >= rank["xp_required"]:
+            level = rank["level"]
+        else:
+            break
+    return level
+
+
 def get_rank_info(xp: int) -> dict:
     current = BALL_KNOWLEDGE_RANKS[0]
     next_rank = None
@@ -2847,6 +2857,7 @@ def _format_review(r: dict) -> dict:
         "reply_count":    int(r.get("reply_count", 0)),
         "tags":           r.get("tags") or [],
         "attended":       bool(r.get("attended", False)),
+        "ball_knowledge_level": _xp_to_level(int(r.get("xp") or 0)),
     }
 
 
@@ -2975,7 +2986,7 @@ def get_game_reviews(game_id):
         cur  = conn.cursor()
         if user_id:
             cur.execute(f"""
-                SELECT gr.*, u.display_name, u.avatar_url, u.favorite_team, u.is_pro,
+                SELECT gr.*, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
                        COUNT(rl.review_id)                                   AS like_count,
                        BOOL_OR(rl_me.user_id IS NOT NULL)                    AS liked_by_me,
                        (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
@@ -2985,13 +2996,13 @@ def get_game_reviews(game_id):
                 LEFT JOIN review_likes rl_me ON rl_me.review_id = gr.id
                                             AND rl_me.user_id   = %s
                 WHERE gr.game_id = %s
-                GROUP BY gr.id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro
+                GROUP BY gr.id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp
                 ORDER BY {order_sql}
                 LIMIT %s OFFSET %s
             """, (user_id, game_id, limit, offset))
         else:
             cur.execute(f"""
-                SELECT gr.*, u.display_name, u.avatar_url, u.favorite_team, u.is_pro,
+                SELECT gr.*, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
                        COUNT(rl.review_id) AS like_count,
                        FALSE               AS liked_by_me,
                        (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
@@ -2999,7 +3010,7 @@ def get_game_reviews(game_id):
                 JOIN users u ON gr.user_id = u.id
                 LEFT JOIN review_likes rl ON rl.review_id = gr.id
                 WHERE gr.game_id = %s
-                GROUP BY gr.id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro
+                GROUP BY gr.id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp
                 ORDER BY {order_sql}
                 LIMIT %s OFFSET %s
             """, (game_id, limit, offset))
@@ -3508,7 +3519,7 @@ def get_most_liked_reviews():
                     gr.created_at, gr.updated_at,
                     COALESCE(gr.tags, '[]'::jsonb) AS tags,
                     gr.attended,
-                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro,
+                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
                     g.game_date, g.home_team_abbr, g.away_team_abbr,
                     g.home_score, g.away_score,
                     COUNT(rl.review_id)                AS like_count,
@@ -3531,7 +3542,7 @@ def get_most_liked_reviews():
                     gr.created_at, gr.updated_at,
                     COALESCE(gr.tags, '[]'::jsonb) AS tags,
                     gr.attended,
-                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro,
+                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
                     g.game_date, g.home_team_abbr, g.away_team_abbr,
                     g.home_score, g.away_score,
                     COUNT(rl.review_id) AS like_count,
@@ -3609,7 +3620,7 @@ def get_recent_reviews():
                     gr.created_at, gr.updated_at,
                     COALESCE(gr.tags, '[]'::jsonb) AS tags,
                     gr.attended,
-                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro,
+                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
                     g.game_date, g.home_team_abbr, g.away_team_abbr,
                     g.home_score, g.away_score,
                     COUNT(rl.review_id)                        AS like_count,
@@ -3634,7 +3645,7 @@ def get_recent_reviews():
                     gr.created_at, gr.updated_at,
                     COALESCE(gr.tags, '[]'::jsonb) AS tags,
                     gr.attended,
-                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro,
+                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
                     g.game_date, g.home_team_abbr, g.away_team_abbr,
                     g.home_score, g.away_score,
                     COUNT(rl.review_id) AS like_count,
@@ -3716,7 +3727,7 @@ def get_user_reviews(user_id):
         cur  = conn.cursor()
         cur.execute(f"""
             SELECT
-                gr.*, u.display_name, u.avatar_url, u.favorite_team, u.is_pro,
+                gr.*, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
                 g.game_date, g.home_team_abbr, g.away_team_abbr,
                 g.home_score, g.away_score, g.season, g.season_type,
                 (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count,
