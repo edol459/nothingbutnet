@@ -4297,6 +4297,113 @@ def remove_favorite(game_id):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/notifications
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/notifications")
+@login_required
+def get_notifications():
+    user  = current_user()
+    uid   = user["id"]
+    limit = min(int(request.args.get("limit", 50)), 100)
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT type, created_at, actor_id, actor_name, actor_avatar,
+                   review_id, game_id, home_team_abbr, away_team_abbr,
+                   game_date::text, reply_text, league
+            FROM (
+                -- Someone liked your review
+                SELECT
+                    'review_like'           AS type,
+                    rl.created_at,
+                    u.id                    AS actor_id,
+                    u.display_name          AS actor_name,
+                    u.avatar_url            AS actor_avatar,
+                    gr.id                   AS review_id,
+                    gr.game_id,
+                    g.home_team_abbr,
+                    g.away_team_abbr,
+                    g.game_date,
+                    NULL::text              AS reply_text,
+                    COALESCE(g.league,'nba') AS league
+                FROM review_likes rl
+                JOIN game_reviews gr ON gr.id = rl.review_id
+                JOIN users        u  ON u.id  = rl.user_id
+                LEFT JOIN games   g  ON g.game_id = gr.game_id
+                WHERE gr.user_id = %s AND rl.user_id != %s
+
+                UNION ALL
+
+                -- Someone replied to your review
+                SELECT
+                    'review_reply'          AS type,
+                    rr.created_at,
+                    u.id,
+                    u.display_name,
+                    u.avatar_url,
+                    gr.id,
+                    gr.game_id,
+                    g.home_team_abbr,
+                    g.away_team_abbr,
+                    g.game_date,
+                    rr.reply_text,
+                    COALESCE(g.league,'nba')
+                FROM review_replies rr
+                JOIN game_reviews gr ON gr.id = rr.review_id
+                JOIN users        u  ON u.id  = rr.user_id
+                LEFT JOIN games   g  ON g.game_id = gr.game_id
+                WHERE gr.user_id = %s AND rr.user_id != %s
+
+                UNION ALL
+
+                -- Pending friend requests sent to you
+                SELECT
+                    'friend_request'        AS type,
+                    f.created_at,
+                    u.id,
+                    u.display_name,
+                    u.avatar_url,
+                    NULL::int,
+                    NULL::text,
+                    NULL::text,
+                    NULL::text,
+                    NULL::date,
+                    NULL::text,
+                    NULL::text
+                FROM friendships f
+                JOIN users u ON u.id = f.sender_id
+                WHERE f.receiver_id = %s AND f.status = 'pending'
+            ) n
+            ORDER BY created_at DESC
+            LIMIT %s
+        """, (uid, uid, uid, uid, uid, limit))
+
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+
+        notifications = []
+        for r in rows:
+            notifications.append({
+                "type":           r["type"],
+                "created_at":     r["created_at"].isoformat() if r["created_at"] else None,
+                "actor_id":       r["actor_id"],
+                "actor_name":     r["actor_name"],
+                "actor_avatar":   r["actor_avatar"],
+                "review_id":      r["review_id"],
+                "game_id":        r["game_id"],
+                "home_team_abbr": r["home_team_abbr"],
+                "away_team_abbr": r["away_team_abbr"],
+                "game_date":      r["game_date"],
+                "reply_text":     r["reply_text"],
+                "league":         r["league"],
+            })
+        return jsonify({"notifications": notifications})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # GET /api/users/<user_id>/profile  (public)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/users/<int:user_id>/profile")
