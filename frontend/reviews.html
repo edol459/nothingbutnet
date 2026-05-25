@@ -1402,9 +1402,13 @@ const _PERSON_SVG = `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" 
   <path d="M3 18c0-3.866 3.134-7 7-7s7 3.134 7 7"/>
 </svg>`;
 
-function tagPillHTML(t) {
+function tagPillHTML(t, gameId) {
+  const isWnba = gameId && String(gameId).startsWith('10');
+  const headshotUrl = isWnba
+    ? `https://ak-static.cms.nba.com/wp-content/uploads/headshots/wnba/latest/260x190/${t.player_id}.png`
+    : `https://cdn.nba.com/headshots/nba/latest/260x190/${t.player_id}.png`;
   return `<span class="review-tag">
-    <img class="tag-headshot" src="https://cdn.nba.com/headshots/nba/latest/260x190/${t.player_id}.png" onerror="this.style.display='none'" alt="">
+    <img class="tag-headshot" src="${headshotUrl}" onerror="this.style.display='none'" alt="">
     <span class="tag-val">${_esc(t.stat_display)}</span>
     <span class="tag-lbl">${_esc(t.stat_label)}</span>
   </span>`;
@@ -1544,7 +1548,7 @@ function buildReviewCard(r, i) {
       ${r.review_text ? `<p class="review-text">${r.review_text}</p>` : ''}
       ${(r.tags && r.tags.length) || r.attended ? `<div class="review-tags">
         ${r.attended ? `<span class="attended-badge">${_PERSON_SVG}attended</span>` : ''}
-        ${r.tags ? r.tags.map(tagPillHTML).join('') : ''}
+        ${r.tags ? r.tags.map(t => tagPillHTML(t, r.game_id)).join('') : ''}
       </div>` : ''}
       <div class="review-card-footer">
         <button class="btn-like${r.liked_by_me ? ' liked' : ''}" data-review-id="${r.id}" title="Like this review">

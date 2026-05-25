@@ -887,9 +887,9 @@ async function loadReviews(reset = false) {
     div.onclick = () => window.location.href = `/game?gameId=${r.game_id}&tab=reviews`;
     div.innerHTML = `
       <div class="ri-logos">
-        ${riLogo(r.away_team_abbr)}
+        ${riLogo(r.away_team_abbr, r.game_id)}
         <span class="ri-vs">@</span>
-        ${riLogo(r.home_team_abbr)}
+        ${riLogo(r.home_team_abbr, r.game_id)}
       </div>
       <div class="ri-body">
         <div class="ri-matchup">${r.away_team_abbr} @ ${r.home_team_abbr}</div>
@@ -1579,7 +1579,13 @@ function _teamBadgeHtml(favorite_team) {
 function _teamDisplayAbbr(favorite_team) {
   return favorite_team && favorite_team.startsWith('WNBA_') ? favorite_team.slice(5) : (favorite_team || '');
 }
-function riLogo(abbr) {
+function riLogo(abbr, gameId) {
+  const isWnba = gameId && String(gameId).startsWith('10');
+  if (isWnba) {
+    const id = _WNBA_CDN_IDS[abbr];
+    if (!id) return `<div class="ri-logo-fallback">🏀</div>`;
+    return `<img class="ri-logo" src="https://cdn.wnba.com/logos/wnba/${id}/global/L/logo.svg" alt="${abbr}" onerror="this.outerHTML='<div class=\\'ri-logo-fallback\\'>🏀</div>'">`;
+  }
   const id = _RI_TEAM_IDS[abbr];
   if (!id) return `<div class="ri-logo-fallback">🏀</div>`;
   return `<img class="ri-logo" src="https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg" alt="${abbr}" onerror="this.outerHTML='<div class=\\'ri-logo-fallback\\'>🏀</div>'">`;
