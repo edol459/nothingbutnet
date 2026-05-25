@@ -1032,13 +1032,16 @@ def _parse_cdn_scoreboard(cdn_data: dict, game_today: str) -> dict | None:
         if g.get("ifNecessary") and str(g.get("gameStatusText", "")).strip().upper() == "TBD":
             continue
         away = g.get("awayTeam", {}); home = g.get("homeTeam", {})
+        raw_utc = g.get("gameTimeUTC", "")
+        if raw_utc.startswith("1900-"):
+            raw_utc = _resolve_1900_game_time(g.get("gameStatusText", ""), game_today) or raw_utc
         games.append({
             "gameId":         g.get("gameId", ""),
             "gameStatus":     g.get("gameStatus", 1),
             "gameStatusText": g.get("gameStatusText", ""),
             "period":         g.get("period", 0),
             "gameClock":      g.get("gameClock", ""),
-            "gameTimeUTC":    g.get("gameTimeUTC", ""),
+            "gameTimeUTC":    raw_utc,
             "away": {"abbr": away.get("teamTricode", ""), "score": int(away.get("score", 0) or 0),
                      "wins": away.get("wins"), "losses": away.get("losses")},
             "home": {"abbr": home.get("teamTricode", ""), "score": int(home.get("score", 0) or 0),
@@ -1138,11 +1141,14 @@ def _sb_poller_tick() -> tuple[bool, bool, bool]:
                     if g.get("ifNecessary") and str(g.get("gameStatusText", "")).strip().upper() == "TBD":
                         continue
                     away = g.get("awayTeam", {}); home = g.get("homeTeam", {})
+                    raw_utc = g.get("gameTimeUTC", "")
+                    if raw_utc.startswith("1900-"):
+                        raw_utc = _resolve_1900_game_time(g.get("gameStatusText", ""), game_today) or raw_utc
                     games.append({
                         "gameId": g.get("gameId", ""), "gameStatus": 1,
                         "gameStatusText": g.get("gameStatusText", ""),
                         "period": 0, "gameClock": "",
-                        "gameTimeUTC": g.get("gameTimeUTC", ""),
+                        "gameTimeUTC": raw_utc,
                         "away": {"abbr": away.get("teamTricode", ""), "score": 0,
                                  "wins": None, "losses": None},
                         "home": {"abbr": home.get("teamTricode", ""), "score": 0,
@@ -1464,13 +1470,16 @@ def get_scoreboard():
                     if g.get("ifNecessary") and str(g.get("gameStatusText", "")).strip().upper() == "TBD":
                         continue
                     away = g.get(away_k, {}); home = g.get(home_k, {})
+                    raw_utc = g.get("gameTimeUTC", "")
+                    if raw_utc.startswith("1900-"):
+                        raw_utc = _resolve_1900_game_time(g.get("gameStatusText", ""), _game_today) or raw_utc
                     games.append({
                         "gameId":         g.get("gameId", ""),
                         "gameStatus":     g.get("gameStatus", 1),
                         "gameStatusText": g.get("gameStatusText", ""),
                         "period":         g.get("period", 0),
                         "gameClock":      g.get("gameClock", ""),
-                        "gameTimeUTC":    g.get("gameTimeUTC", ""),
+                        "gameTimeUTC":    raw_utc,
                         "away": {"abbr": away.get("teamTricode",""), "score": int(away.get("score",0) or 0),
                                  "wins": away.get("wins"), "losses": away.get("losses")},
                         "home": {"abbr": home.get("teamTricode",""), "score": int(home.get("score",0) or 0),
