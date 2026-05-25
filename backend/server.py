@@ -4386,7 +4386,7 @@ def get_notifications():
         for r in rows:
             notifications.append({
                 "type":           r["type"],
-                "created_at":     r["created_at"].isoformat() if r["created_at"] else None,
+                "created_at":     r["created_at"].strftime("%Y-%m-%dT%H:%M:%SZ") if r["created_at"] else None,
                 "actor_id":       r["actor_id"],
                 "actor_name":     r["actor_name"],
                 "actor_avatar":   r["actor_avatar"],
