@@ -346,6 +346,7 @@ def _ensure_tables():
         """)
         # Ball Knowledge XP system
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS xp INTEGER NOT NULL DEFAULT 0")
+        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS equipped_ring INTEGER DEFAULT NULL")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS xp_events (
                 id           SERIAL  PRIMARY KEY,
@@ -2858,6 +2859,7 @@ def _format_review(r: dict) -> dict:
         "tags":           r.get("tags") or [],
         "attended":       bool(r.get("attended", False)),
         "ball_knowledge_level": _xp_to_level(int(r.get("xp") or 0)),
+        "equipped_ring":        r.get("equipped_ring"),  # null=use rank, 0=no ring, 1-10=specific
     }
 
 
@@ -2986,7 +2988,7 @@ def get_game_reviews(game_id):
         cur  = conn.cursor()
         if user_id:
             cur.execute(f"""
-                SELECT gr.*, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
+                SELECT gr.*, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp, u.equipped_ring,
                        COUNT(rl.review_id)                                   AS like_count,
                        BOOL_OR(rl_me.user_id IS NOT NULL)                    AS liked_by_me,
                        (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
@@ -2996,13 +2998,13 @@ def get_game_reviews(game_id):
                 LEFT JOIN review_likes rl_me ON rl_me.review_id = gr.id
                                             AND rl_me.user_id   = %s
                 WHERE gr.game_id = %s
-                GROUP BY gr.id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp
+                GROUP BY gr.id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp, u.equipped_ring
                 ORDER BY {order_sql}
                 LIMIT %s OFFSET %s
             """, (user_id, game_id, limit, offset))
         else:
             cur.execute(f"""
-                SELECT gr.*, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
+                SELECT gr.*, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp, u.equipped_ring,
                        COUNT(rl.review_id) AS like_count,
                        FALSE               AS liked_by_me,
                        (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
@@ -3010,7 +3012,7 @@ def get_game_reviews(game_id):
                 JOIN users u ON gr.user_id = u.id
                 LEFT JOIN review_likes rl ON rl.review_id = gr.id
                 WHERE gr.game_id = %s
-                GROUP BY gr.id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp
+                GROUP BY gr.id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp, u.equipped_ring
                 ORDER BY {order_sql}
                 LIMIT %s OFFSET %s
             """, (game_id, limit, offset))
@@ -3519,7 +3521,7 @@ def get_most_liked_reviews():
                     gr.created_at, gr.updated_at,
                     COALESCE(gr.tags, '[]'::jsonb) AS tags,
                     gr.attended,
-                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
+                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp, u.equipped_ring,
                     g.game_date, g.home_team_abbr, g.away_team_abbr,
                     g.home_score, g.away_score,
                     COUNT(rl.review_id)                AS like_count,
@@ -3542,7 +3544,7 @@ def get_most_liked_reviews():
                     gr.created_at, gr.updated_at,
                     COALESCE(gr.tags, '[]'::jsonb) AS tags,
                     gr.attended,
-                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
+                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp, u.equipped_ring,
                     g.game_date, g.home_team_abbr, g.away_team_abbr,
                     g.home_score, g.away_score,
                     COUNT(rl.review_id) AS like_count,
@@ -3620,7 +3622,7 @@ def get_recent_reviews():
                     gr.created_at, gr.updated_at,
                     COALESCE(gr.tags, '[]'::jsonb) AS tags,
                     gr.attended,
-                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
+                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp, u.equipped_ring,
                     g.game_date, g.home_team_abbr, g.away_team_abbr,
                     g.home_score, g.away_score,
                     COUNT(rl.review_id)                        AS like_count,
@@ -3645,7 +3647,7 @@ def get_recent_reviews():
                     gr.created_at, gr.updated_at,
                     COALESCE(gr.tags, '[]'::jsonb) AS tags,
                     gr.attended,
-                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
+                    u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp, u.equipped_ring,
                     g.game_date, g.home_team_abbr, g.away_team_abbr,
                     g.home_score, g.away_score,
                     COUNT(rl.review_id) AS like_count,
@@ -3727,7 +3729,7 @@ def get_user_reviews(user_id):
         cur  = conn.cursor()
         cur.execute(f"""
             SELECT
-                gr.*, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
+                gr.*, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp, u.equipped_ring,
                 g.game_date, g.home_team_abbr, g.away_team_abbr,
                 g.home_score, g.away_score, g.season, g.season_type,
                 (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count,
@@ -4209,6 +4211,43 @@ def update_favorite_team():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PATCH /api/me/ring  — set equipped avatar ring (null=rank default, 0=none, 1-10=level)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/me/ring", methods=["PATCH"])
+@login_required
+def update_ring():
+    user = current_user()
+    body = request.get_json() or {}
+    ring = body.get("equipped_ring")  # null, 0, or 1-10
+
+    if ring is not None and (not isinstance(ring, int) or ring < 0 or ring > 10):
+        return jsonify({"error": "equipped_ring must be null or an integer 0–10"}), 400
+
+    # Verify the user has actually unlocked this ring level
+    if ring and ring >= 2:
+        try:
+            conn = get_conn()
+            cur  = conn.cursor()
+            cur.execute("SELECT xp FROM users WHERE id = %s", (user["id"],))
+            row = cur.fetchone()
+            cur.close(); conn.close()
+            if not row or _xp_to_level(int(row["xp"] or 0)) < ring:
+                return jsonify({"error": "Ring level not yet unlocked"}), 403
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("UPDATE users SET equipped_ring = %s WHERE id = %s", (ring, user["id"]))
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"ok": True, "equipped_ring": ring})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # POST /api/me/avatar  — upload / replace profile picture
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/me/avatar", methods=["POST"])
@@ -4426,7 +4465,7 @@ def get_user_profile(user_id):
         cur  = conn.cursor()
 
         cur.execute("""
-            SELECT id, display_name, avatar_url, favorite_team, display_name_set, created_at, is_pro, xp
+            SELECT id, display_name, avatar_url, favorite_team, display_name_set, created_at, is_pro, xp, equipped_ring
             FROM users WHERE id = %s
         """, (user_id,))
         user = cur.fetchone()
@@ -4518,7 +4557,7 @@ def get_user_profile(user_id):
                 "half_star_count": int(stats["half_star_count"] or 0),
                 "distribution":    dist,
             },
-            "ball_knowledge":  get_rank_info(xp),
+            "ball_knowledge":  {**get_rank_info(xp), "equipped_ring": user.get("equipped_ring")},
             "favorites":       favorites,
             "friend_count":    friend_count,
             "friend_status":   friend_status,
