@@ -4220,13 +4220,13 @@ def update_favorite_team():
 def update_ring():
     user = current_user()
     body = request.get_json() or {}
-    ring = body.get("equipped_ring")  # null, 0, or 1-10
+    ring = body.get("equipped_ring")  # null, 0, 1-10, or 11 (pro)
 
-    if ring is not None and (not isinstance(ring, int) or ring < 0 or ring > 10):
-        return jsonify({"error": "equipped_ring must be null or an integer 0–10"}), 400
+    if ring is not None and (not isinstance(ring, int) or ring < 0 or ring > 11):
+        return jsonify({"error": "equipped_ring must be null or an integer 0–11"}), 400
 
-    # Verify the user has actually unlocked this ring level
-    if ring and ring >= 2:
+    # Verify unlock: levels 2-10 require sufficient XP; level 11 (Pro) is gated client-side
+    if ring and ring >= 2 and ring <= 10:
         try:
             conn = get_conn()
             cur  = conn.cursor()
@@ -4250,7 +4250,7 @@ def update_ring():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# PATCH /api/me/title  — set equipped title (null=rank default, 0=none, 1-10=level)
+# PATCH /api/me/title  — set equipped title (null=rank default, 0=none, 1-10=level, 11=pro)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/me/title", methods=["PATCH"])
 @login_required
@@ -4259,10 +4259,11 @@ def update_title():
     body = request.get_json() or {}
     title = body.get("equipped_title")
 
-    if title is not None and (not isinstance(title, int) or title < 0 or title > 10):
-        return jsonify({"error": "equipped_title must be null or an integer 0–10"}), 400
+    if title is not None and (not isinstance(title, int) or title < 0 or title > 11):
+        return jsonify({"error": "equipped_title must be null or an integer 0–11"}), 400
 
-    if title and title >= 2:
+    # Verify unlock: levels 2-10 require sufficient XP; level 11 (Pro) is gated client-side
+    if title and title >= 2 and title <= 10:
         try:
             conn = get_conn()
             cur  = conn.cursor()
