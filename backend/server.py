@@ -25,6 +25,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 import psycopg2
 import psycopg2.extras
+import threading
 
 load_dotenv()
 
@@ -86,9 +87,41 @@ DEFAULT_SEASON      = os.getenv("NBA_SEASON",      get_current_season())
 DEFAULT_SEASON_TYPE = os.getenv("NBA_SEASON_TYPE", get_current_season_type())
 
 
+class _PersistentConn:
+    """Wraps a psycopg2 connection so close() resets state instead of closing it.
+    Kept in thread-local storage so each gunicorn thread reuses one long-lived
+    connection rather than opening a new TCP connection on every request."""
+    __slots__ = ("_raw",)
+
+    def __init__(self, raw):
+        self._raw = raw
+
+    def __getattr__(self, name):
+        return getattr(self._raw, name)
+
+    def close(self):
+        try:
+            if not self._raw.closed:
+                self._raw.rollback()
+        except Exception:
+            pass
+
+_tl = threading.local()
+
 def get_conn():
-    return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor,
-                            connect_timeout=10)
+    w = getattr(_tl, "conn", None)
+    if w is not None:
+        try:
+            if not w._raw.closed:
+                w._raw.rollback()
+                return w
+        except Exception:
+            pass
+    raw = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor,
+                           connect_timeout=10)
+    w = _PersistentConn(raw)
+    _tl.conn = w
+    return w
 
 def _resolve_1900_game_time(status_text: str, game_date: str) -> str:
     """Convert a CDN 1900-era placeholder gameTimeUTC to the real UTC time.
