@@ -307,6 +307,24 @@ def _ensure_tables():
             ALTER TABLE game_list_items ADD COLUMN IF NOT EXISTS sort_order INTEGER
         """)
         cur.execute("""
+            ALTER TABLE game_lists ADD COLUMN IF NOT EXISTS list_type TEXT DEFAULT 'games'
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS player_list_items (
+                id          SERIAL PRIMARY KEY,
+                list_id     INTEGER REFERENCES game_lists(id) ON DELETE CASCADE,
+                player_id   INTEGER,
+                player_name TEXT NOT NULL,
+                team        TEXT,
+                season      TEXT,
+                sort_order  INTEGER,
+                added_at    TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_player_list_items_list_id ON player_list_items(list_id)
+        """)
+        cur.execute("""
             ALTER TABLE games ADD COLUMN IF NOT EXISTS league TEXT NOT NULL DEFAULT 'nba'
         """)
         cur.execute("""
@@ -3954,6 +3972,7 @@ def _format_list(row: dict, game_count: int = 0) -> dict:
         "description": row.get("description"),
         "isPublic":    row["is_public"],
         "isRanked":    bool(row.get("is_ranked", False)),
+        "listType":    row.get("list_type", "games") or "games",
         "gameCount":   game_count,
         "createdAt":   str(row.get("created_at", "")),
     }
@@ -4017,11 +4036,14 @@ def create_list():
         return jsonify({"error": "title must be 100 characters or fewer"}), 400
     desc      = (body.get("description") or "").strip() or None
     is_ranked = bool(body.get("isRanked", False))
+    list_type = (body.get("listType") or "games").strip()
+    if list_type not in ("games", "players", "player_seasons"):
+        list_type = "games"
     conn = get_conn(); cur = conn.cursor()
     cur.execute("""
-        INSERT INTO game_lists (user_id, title, description, is_ranked)
-        VALUES (%s, %s, %s, %s) RETURNING *
-    """, (user["id"], title, desc, is_ranked))
+        INSERT INTO game_lists (user_id, title, description, is_ranked, list_type)
+        VALUES (%s, %s, %s, %s, %s) RETURNING *
+    """, (user["id"], title, desc, is_ranked, list_type))
     row = cur.fetchone()
     conn.commit(); cur.close(); conn.close()
     return jsonify({"list": _format_list(row, 0)}), 201
@@ -4064,9 +4086,29 @@ def get_list_detail(list_id):
             "gameDate":     str(r["game_date"]) if r.get("game_date") else None,
             "league":       r.get("league", "nba"),
         })
+    # Fetch player items (for player/player_seasons lists)
+    player_items = []
+    if lst.get("list_type", "games") != "games":
+        p_order = "ORDER BY sort_order ASC NULLS LAST, added_at ASC" if lst.get("is_ranked") else "ORDER BY added_at ASC"
+        cur.execute(f"""
+            SELECT id, player_id, player_name, team, season, sort_order, added_at
+            FROM player_list_items WHERE list_id = %s {p_order}
+        """, (list_id,))
+        for r in cur.fetchall():
+            player_items.append({
+                "id":         r["id"],
+                "playerId":   r.get("player_id"),
+                "playerName": r["player_name"],
+                "team":       r.get("team"),
+                "season":     r.get("season"),
+                "sortOrder":  r.get("sort_order"),
+                "addedAt":    str(r["added_at"]),
+            })
+
     cur.close(); conn.close()
     result = dict(_format_list(lst, len(games)))
     result["games"] = games
+    result["playerItems"] = player_items
     return jsonify({"list": result})
 
 
@@ -4179,6 +4221,131 @@ def reorder_list_games(list_id):
             UPDATE game_list_items SET sort_order = %s
             WHERE list_id = %s AND game_id = %s
         """, (i + 1, list_id, gid))
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/lists/players/search")
+def search_list_players():
+    q         = request.args.get("q", "").strip()
+    list_type = request.args.get("type", "players")
+    league    = request.args.get("league", "nba")
+    if len(q) < 2:
+        return jsonify({"players": []})
+    pattern = f"%{q}%"
+    conn = get_conn(); cur = conn.cursor()
+    results = []
+    try:
+        if league == "wnba":
+            if list_type == "player_seasons":
+                cur.execute("""
+                    SELECT DISTINCT player_id, player_name, team, season
+                    FROM wnba_player_seasons
+                    WHERE player_name ILIKE %s AND season_type = 'Regular Season'
+                    ORDER BY player_name, season DESC LIMIT 30
+                """, (pattern,))
+            else:
+                cur.execute("""
+                    SELECT DISTINCT ON (player_id) player_id, player_name, team, season
+                    FROM wnba_player_seasons
+                    WHERE player_name ILIKE %s
+                    ORDER BY player_id, season DESC LIMIT 20
+                """, (pattern,))
+        else:
+            if list_type == "player_seasons":
+                cur.execute("""
+                    SELECT p.player_id, p.player_name, ps.team_abbr AS team, ps.season
+                    FROM players p
+                    JOIN player_seasons ps ON p.player_id = ps.player_id
+                    WHERE p.player_name ILIKE %s AND ps.season_type = 'Regular Season'
+                    ORDER BY p.player_name, ps.season DESC LIMIT 30
+                """, (pattern,))
+            else:
+                cur.execute("""
+                    SELECT DISTINCT ON (p.player_id) p.player_id, p.player_name,
+                           ps.team_abbr AS team, ps.season
+                    FROM players p
+                    JOIN player_seasons ps ON p.player_id = ps.player_id
+                    WHERE p.player_name ILIKE %s
+                    ORDER BY p.player_id, ps.season DESC LIMIT 20
+                """, (pattern,))
+        for r in cur.fetchall():
+            item = {"playerId": r["player_id"], "playerName": r["player_name"], "team": r.get("team")}
+            if list_type == "player_seasons":
+                item["season"] = r.get("season")
+            results.append(item)
+    except Exception:
+        pass
+    cur.close(); conn.close()
+    return jsonify({"players": results})
+
+
+@app.route("/api/lists/<int:list_id>/players", methods=["POST"])
+@login_required
+def add_player_to_list(list_id):
+    user        = current_user()
+    body        = request.get_json(force=True, silent=True) or {}
+    player_id   = body.get("playerId")
+    player_name = (body.get("playerName") or "").strip()
+    team        = body.get("team")
+    season      = body.get("season")
+    if not player_name:
+        return jsonify({"error": "playerName required"}), 400
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    sort_order = None
+    cur.execute("SELECT is_ranked FROM game_lists WHERE id = %s", (list_id,))
+    lst_row = cur.fetchone()
+    if lst_row and lst_row["is_ranked"]:
+        cur.execute("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM player_list_items WHERE list_id=%s", (list_id,))
+        sort_order = cur.fetchone()["n"]
+    cur.execute("""
+        INSERT INTO player_list_items (list_id, player_id, player_name, team, season, sort_order)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id, player_id, player_name, team, season, sort_order, added_at
+    """, (list_id, player_id, player_name, team, season, sort_order))
+    row = cur.fetchone()
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"item": {
+        "id": row["id"], "playerId": row.get("player_id"), "playerName": row["player_name"],
+        "team": row.get("team"), "season": row.get("season"),
+        "sortOrder": row.get("sort_order"), "addedAt": str(row["added_at"]),
+    }}), 201
+
+
+@app.route("/api/lists/<int:list_id>/players/<int:item_id>", methods=["DELETE"])
+@login_required
+def remove_player_from_list(list_id, item_id):
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    cur.execute("DELETE FROM player_list_items WHERE id = %s AND list_id = %s", (item_id, list_id))
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/lists/<int:list_id>/players/reorder", methods=["PATCH"])
+@login_required
+def reorder_player_items(list_id):
+    user     = current_user()
+    body     = request.get_json(force=True, silent=True) or {}
+    item_ids = body.get("itemIds", [])
+    if not isinstance(item_ids, list):
+        return jsonify({"error": "itemIds must be an array"}), 400
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    for i, iid in enumerate(item_ids):
+        cur.execute("UPDATE player_list_items SET sort_order=%s WHERE id=%s AND list_id=%s",
+                    (i + 1, iid, list_id))
     cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
     conn.commit(); cur.close(); conn.close()
     return jsonify({"ok": True})
