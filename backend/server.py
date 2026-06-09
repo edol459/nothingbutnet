@@ -301,6 +301,12 @@ def _ensure_tables():
             CREATE INDEX IF NOT EXISTS idx_game_lists_user_id ON game_lists(user_id)
         """)
         cur.execute("""
+            ALTER TABLE game_lists ADD COLUMN IF NOT EXISTS is_ranked BOOLEAN DEFAULT FALSE
+        """)
+        cur.execute("""
+            ALTER TABLE game_list_items ADD COLUMN IF NOT EXISTS sort_order INTEGER
+        """)
+        cur.execute("""
             ALTER TABLE games ADD COLUMN IF NOT EXISTS league TEXT NOT NULL DEFAULT 'nba'
         """)
         cur.execute("""
@@ -3947,6 +3953,7 @@ def _format_list(row: dict, game_count: int = 0) -> dict:
         "title":       row["title"],
         "description": row.get("description"),
         "isPublic":    row["is_public"],
+        "isRanked":    bool(row.get("is_ranked", False)),
         "gameCount":   game_count,
         "createdAt":   str(row.get("created_at", "")),
     }
@@ -4008,12 +4015,13 @@ def create_list():
         return jsonify({"error": "title is required"}), 400
     if len(title) > 100:
         return jsonify({"error": "title must be 100 characters or fewer"}), 400
-    desc = (body.get("description") or "").strip() or None
+    desc      = (body.get("description") or "").strip() or None
+    is_ranked = bool(body.get("isRanked", False))
     conn = get_conn(); cur = conn.cursor()
     cur.execute("""
-        INSERT INTO game_lists (user_id, title, description)
-        VALUES (%s, %s, %s) RETURNING *
-    """, (user["id"], title, desc))
+        INSERT INTO game_lists (user_id, title, description, is_ranked)
+        VALUES (%s, %s, %s, %s) RETURNING *
+    """, (user["id"], title, desc, is_ranked))
     row = cur.fetchone()
     conn.commit(); cur.close(); conn.close()
     return jsonify({"list": _format_list(row, 0)}), 201
@@ -4032,21 +4040,23 @@ def get_list_detail(list_id):
         cur.close(); conn.close()
         return jsonify({"error": "not found"}), 404
 
-    cur.execute("""
-        SELECT gli.game_id, gli.added_at,
+    order_clause = "ORDER BY gli.sort_order ASC NULLS LAST, gli.added_at DESC" if lst.get("is_ranked") else "ORDER BY gli.added_at DESC"
+    cur.execute(f"""
+        SELECT gli.game_id, gli.added_at, gli.sort_order,
                g.home_team_abbr, g.away_team_abbr,
                g.home_score, g.away_score,
                g.game_date, g.league
         FROM game_list_items gli
         LEFT JOIN games g ON g.game_id = gli.game_id
         WHERE gli.list_id = %s
-        ORDER BY gli.added_at DESC
+        {order_clause}
     """, (list_id,))
     games = []
     for r in cur.fetchall():
         games.append({
             "gameId":       r["game_id"],
             "addedAt":      str(r["added_at"]),
+            "sortOrder":    r.get("sort_order"),
             "homeTeamAbbr": r.get("home_team_abbr"),
             "awayTeamAbbr": r.get("away_team_abbr"),
             "homeScore":    r.get("home_score"),
@@ -4074,15 +4084,17 @@ def update_list(list_id):
         return jsonify({"error": "title must be 100 characters or fewer"}), 400
     desc      = (body.get("description") or "").strip() or None
     is_public = body.get("isPublic", True)
+    is_ranked = body.get("isRanked")  # None means don't change
     cur.execute("""
         UPDATE game_lists
         SET title = COALESCE(NULLIF(%s,''), title),
             description = %s,
             is_public = %s,
+            is_ranked = CASE WHEN %s IS NULL THEN is_ranked ELSE %s::boolean END,
             updated_at = NOW()
         WHERE id = %s
         RETURNING *
-    """, (title, desc, bool(is_public), list_id))
+    """, (title, desc, bool(is_public), is_ranked, is_ranked, list_id))
     row = cur.fetchone()
     conn.commit(); cur.close(); conn.close()
     return jsonify({"list": _format_list(row)})
@@ -4113,10 +4125,23 @@ def add_game_to_list(list_id):
     if not _list_is_owner(list_id, user["id"], cur):
         cur.close(); conn.close()
         return jsonify({"error": "not found"}), 404
-    cur.execute("""
-        INSERT INTO game_list_items (list_id, game_id)
-        VALUES (%s, %s) ON CONFLICT DO NOTHING
-    """, (list_id, game_id))
+    cur.execute("SELECT is_ranked FROM game_lists WHERE id = %s", (list_id,))
+    lst_row = cur.fetchone()
+    if lst_row and lst_row["is_ranked"]:
+        cur.execute("""
+            SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order
+            FROM game_list_items WHERE list_id = %s
+        """, (list_id,))
+        next_order = cur.fetchone()["next_order"]
+        cur.execute("""
+            INSERT INTO game_list_items (list_id, game_id, sort_order)
+            VALUES (%s, %s, %s) ON CONFLICT DO NOTHING
+        """, (list_id, game_id, next_order))
+    else:
+        cur.execute("""
+            INSERT INTO game_list_items (list_id, game_id)
+            VALUES (%s, %s) ON CONFLICT DO NOTHING
+        """, (list_id, game_id))
     cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
     conn.commit(); cur.close(); conn.close()
     return jsonify({"ok": True})
@@ -4132,6 +4157,28 @@ def remove_game_from_list(list_id, game_id):
         return jsonify({"error": "not found"}), 404
     cur.execute("DELETE FROM game_list_items WHERE list_id = %s AND game_id = %s",
                 (list_id, game_id))
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/lists/<int:list_id>/games/reorder", methods=["PATCH"])
+@login_required
+def reorder_list_games(list_id):
+    user    = current_user()
+    body    = request.get_json(force=True, silent=True) or {}
+    game_ids = body.get("gameIds", [])
+    if not isinstance(game_ids, list):
+        return jsonify({"error": "gameIds must be an array"}), 400
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    for i, gid in enumerate(game_ids):
+        cur.execute("""
+            UPDATE game_list_items SET sort_order = %s
+            WHERE list_id = %s AND game_id = %s
+        """, (i + 1, list_id, gid))
     cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
     conn.commit(); cur.close(); conn.close()
     return jsonify({"ok": True})
