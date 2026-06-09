@@ -4398,10 +4398,13 @@ _EDITION_ORDER = {"Association Edition": 1, "Icon Edition": 2, "Statement Editio
 @app.route("/api/jerseys/search")
 def search_jerseys():
     q      = request.args.get("q", "").strip()
-    season = request.args.get("season", "2025-26")
+    season = request.args.get("season", "").strip()
     conn = get_conn(); cur = conn.cursor()
-    conditions = ["source_slug = 'lockervision'", "year_range = %s"]
-    params = [season]
+    conditions = ["source_slug = 'lockervision'"]
+    params = []
+    if season:
+        conditions.append("year_range = %s")
+        params.append(season)
     if q:
         conditions.append("(team_name ILIKE %s OR label ILIKE %s)")
         params.extend([f"%{q}%", f"%{q}%"])
@@ -4410,7 +4413,7 @@ def search_jerseys():
         FROM jerseys
         WHERE {' AND '.join(conditions)}
         ORDER BY team_name, year_start DESC, variant
-        LIMIT 200
+        LIMIT 500
     """, params)
     results = []
     for r in cur.fetchall():
