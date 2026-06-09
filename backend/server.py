@@ -325,6 +325,20 @@ def _ensure_tables():
             CREATE INDEX IF NOT EXISTS idx_player_list_items_list_id ON player_list_items(list_id)
         """)
         cur.execute("""
+            CREATE TABLE IF NOT EXISTS jersey_list_items (
+                id         SERIAL PRIMARY KEY,
+                list_id    INTEGER REFERENCES game_lists(id) ON DELETE CASCADE,
+                jersey_id  INTEGER REFERENCES jerseys(id),
+                label      TEXT NOT NULL,
+                image_url  TEXT NOT NULL,
+                sort_order INTEGER,
+                added_at   TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_jersey_list_items_list_id ON jersey_list_items(list_id)
+        """)
+        cur.execute("""
             ALTER TABLE games ADD COLUMN IF NOT EXISTS league TEXT NOT NULL DEFAULT 'nba'
         """)
         cur.execute("""
@@ -4037,7 +4051,7 @@ def create_list():
     desc      = (body.get("description") or "").strip() or None
     is_ranked = bool(body.get("isRanked", False))
     list_type = (body.get("listType") or "games").strip()
-    if list_type not in ("games", "players", "player_seasons"):
+    if list_type not in ("games", "players", "player_seasons", "jerseys"):
         list_type = "games"
     conn = get_conn(); cur = conn.cursor()
     cur.execute("""
@@ -4088,7 +4102,8 @@ def get_list_detail(list_id):
         })
     # Fetch player items (for player/player_seasons lists)
     player_items = []
-    if lst.get("list_type", "games") != "games":
+    list_type = lst.get("list_type", "games")
+    if list_type in ("players", "player_seasons"):
         p_order = "ORDER BY sort_order ASC NULLS LAST, added_at ASC" if lst.get("is_ranked") else "ORDER BY added_at ASC"
         cur.execute(f"""
             SELECT id, player_id, player_name, team, season, sort_order, added_at
@@ -4105,10 +4120,36 @@ def get_list_detail(list_id):
                 "addedAt":    str(r["added_at"]),
             })
 
+    # Fetch jersey items (for jersey lists)
+    jersey_items = []
+    if list_type == "jerseys":
+        j_order = "ORDER BY sort_order ASC NULLS LAST, added_at ASC" if lst.get("is_ranked") else "ORDER BY added_at ASC"
+        cur.execute(f"""
+            SELECT jli.id, jli.jersey_id, jli.label, jli.image_url, jli.sort_order, jli.added_at,
+                   j.team_name, j.team_slug, j.variant, j.year_range
+            FROM jersey_list_items jli
+            LEFT JOIN jerseys j ON j.id = jli.jersey_id
+            WHERE jli.list_id = %s {j_order}
+        """, (list_id,))
+        for r in cur.fetchall():
+            jersey_items.append({
+                "id":        r["id"],
+                "jerseyId":  r.get("jersey_id"),
+                "label":     r["label"],
+                "imageUrl":  r["image_url"],
+                "teamName":  r.get("team_name"),
+                "teamSlug":  r.get("team_slug"),
+                "variant":   r.get("variant"),
+                "yearRange": r.get("year_range"),
+                "sortOrder": r.get("sort_order"),
+                "addedAt":   str(r["added_at"]),
+            })
+
     cur.close(); conn.close()
     result = dict(_format_list(lst, len(games)))
     result["games"] = games
     result["playerItems"] = player_items
+    result["jerseyItems"] = jersey_items
     return jsonify({"list": result})
 
 
@@ -4345,6 +4386,109 @@ def reorder_player_items(list_id):
         return jsonify({"error": "not found"}), 404
     for i, iid in enumerate(item_ids):
         cur.execute("UPDATE player_list_items SET sort_order=%s WHERE id=%s AND list_id=%s",
+                    (i + 1, iid, list_id))
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True})
+
+
+_EDITION_ORDER = {"Association Edition": 1, "Icon Edition": 2, "Statement Edition": 3, "City Edition": 4}
+
+
+@app.route("/api/jerseys/search")
+def search_jerseys():
+    q      = request.args.get("q", "").strip()
+    season = request.args.get("season", "2025-26")
+    conn = get_conn(); cur = conn.cursor()
+    conditions = ["source_slug = 'lockervision'", "year_range = %s"]
+    params = [season]
+    if q:
+        conditions.append("(team_name ILIKE %s OR label ILIKE %s)")
+        params.extend([f"%{q}%", f"%{q}%"])
+    cur.execute(f"""
+        SELECT id, team_slug, team_name, year_range, label, variant, image_url
+        FROM jerseys
+        WHERE {' AND '.join(conditions)}
+        ORDER BY team_name, year_start DESC, variant
+        LIMIT 200
+    """, params)
+    results = []
+    for r in cur.fetchall():
+        results.append({
+            "id":        r["id"],
+            "teamSlug":  r["team_slug"],
+            "teamName":  r["team_name"],
+            "yearRange": r["year_range"],
+            "label":     r["label"],
+            "variant":   r.get("variant"),
+            "imageUrl":  r["image_url"],
+        })
+    cur.close(); conn.close()
+    return jsonify({"jerseys": results})
+
+
+@app.route("/api/lists/<int:list_id>/jerseys", methods=["POST"])
+@login_required
+def add_jersey_to_list(list_id):
+    user      = current_user()
+    body      = request.get_json(force=True, silent=True) or {}
+    jersey_id = body.get("jerseyId")
+    label     = (body.get("label") or "").strip()
+    image_url = (body.get("imageUrl") or "").strip()
+    if not label or not image_url:
+        return jsonify({"error": "label and imageUrl required"}), 400
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    sort_order = None
+    cur.execute("SELECT is_ranked FROM game_lists WHERE id = %s", (list_id,))
+    lst_row = cur.fetchone()
+    if lst_row and lst_row["is_ranked"]:
+        cur.execute("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM jersey_list_items WHERE list_id=%s", (list_id,))
+        sort_order = cur.fetchone()["n"]
+    cur.execute("""
+        INSERT INTO jersey_list_items (list_id, jersey_id, label, image_url, sort_order)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id, jersey_id, label, image_url, sort_order, added_at
+    """, (list_id, jersey_id, label, image_url, sort_order))
+    row = cur.fetchone()
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"item": {
+        "id": row["id"], "jerseyId": row.get("jersey_id"), "label": row["label"],
+        "imageUrl": row["image_url"], "sortOrder": row.get("sort_order"), "addedAt": str(row["added_at"]),
+    }}), 201
+
+
+@app.route("/api/lists/<int:list_id>/jerseys/<int:item_id>", methods=["DELETE"])
+@login_required
+def remove_jersey_from_list(list_id, item_id):
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    cur.execute("DELETE FROM jersey_list_items WHERE id = %s AND list_id = %s", (item_id, list_id))
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/lists/<int:list_id>/jerseys/reorder", methods=["PATCH"])
+@login_required
+def reorder_jersey_items(list_id):
+    user     = current_user()
+    body     = request.get_json(force=True, silent=True) or {}
+    item_ids = body.get("itemIds", [])
+    if not isinstance(item_ids, list):
+        return jsonify({"error": "itemIds must be an array"}), 400
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    for i, iid in enumerate(item_ids):
+        cur.execute("UPDATE jersey_list_items SET sort_order=%s WHERE id=%s AND list_id=%s",
                     (i + 1, iid, list_id))
     cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
     conn.commit(); cur.close(); conn.close()
