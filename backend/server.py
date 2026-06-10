@@ -358,6 +358,12 @@ def _ensure_tables():
             ALTER TABLE games ADD COLUMN IF NOT EXISTS league TEXT NOT NULL DEFAULT 'nba'
         """)
         cur.execute("""
+            ALTER TABLE team_seasons ADD COLUMN IF NOT EXISTS league TEXT NOT NULL DEFAULT 'nba'
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_team_seasons_league ON team_seasons(league)
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS wnba_player_game_stats (
                 player_id   INTEGER NOT NULL,
                 player_name TEXT,
@@ -4067,7 +4073,9 @@ def create_list():
     desc      = (body.get("description") or "").strip() or None
     is_ranked = bool(body.get("isRanked", False))
     list_type = (body.get("listType") or "games").strip()
-    if list_type not in ("games", "players", "player_seasons", "jerseys", "teams", "team_seasons"):
+    if list_type not in ("games", "players", "player_seasons", "jerseys", "teams", "team_seasons",
+                          "wnba_jerseys", "wnba_teams", "wnba_team_seasons",
+                          "wnba_players", "wnba_player_seasons"):
         list_type = "games"
     conn = get_conn(); cur = conn.cursor()
     cur.execute("""
@@ -4119,7 +4127,7 @@ def get_list_detail(list_id):
     # Fetch player items (for player/player_seasons lists)
     player_items = []
     list_type = lst.get("list_type") or "games"
-    if list_type in ("players", "player_seasons"):
+    if list_type in ("players", "player_seasons", "wnba_players", "wnba_player_seasons"):
         p_order = "ORDER BY sort_order ASC NULLS LAST, added_at ASC" if lst.get("is_ranked") else "ORDER BY added_at ASC"
         cur.execute(f"""
             SELECT id, player_id, player_name, team, season, sort_order, added_at
@@ -4138,7 +4146,7 @@ def get_list_detail(list_id):
 
     # Fetch jersey items (for jersey lists)
     jersey_items = []
-    if list_type == "jerseys":
+    if list_type in ("jerseys", "wnba_jerseys"):
         j_order = "ORDER BY sort_order ASC NULLS LAST, added_at ASC" if lst.get("is_ranked") else "ORDER BY added_at ASC"
         cur.execute(f"""
             SELECT jli.id, jli.jersey_id, jli.label, jli.image_url, jli.sort_order, jli.added_at,
@@ -4163,7 +4171,7 @@ def get_list_detail(list_id):
 
     # Fetch team items (for teams/team_seasons lists)
     team_items = []
-    if list_type in ("teams", "team_seasons"):
+    if list_type in ("teams", "team_seasons", "wnba_teams", "wnba_team_seasons"):
         t_order = "ORDER BY sort_order ASC NULLS LAST, added_at ASC" if lst.get("is_ranked") else "ORDER BY added_at ASC"
         cur.execute(f"""
             SELECT id, team_abbr, team_name, season, wins, losses, sort_order, added_at
@@ -4433,12 +4441,17 @@ def reorder_player_items(list_id):
 def search_teams():
     q         = request.args.get("q", "").strip()
     list_type = request.args.get("type", "teams")
+    league    = request.args.get("league", "nba").strip().lower()
+    # wnba_ prefix on list_type also implies wnba league
+    if list_type.startswith("wnba_"):
+        league = "wnba"
+        list_type = list_type[5:]  # strip prefix: wnba_team_seasons → team_seasons
     conn = get_conn(); cur = conn.cursor()
     results = []
     try:
         if list_type == "team_seasons":
-            conditions = ["1=1"]
-            params = []
+            conditions = ["ts.league = %s"]
+            params = [league]
             if q:
                 conditions.append("(ts.team_name ILIKE %s OR ts.team_abbr ILIKE %s)")
                 params.extend([f"%{q}%", f"%{q}%"])
@@ -4447,7 +4460,7 @@ def search_teams():
                 FROM team_seasons ts
                 WHERE {' AND '.join(conditions)}
                 ORDER BY ts.team_name, ts.season DESC
-                LIMIT 200
+                LIMIT 500
             """, params)
             for r in cur.fetchall():
                 results.append({
@@ -4458,8 +4471,8 @@ def search_teams():
                     "losses":   r.get("losses"),
                 })
         else:
-            conditions = ["1=1"]
-            params = []
+            conditions = ["league = %s"]
+            params = [league]
             if q:
                 conditions.append("(team_name ILIKE %s OR team_abbr ILIKE %s)")
                 params.extend([f"%{q}%", f"%{q}%"])
@@ -4561,9 +4574,11 @@ _EDITION_ORDER = {"Association Edition": 1, "Icon Edition": 2, "Statement Editio
 def search_jerseys():
     q      = request.args.get("q", "").strip()
     season = request.args.get("season", "").strip()
+    league = request.args.get("league", "nba").strip().lower()
     conn = get_conn(); cur = conn.cursor()
-    conditions = ["source_slug = 'lockervision'"]
-    params = []
+    source = "lockervision_wnba" if league == "wnba" else "lockervision"
+    conditions = ["source_slug = %s"]
+    params = [source]
     if season:
         conditions.append("year_range = %s")
         params.append(season)

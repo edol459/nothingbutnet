@@ -11,7 +11,7 @@ Usage:
   python backend/ingest/fetch_team_seasons.py --seasons 2016-17 2017-18
 """
 
-import os, sys, time, argparse
+import os, sys, time, argparse, concurrent.futures
 from dotenv import load_dotenv
 import psycopg2, psycopg2.extras
 
@@ -102,13 +102,20 @@ def wins_losses_from_games(cur, season):
 
 
 def wins_losses_from_api(season, delay):
-    """Fetch W-L from NBA API LeagueStandingsV3."""
+    """Fetch W-L from NBA API LeagueStandingsV3 with a hard thread timeout."""
     try:
         from nba_api.stats.endpoints import leaguestandingsv3
         time.sleep(delay)
-        s = leaguestandingsv3.LeagueStandingsV3(
-            season=season, season_type="Regular Season", timeout=30
-        )
+
+        def _fetch():
+            return leaguestandingsv3.LeagueStandingsV3(
+                season=season, season_type="Regular Season", timeout=30
+            )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(_fetch)
+            s = future.result(timeout=45)
+
         df = s.get_data_frames()[0]
         result = {}
         for _, row in df.iterrows():
@@ -120,6 +127,9 @@ def wins_losses_from_api(season, delay):
                 "losses": int(row.get("LOSSES", 0) or 0),
             }
         return result
+    except concurrent.futures.TimeoutError:
+        print(f"  ⚠ Timeout for {season} — skipping")
+        return {}
     except Exception as e:
         print(f"  ⚠ API error for {season}: {e}")
         return {}
@@ -175,35 +185,44 @@ def upsert(conn, rows):
 GAMES_START_YEAR = 2010
 
 
+def get_conn():
+    c = psycopg2.connect(DATABASE_URL)
+    c.cursor_factory = psycopg2.extras.RealDictCursor
+    return c
+
+
 def run():
     if not DATABASE_URL:
         print("❌ DATABASE_URL not set"); sys.exit(1)
 
-    conn = psycopg2.connect(DATABASE_URL)
-    conn.cursor_factory = psycopg2.extras.RealDictCursor
-
     if not args.dry_run:
+        conn = get_conn()
         init_tables(conn)
+        conn.close()
 
     all_seasons = args.seasons if args.seasons else season_list()
     print(f"\n🏀 Processing {len(all_seasons)} seasons")
-
-    cur = conn.cursor()
 
     for season in all_seasons:
         start_year = int(season[:4])
         print(f"\n{season}", end="  ", flush=True)
 
+        # Use a short-lived connection for DB reads before the (slow) API call
+        conn = get_conn()
+        cur = conn.cursor()
         team_abbrs = teams_in_season(cur, season)
+
         if not team_abbrs:
+            cur.close(); conn.close()
             print("no player data — skipping")
             continue
 
-        # Get W-L
         if start_year >= GAMES_START_YEAR:
             wl = wins_losses_from_games(cur, season)
             source = "games table"
+            cur.close(); conn.close()
         else:
+            cur.close(); conn.close()          # close before the slow API call
             wl = wins_losses_from_api(season, args.delay)
             source = "NBA API"
 
@@ -224,11 +243,12 @@ def run():
                 print(f"  {r}")
             print(f"  ... {len(rows)} total")
         else:
+            conn = get_conn()           # fresh connection for the write
             upsert(conn, rows)
+            conn.close()
             wl_count = sum(1 for r in rows if r.get("wins") is not None)
             print(f"{len(rows)} teams, {wl_count} with W-L  [{source}]")
 
-    cur.close(); conn.close()
     print("\n✅ Done")
 
 
