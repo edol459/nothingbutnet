@@ -89,7 +89,12 @@ def main():
     wnba_year = str(int(season.split('-')[0]) + 1) if '-' in season else season
 
     steps = [
-        # ── WNBA team W-L (computed from games table — Railway-safe) ──
+        # ── Team W-L records — both computed from games table, Railway-safe ──
+        (
+            'fetch_team_seasons.py',
+            'NBA team season records',
+            ['--seasons', season],
+        ),
         (
             'fetch_wnba_team_seasons.py',
             'WNBA team season records',
