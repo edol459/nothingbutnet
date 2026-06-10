@@ -4073,9 +4073,7 @@ def create_list():
     desc      = (body.get("description") or "").strip() or None
     is_ranked = bool(body.get("isRanked", False))
     list_type = (body.get("listType") or "games").strip()
-    if list_type not in ("games", "players", "player_seasons", "jerseys", "teams", "team_seasons",
-                          "wnba_jerseys", "wnba_teams", "wnba_team_seasons",
-                          "wnba_players", "wnba_player_seasons"):
+    if list_type not in ("games", "players", "player_seasons", "jerseys", "teams", "team_seasons"):
         list_type = "games"
     conn = get_conn(); cur = conn.cursor()
     cur.execute("""
@@ -4127,7 +4125,7 @@ def get_list_detail(list_id):
     # Fetch player items (for player/player_seasons lists)
     player_items = []
     list_type = lst.get("list_type") or "games"
-    if list_type in ("players", "player_seasons", "wnba_players", "wnba_player_seasons"):
+    if list_type in ("players", "player_seasons"):
         p_order = "ORDER BY sort_order ASC NULLS LAST, added_at ASC" if lst.get("is_ranked") else "ORDER BY added_at ASC"
         cur.execute(f"""
             SELECT id, player_id, player_name, team, season, sort_order, added_at
@@ -4146,7 +4144,7 @@ def get_list_detail(list_id):
 
     # Fetch jersey items (for jersey lists)
     jersey_items = []
-    if list_type in ("jerseys", "wnba_jerseys"):
+    if list_type == "jerseys":
         j_order = "ORDER BY sort_order ASC NULLS LAST, added_at ASC" if lst.get("is_ranked") else "ORDER BY added_at ASC"
         cur.execute(f"""
             SELECT jli.id, jli.jersey_id, jli.label, jli.image_url, jli.sort_order, jli.added_at,
@@ -4171,7 +4169,7 @@ def get_list_detail(list_id):
 
     # Fetch team items (for teams/team_seasons lists)
     team_items = []
-    if list_type in ("teams", "team_seasons", "wnba_teams", "wnba_team_seasons"):
+    if list_type in ("teams", "team_seasons"):
         t_order = "ORDER BY sort_order ASC NULLS LAST, added_at ASC" if lst.get("is_ranked") else "ORDER BY added_at ASC"
         cur.execute(f"""
             SELECT id, team_abbr, team_name, season, wins, losses, sort_order, added_at
@@ -4442,10 +4440,6 @@ def search_teams():
     q         = request.args.get("q", "").strip()
     list_type = request.args.get("type", "teams")
     league    = request.args.get("league", "nba").strip().lower()
-    # wnba_ prefix on list_type also implies wnba league
-    if list_type.startswith("wnba_"):
-        league = "wnba"
-        list_type = list_type[5:]  # strip prefix: wnba_team_seasons → team_seasons
     conn = get_conn(); cur = conn.cursor()
     results = []
     try:
