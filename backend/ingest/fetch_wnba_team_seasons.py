@@ -22,6 +22,37 @@ parser.add_argument("--seasons",  nargs="*", help="Specific WNBA seasons e.g. 20
 parser.add_argument("--delay",    type=float, default=2.0)
 args = parser.parse_args()
 
+# The NBA API returns team nicknames as TeamAbbreviation for WNBA.
+# Map those to the proper 2-3 letter abbreviations used everywhere else.
+NICKNAME_TO_ABBR = {
+    "ACES":         "LVA",
+    "DREAM":        "ATL",
+    "FEVER":        "IND",
+    "FIRE":         "PDX",
+    "LIBERTY":      "NYL",
+    "LYNX":         "MIN",
+    "MERCURY":      "PHX",
+    "MYSTICS":      "WAS",
+    "SKY":          "CHI",
+    "SPARKS":       "LAS",
+    "STARS":        "SAS",
+    "STORM":        "SEA",
+    "SUN":          "CON",
+    "TEMPO":        "TOR",
+    "VALKYRIES":    "GSV",
+    "WINGS":        "DAL",
+    # Historical defunct teams
+    "COMETS":       "HOU",
+    "MONARCHS":     "SAC",
+    "MIRACLE":      "ORL",
+    "ROCKERS":      "CLE",
+    "SHOCK":        "DET",
+    "SILVER-STARS": "SAS",
+    "SOL":          "MIA",
+    "STARZZ":       "UTA",
+    "STING":        "CHA",
+}
+
 TEAM_NAMES = {
     "ATL": "Atlanta Dream",
     "CHI": "Chicago Sky",
@@ -36,24 +67,22 @@ TEAM_NAMES = {
     "PHX": "Phoenix Mercury",
     "PDX": "Portland Fire",
     "SEA": "Seattle Storm",
+    "SAS": "San Antonio Stars",
     "TOR": "Toronto Tempo",
     "WAS": "Washington Mystics",
     # Historical
-    "SAS": "San Antonio Stars",
-    "TUL": "Tulsa Shock",
-    "DET": "Detroit Shock",
-    "HOU": "Houston Comets",
-    "SAC": "Sacramento Monarchs",
     "CHA": "Charlotte Sting",
     "CLE": "Cleveland Rockers",
-    "ORL": "Orlando Miracle",
-    "UTA": "Utah Starzz",
+    "DET": "Detroit Shock",
+    "HOU": "Houston Comets",
     "MIA": "Miami Sol",
-    "POR": "Portland Fire",
+    "ORL": "Orlando Miracle",
+    "SAC": "Sacramento Monarchs",
+    "UTA": "Utah Starzz",
 }
 
+
 def season_list():
-    """WNBA seasons from 1997 to current."""
     return [str(y) for y in range(1997, 2027)]
 
 
@@ -78,9 +107,10 @@ def wins_losses_from_api(season, delay):
         df = s.get_data_frames()[0]
         result = {}
         for _, row in df.iterrows():
-            abbr = row.get("TeamAbbreviation") or row.get("TeamSlug", "").upper()
-            if not abbr:
+            raw = (row.get("TeamAbbreviation") or row.get("TeamSlug", "")).strip().upper()
+            if not raw:
                 continue
+            abbr = NICKNAME_TO_ABBR.get(raw, raw)
             result[abbr] = {
                 "wins":   int(row.get("WINS",   0) or 0),
                 "losses": int(row.get("LOSSES", 0) or 0),
@@ -102,13 +132,34 @@ def get_conn():
 
 def ensure_league_column(conn):
     cur = conn.cursor()
-    cur.execute("""
-        ALTER TABLE team_seasons ADD COLUMN IF NOT EXISTS league TEXT NOT NULL DEFAULT 'nba'
-    """)
-    cur.execute("""
-        CREATE INDEX IF NOT EXISTS idx_team_seasons_league ON team_seasons(league)
-    """)
+    cur.execute("ALTER TABLE team_seasons ADD COLUMN IF NOT EXISTS league TEXT NOT NULL DEFAULT 'nba'")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_team_seasons_league ON team_seasons(league)")
     conn.commit(); cur.close()
+
+
+def fix_nickname_abbrs(conn):
+    """Rename any existing rows that used nickname abbreviations (ACES, DREAM, etc.)."""
+    cur = conn.cursor()
+    updated = 0
+    for nickname, abbr in NICKNAME_TO_ABBR.items():
+        name = TEAM_NAMES.get(abbr, abbr)
+        # Update only if proper-abbr row doesn't already exist for that season
+        cur.execute("""
+            UPDATE team_seasons
+            SET team_abbr = %s, team_name = %s
+            WHERE league = 'wnba'
+              AND team_abbr = %s
+              AND NOT EXISTS (
+                SELECT 1 FROM team_seasons t2
+                WHERE t2.league = 'wnba' AND t2.team_abbr = %s AND t2.season = team_seasons.season
+              )
+        """, (abbr, name, nickname, abbr))
+        updated += cur.rowcount
+        # Delete any orphaned nickname rows that couldn't be renamed (duplicate season)
+        cur.execute("DELETE FROM team_seasons WHERE league='wnba' AND team_abbr=%s", (nickname,))
+    conn.commit(); cur.close()
+    if updated:
+        print(f"  ✅ Renamed {updated} nickname-based rows to proper abbreviations")
 
 
 def upsert(conn, rows):
@@ -134,8 +185,9 @@ def run():
 
     conn = get_conn()
     ensure_league_column(conn)
-    conn.close()
     print("✅ league column ready")
+    fix_nickname_abbrs(conn)
+    conn.close()
 
     all_seasons = args.seasons if args.seasons else season_list()
     print(f"\n🏀 Processing {len(all_seasons)} WNBA seasons")
