@@ -86,6 +86,36 @@ def season_list():
     return [str(y) for y in range(1997, 2027)]
 
 
+def wins_losses_from_games(cur, season):
+    """Compute W-L for each WNBA team in a season from the games table.
+    Works from Railway (no external API needed)."""
+    cur.execute("""
+        SELECT home_team_abbr AS abbr,
+               SUM(CASE WHEN home_score > away_score THEN 1 ELSE 0 END) AS wins,
+               SUM(CASE WHEN home_score < away_score THEN 1 ELSE 0 END) AS losses
+        FROM games
+        WHERE league = 'wnba' AND season = %s AND season_type = 'Regular Season'
+          AND home_score IS NOT NULL
+        GROUP BY home_team_abbr
+        UNION ALL
+        SELECT away_team_abbr AS abbr,
+               SUM(CASE WHEN away_score > home_score THEN 1 ELSE 0 END) AS wins,
+               SUM(CASE WHEN away_score < home_score THEN 1 ELSE 0 END) AS losses
+        FROM games
+        WHERE league = 'wnba' AND season = %s AND season_type = 'Regular Season'
+          AND away_score IS NOT NULL
+        GROUP BY away_team_abbr
+    """, (season, season))
+    totals = {}
+    for r in cur.fetchall():
+        abbr = r["abbr"]
+        if abbr not in totals:
+            totals[abbr] = {"wins": 0, "losses": 0}
+        totals[abbr]["wins"]   += int(r["wins"] or 0)
+        totals[abbr]["losses"] += int(r["losses"] or 0)
+    return totals
+
+
 def wins_losses_from_api(season, delay):
     """Fetch WNBA W-L from NBA API with a hard thread timeout."""
     try:
@@ -195,7 +225,17 @@ def run():
     for season in all_seasons:
         print(f"\n{season}", end="  ", flush=True)
 
-        wl = wins_losses_from_api(season, args.delay)
+        # Try games table first (works from Railway, no API rate limits)
+        conn = get_conn()
+        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        wl   = wins_losses_from_games(cur, season)
+        cur.close(); conn.close()
+
+        source = "games table"
+        if not wl:
+            # Fall back to NBA API for seasons without game data (pre-2024)
+            wl     = wins_losses_from_api(season, args.delay)
+            source = "nba api"
 
         if not wl:
             print("no data — skipping")
@@ -220,7 +260,7 @@ def run():
             conn = get_conn()
             upsert(conn, rows)
             conn.close()
-            print(f"{len(rows)} teams  [{season}]")
+            print(f"{len(rows)} teams  [{season}]  ({source})")
 
     print("\n✅ Done")
 

@@ -106,6 +106,12 @@ def main():
     season_args = ['--season', season, '--season-type', season_type]
 
     steps = [
+        # ── NBA team W-L (current season, uses games table + NBA API for pre-2010) ──
+        (
+            'fetch_team_seasons.py',
+            'NBA team season records',
+            ['--seasons', season],
+        ),
         # ── NBA API stats (require residential IP) ────────────
         (
             'fetch_season.py',

@@ -85,7 +85,16 @@ def main():
 
     season_args = ['--season', season, '--season-type', season_type]
 
+    # WNBA season = calendar year of the second half of NBA season (e.g. "2025-26" → "2026")
+    wnba_year = str(int(season.split('-')[0]) + 1) if '-' in season else season
+
     steps = [
+        # ── WNBA team W-L (computed from games table — Railway-safe) ──
+        (
+            'fetch_wnba_team_seasons.py',
+            'WNBA team season records',
+            ['--seasons', wnba_year],
+        ),
         # ── Players (CDN-friendly, works from cloud) ───────────
         (
             'fetch_players.py',
