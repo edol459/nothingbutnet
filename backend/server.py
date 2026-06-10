@@ -364,6 +364,12 @@ def _ensure_tables():
             CREATE INDEX IF NOT EXISTS idx_team_seasons_league ON team_seasons(league)
         """)
         cur.execute("""
+            ALTER TABLE team_list_items ADD COLUMN IF NOT EXISTS league TEXT NOT NULL DEFAULT 'nba'
+        """)
+        cur.execute("""
+            ALTER TABLE player_list_items ADD COLUMN IF NOT EXISTS league TEXT NOT NULL DEFAULT 'nba'
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS wnba_player_game_stats (
                 player_id   INTEGER NOT NULL,
                 player_name TEXT,
@@ -4128,7 +4134,7 @@ def get_list_detail(list_id):
     if list_type in ("players", "player_seasons"):
         p_order = "ORDER BY sort_order ASC NULLS LAST, added_at ASC" if lst.get("is_ranked") else "ORDER BY added_at ASC"
         cur.execute(f"""
-            SELECT id, player_id, player_name, team, season, sort_order, added_at
+            SELECT id, player_id, player_name, team, season, sort_order, added_at, league
             FROM player_list_items WHERE list_id = %s {p_order}
         """, (list_id,))
         for r in cur.fetchall():
@@ -4140,6 +4146,7 @@ def get_list_detail(list_id):
                 "season":     r.get("season"),
                 "sortOrder":  r.get("sort_order"),
                 "addedAt":    str(r["added_at"]),
+                "league":     r.get("league") or "nba",
             })
 
     # Fetch jersey items (for jersey lists)
@@ -4172,7 +4179,7 @@ def get_list_detail(list_id):
     if list_type in ("teams", "team_seasons"):
         t_order = "ORDER BY sort_order ASC NULLS LAST, added_at ASC" if lst.get("is_ranked") else "ORDER BY added_at ASC"
         cur.execute(f"""
-            SELECT id, team_abbr, team_name, season, wins, losses, sort_order, added_at
+            SELECT id, team_abbr, team_name, season, wins, losses, sort_order, added_at, league
             FROM team_list_items WHERE list_id = %s {t_order}
         """, (list_id,))
         for r in cur.fetchall():
@@ -4185,6 +4192,7 @@ def get_list_detail(list_id):
                 "losses":    r.get("losses"),
                 "sortOrder": r.get("sort_order"),
                 "addedAt":   str(r["added_at"]),
+                "league":    r.get("league") or "nba",
             })
 
     cur.close(); conn.close()
@@ -4374,6 +4382,7 @@ def add_player_to_list(list_id):
     player_name = (body.get("playerName") or "").strip()
     team        = body.get("team")
     season      = body.get("season")
+    league      = (body.get("league") or "nba").strip().lower()
     if not player_name:
         return jsonify({"error": "playerName required"}), 400
     conn = get_conn(); cur = conn.cursor()
@@ -4387,16 +4396,16 @@ def add_player_to_list(list_id):
         cur.execute("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM player_list_items WHERE list_id=%s", (list_id,))
         sort_order = cur.fetchone()["n"]
     cur.execute("""
-        INSERT INTO player_list_items (list_id, player_id, player_name, team, season, sort_order)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        RETURNING id, player_id, player_name, team, season, sort_order, added_at
-    """, (list_id, player_id, player_name, team, season, sort_order))
+        INSERT INTO player_list_items (list_id, player_id, player_name, team, season, sort_order, league)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING id, player_id, player_name, team, season, sort_order, added_at, league
+    """, (list_id, player_id, player_name, team, season, sort_order, league))
     row = cur.fetchone()
     cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
     conn.commit(); cur.close(); conn.close()
     return jsonify({"item": {
         "id": row["id"], "playerId": row.get("player_id"), "playerName": row["player_name"],
-        "team": row.get("team"), "season": row.get("season"),
+        "team": row.get("team"), "season": row.get("season"), "league": row.get("league", "nba"),
         "sortOrder": row.get("sort_order"), "addedAt": str(row["added_at"]),
     }}), 201
 
@@ -4500,6 +4509,7 @@ def add_team_to_list(list_id):
     season    = body.get("season")
     wins      = body.get("wins")
     losses    = body.get("losses")
+    league    = (body.get("league") or "nba").strip().lower()
     if not team_abbr or not team_name:
         return jsonify({"error": "teamAbbr and teamName required"}), 400
     conn = get_conn(); cur = conn.cursor()
@@ -4513,16 +4523,17 @@ def add_team_to_list(list_id):
         cur.execute("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM team_list_items WHERE list_id=%s", (list_id,))
         sort_order = cur.fetchone()["n"]
     cur.execute("""
-        INSERT INTO team_list_items (list_id, team_abbr, team_name, season, wins, losses, sort_order)
-        VALUES (%s,%s,%s,%s,%s,%s,%s)
-        RETURNING id, team_abbr, team_name, season, wins, losses, sort_order, added_at
-    """, (list_id, team_abbr, team_name, season, wins, losses, sort_order))
+        INSERT INTO team_list_items (list_id, team_abbr, team_name, season, wins, losses, sort_order, league)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+        RETURNING id, team_abbr, team_name, season, wins, losses, sort_order, added_at, league
+    """, (list_id, team_abbr, team_name, season, wins, losses, sort_order, league))
     row = cur.fetchone()
     cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
     conn.commit(); cur.close(); conn.close()
     return jsonify({"item": {
         "id": row["id"], "teamAbbr": row["team_abbr"], "teamName": row["team_name"],
         "season": row.get("season"), "wins": row.get("wins"), "losses": row.get("losses"),
+        "league": row.get("league", "nba"),
         "sortOrder": row.get("sort_order"), "addedAt": str(row["added_at"]),
     }}), 201
 
