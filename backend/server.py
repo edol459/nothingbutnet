@@ -59,7 +59,7 @@ def aasa():
         mimetype='application/json'
     )
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL  = os.getenv("DATABASE_URL")
 
 
 def get_current_season() -> str:
@@ -465,6 +465,41 @@ def _ensure_tables():
             CREATE INDEX IF NOT EXISTS idx_xp_events_user_type_ref
             ON xp_events(user_id, event_type, reference_id)
         """)
+        # Game predictions
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS game_odds (
+                game_id        TEXT PRIMARY KEY,
+                league         TEXT NOT NULL,
+                home_team      TEXT NOT NULL,
+                away_team      TEXT NOT NULL,
+                home_odds      INTEGER,
+                away_odds      INTEGER,
+                game_starts_at TIMESTAMPTZ,
+                fetched_at     TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS game_predictions (
+                id               SERIAL PRIMARY KEY,
+                user_id          INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                game_id          TEXT NOT NULL,
+                league           TEXT NOT NULL DEFAULT 'nba',
+                predicted_winner TEXT NOT NULL,
+                home_team        TEXT NOT NULL,
+                away_team        TEXT NOT NULL,
+                home_odds        INTEGER,
+                away_odds        INTEGER,
+                game_starts_at   TIMESTAMPTZ,
+                resolved_at      TIMESTAMPTZ,
+                actual_winner    TEXT,
+                is_correct       BOOLEAN,
+                xp_change        INTEGER,
+                created_at       TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(user_id, game_id)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_predictions_game ON game_predictions(game_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_predictions_user ON game_predictions(user_id)")
         conn.commit()
         cur.close(); conn.close()
     except Exception as e:
@@ -540,6 +575,296 @@ def _grant_xp(cur, user_id: int, event_type: str, reference_id: str, amount: int
         (amount, user_id)
     )
     return cur.fetchone()["xp"]
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Game predictions — odds, submission, resolution
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# ESPN uses different abbreviations for 6 NBA teams — map them to ours
+_ESPN_TO_OURS = {
+    "GS":   "GSW",
+    "NO":   "NOP",
+    "NY":   "NYK",
+    "SA":   "SAS",
+    "UTAH": "UTA",
+    "WSH":  "WAS",
+}
+
+# WNBA abbreviation corrections from ESPN
+_ESPN_TO_OURS_WNBA = {
+    "WSH": "WSH",  # same in WNBA
+}
+
+_PREDICTION_XP_CORRECT = 50
+_PREDICTION_XP_WRONG   = -50
+_ODDS_CACHE_SECONDS    = 4 * 3600  # refresh at most once per 4 hours
+
+
+def _fetch_and_cache_odds(game_id: str, league: str, home_abbr: str, away_abbr: str) -> dict | None:
+    """Fetch odds from ESPN scoreboard, cache in game_odds, return the row dict."""
+    import requests as _req
+
+    sport = "wnba" if league == "wnba" else "nba"
+    mapping = _ESPN_TO_OURS_WNBA if league == "wnba" else _ESPN_TO_OURS
+
+    try:
+        resp = _req.get(
+            f"https://site.api.espn.com/apis/site/v2/sports/basketball/{sport}/scoreboard",
+            timeout=8,
+        )
+        resp.raise_for_status()
+        events = resp.json().get("events", [])
+    except Exception as e:
+        print(f"[odds] ESPN fetch error: {e}", flush=True)
+        return None
+
+    for event in events:
+        comp = (event.get("competitions") or [{}])[0]
+        competitors = comp.get("competitors", [])
+        if len(competitors) < 2:
+            continue
+
+        # ESPN lists home first (homeAway="home"), away second
+        espn_home = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0])
+        espn_away = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1])
+
+        h = mapping.get(espn_home["team"]["abbreviation"], espn_home["team"]["abbreviation"])
+        a = mapping.get(espn_away["team"]["abbreviation"], espn_away["team"]["abbreviation"])
+
+        if h != home_abbr or a != away_abbr:
+            continue
+
+        # Found the matching game — extract moneyline odds
+        odds_list = comp.get("odds", [])
+        if not odds_list:
+            return None
+
+        ml = odds_list[0].get("moneyline", {})
+        try:
+            home_odds = int(ml["home"]["close"]["odds"])
+            away_odds = int(ml["away"]["close"]["odds"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+        starts_at = event.get("date")  # ISO string e.g. "2026-06-14T00:30Z"
+
+        try:
+            conn = get_conn()
+            cur  = conn.cursor()
+            cur.execute("""
+                INSERT INTO game_odds
+                    (game_id, league, home_team, away_team, home_odds, away_odds, game_starts_at, fetched_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (game_id) DO UPDATE SET
+                    home_odds      = EXCLUDED.home_odds,
+                    away_odds      = EXCLUDED.away_odds,
+                    game_starts_at = EXCLUDED.game_starts_at,
+                    fetched_at     = NOW()
+                RETURNING *
+            """, (game_id, league, home_abbr, away_abbr, home_odds, away_odds, starts_at))
+            row = dict(cur.fetchone())
+            conn.commit()
+            cur.close(); conn.close()
+            return row
+        except Exception as e:
+            print(f"[odds] db error: {e}", flush=True)
+            return None
+
+    return None  # game not found in ESPN scoreboard
+
+
+def _resolve_game_predictions(game_id: str, home_abbr: str, away_abbr: str,
+                               home_score: int, away_score: int) -> None:
+    """Resolve all pending predictions for a finished game. Grants +50 XP for correct
+    picks and deducts 50 XP (floored at 0) for wrong ones. Safe to call multiple times."""
+    if home_score == away_score:
+        return  # no winner in overtime tie — skip (shouldn't happen in NBA/WNBA)
+    winner = home_abbr if home_score > away_score else away_abbr
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT gp.id, gp.user_id, gp.predicted_winner
+            FROM game_predictions gp
+            WHERE gp.game_id = %s AND gp.resolved_at IS NULL
+        """, (game_id,))
+        rows = cur.fetchall()
+        if not rows:
+            cur.close(); conn.close()
+            return
+        for row in rows:
+            uid      = row["user_id"]
+            correct  = (row["predicted_winner"] == winner)
+            if correct:
+                xp_delta = _PREDICTION_XP_CORRECT
+                cur.execute("UPDATE users SET xp = xp + %s WHERE id = %s", (xp_delta, uid))
+            else:
+                # Deduct up to 50 XP but never go below 0
+                cur.execute("""
+                    UPDATE users
+                    SET xp = GREATEST(0, xp + %s)
+                    WHERE id = %s
+                    RETURNING xp
+                """, (_PREDICTION_XP_WRONG, uid))
+                new_xp = cur.fetchone()["xp"]
+                # Record the actual amount deducted (might be less than 50 if near floor)
+                cur.execute("SELECT xp FROM users WHERE id = %s", (uid,))
+                xp_delta = _PREDICTION_XP_WRONG  # logged as -50 regardless of floor
+
+            event_type = "prediction_correct" if correct else "prediction_wrong"
+            cur.execute("""
+                INSERT INTO xp_events (user_id, event_type, reference_id, xp_amount)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
+            """, (uid, event_type, game_id, xp_delta))
+
+            cur.execute("""
+                UPDATE game_predictions
+                SET resolved_at   = NOW(),
+                    actual_winner = %s,
+                    is_correct    = %s,
+                    xp_change     = %s
+                WHERE id = %s
+            """, (winner, correct, xp_delta, row["id"]))
+
+        conn.commit()
+        cur.close(); conn.close()
+        print(f"[predictions] resolved {len(rows)} predictions for {game_id}, winner={winner}", flush=True)
+    except Exception as e:
+        print(f"[predictions] resolution error for {game_id}: {e}", flush=True)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/games/<game_id>/odds
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/games/<game_id>/odds")
+def get_game_odds(game_id):
+    home = (request.args.get("home") or "").upper()
+    away = (request.args.get("away") or "").upper()
+    league = "wnba" if str(game_id).startswith("10") else "nba"
+    try:
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("SELECT * FROM game_odds WHERE game_id = %s", (game_id,))
+        cached = cur.fetchone()
+        cur.close(); conn.close()
+
+        # Use cache if fresh enough
+        if cached:
+            age = (_dt.now(_tz.utc) - cached["fetched_at"].replace(tzinfo=_tz.utc)).total_seconds()
+            if age < _ODDS_CACHE_SECONDS:
+                return jsonify({
+                    "game_id": game_id, "home_team": cached["home_team"],
+                    "away_team": cached["away_team"], "home_odds": cached["home_odds"],
+                    "away_odds": cached["away_odds"],
+                    "game_starts_at": cached["game_starts_at"].isoformat() if cached["game_starts_at"] else None,
+                })
+
+        if not home or not away:
+            return jsonify({"error": "home and away query params required"}), 400
+
+        row = _fetch_and_cache_odds(game_id, league, home, away)
+        if not row:
+            return jsonify({"error": "odds not available"}), 404
+
+        return jsonify({
+            "game_id": game_id, "home_team": row["home_team"],
+            "away_team": row["away_team"], "home_odds": row["home_odds"],
+            "away_odds": row["away_odds"],
+            "game_starts_at": row["game_starts_at"].isoformat() if row["game_starts_at"] else None,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# POST /api/games/<game_id>/predict   — submit / update prediction
+# GET  /api/games/<game_id>/predict   — fetch own prediction
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/games/<game_id>/predict", methods=["POST"])
+@login_required
+def submit_prediction(game_id):
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    user = current_user()
+    body = request.get_json() or {}
+    predicted_winner = (body.get("predicted_winner") or "").upper()
+    if not predicted_winner:
+        return jsonify({"error": "predicted_winner required"}), 400
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+
+        # Game must not be final
+        cur.execute("SELECT status FROM games WHERE game_id = %s", (game_id,))
+        game_row = cur.fetchone()
+        if game_row and game_row["status"] == "Final":
+            cur.close(); conn.close()
+            return jsonify({"error": "Game is already final"}), 409
+
+        # Odds must exist (they hold the start time and validate the game)
+        cur.execute("SELECT * FROM game_odds WHERE game_id = %s", (game_id,))
+        odds_row = cur.fetchone()
+        if not odds_row:
+            cur.close(); conn.close()
+            return jsonify({"error": "No odds available for this game"}), 404
+
+        # Must predict before tipoff
+        starts_at = odds_row["game_starts_at"]
+        if starts_at:
+            now = _dt.now(_tz.utc)
+            starts_utc = starts_at if starts_at.tzinfo else starts_at.replace(tzinfo=_tz.utc)
+            if now >= starts_utc:
+                cur.close(); conn.close()
+                return jsonify({"error": "Predictions close at tipoff"}), 409
+            if (starts_utc - now) > _td(hours=48):
+                cur.close(); conn.close()
+                return jsonify({"error": "Predictions open within 48 hours of tipoff"}), 409
+
+        league = "wnba" if str(game_id).startswith("10") else "nba"
+        cur.execute("""
+            INSERT INTO game_predictions
+                (user_id, game_id, league, predicted_winner, home_team, away_team,
+                 home_odds, away_odds, game_starts_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (user_id, game_id) DO UPDATE SET
+                predicted_winner = EXCLUDED.predicted_winner,
+                created_at       = NOW()
+            WHERE game_predictions.resolved_at IS NULL
+            RETURNING *
+        """, (user["id"], game_id, league, predicted_winner,
+              odds_row["home_team"], odds_row["away_team"],
+              odds_row["home_odds"], odds_row["away_odds"],
+              odds_row["game_starts_at"]))
+        pred = cur.fetchone()
+        conn.commit()
+        cur.close(); conn.close()
+        if not pred:
+            return jsonify({"error": "Cannot change a resolved prediction"}), 409
+        return jsonify({"prediction": dict(pred)}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/games/<game_id>/predict", methods=["GET"])
+@login_required
+def get_my_prediction(game_id):
+    user = current_user()
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT * FROM game_predictions WHERE user_id = %s AND game_id = %s
+        """, (user["id"], game_id))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if not row:
+            return jsonify({"prediction": None})
+        return jsonify({"prediction": dict(row)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 def _fix_wnba_league_column():
@@ -2586,6 +2911,12 @@ def _upsert_game_from_boxscore(game_id: str, game: dict, league: str = "nba"):
         conn.commit()
         cur.close()
         conn.close()
+        # Resolve any pending predictions now that the game is final
+        threading.Thread(
+            target=_resolve_game_predictions,
+            args=(game_id, home_abbr, away_abbr, home_score, away_score),
+            daemon=True,
+        ).start()
     except Exception:
         pass  # Never break the main response
 
