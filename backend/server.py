@@ -1882,6 +1882,19 @@ def _enrich_games_with_records(games):
         g["avg_stars"]    = rs.get("avg_stars")
         g["review_count"] = rs.get("review_count", 0)
 
+    # ── Drop ghost playoff games (series already decided, game never played) ──
+    # Keep a game if: not a playoff game, OR already final, OR series still alive.
+    # series_wins defaults to 0 if DB failed, so we fail-safe toward showing games.
+    games[:] = [
+        g for g in games
+        if not str(g.get("gameId", "")).startswith("004")
+        or int(g.get("gameStatus", 1) or 1) == 3
+        or max(
+            (g.get("away", {}).get("series_wins", 0) or 0),
+            (g.get("home", {}).get("series_wins", 0) or 0),
+        ) < 4
+    ]
+
 
 # ── /api/scoreboard?date=YYYY-MM-DD ──────────────────────────────
 @app.route("/api/scoreboard")
