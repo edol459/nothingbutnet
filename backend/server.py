@@ -1510,7 +1510,7 @@ def _fetch_nba_schedule() -> dict | None:
         return _schedule_cache["data"]
     try:
         url  = "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json"
-        resp = _requests.get(url, headers=_CDN_HEADERS, timeout=20)
+        resp = _cdn_get(url, headers=_CDN_HEADERS, timeout=20)
         resp.raise_for_status()
         data = resp.json()
         _schedule_cache["data"] = data
@@ -1600,7 +1600,7 @@ def _crosscheck_tipoff(games: list, nba: bool = True) -> None:
             cdn_base = "https://cdn.nba.com" if nba else "https://cdn.wnba.com"
             url = f"{cdn_base}/static/json/liveData/boxscore/boxscore_{gid}.json"
             hdrs = _CDN_HEADERS if nba else _WNBA_CDN_HEADERS
-            r = _requests.get(url, headers=hdrs, timeout=5)
+            r = _cdn_get(url, headers=hdrs, timeout=5)
             r.raise_for_status()
             box = r.json().get("game", {})
             real_status = int(box.get("gameStatus", 1) or 1)
@@ -1756,6 +1756,20 @@ _WNBA_CDN_HEADERS = {
     "sec-fetch-site": "cross-site",
 }
 
+# The NBA/WNBA CDNs (Akamai) sit behind Akamai Bot Manager, which fingerprints the
+# client's TLS handshake (JA3) and serves a challenge HTML page to plain HTTP clients
+# like `requests`/`urllib`.  curl_cffi replicates Chrome's exact TLS+HTTP2 fingerprint,
+# so Akamai treats it as a real browser and returns the JSON.  Use this for every
+# cdn.nba.com / cdn.wnba.com request.
+from curl_cffi import requests as _cffi_requests
+
+def _cdn_get(url, headers=None, timeout=10, impersonate="chrome"):
+    """GET a CDN URL with a Chrome TLS fingerprint to pass Akamai Bot Manager.
+
+    Returns a curl_cffi Response, which is API-compatible with the requests.Response
+    used elsewhere (.json(), .text, .status_code, .headers, .raise_for_status())."""
+    return _cffi_requests.get(url, headers=headers, timeout=timeout, impersonate=impersonate)
+
 
 def _fetch_boxscores_parallel(game_ids, timeout=8):
     """Fetch CDN boxscores for multiple game IDs in parallel.
@@ -1763,7 +1777,7 @@ def _fetch_boxscores_parallel(game_ids, timeout=8):
     def _fetch_one(gid):
         try:
             url  = f"https://cdn.nba.com/static/json/liveData/boxscore/boxscore_{gid}.json"
-            resp = _requests.get(url, headers=_CDN_HEADERS, timeout=timeout)
+            resp = _cdn_get(url, headers=_CDN_HEADERS, timeout=timeout)
             if resp.status_code == 200:
                 return gid, resp.json().get("game", {})
         except Exception:
@@ -1986,7 +2000,7 @@ def get_scoreboard():
     if is_today:
         try:
             cdn_url  = "https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json"
-            cdn_resp = _requests.get(cdn_url, headers=_CDN_HEADERS, timeout=8)
+            cdn_resp = _cdn_get(cdn_url, headers=_CDN_HEADERS, timeout=8)
             cdn_resp.raise_for_status()
             cdn_data  = cdn_resp.json()
             cdn_games = cdn_data.get("scoreboard", {}).get("games", [])
@@ -2483,7 +2497,7 @@ def get_top_performers():
     if not date:
         try:
             url  = "https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json"
-            resp = _requests.get(url, headers=_CDN_HEADERS, timeout=12)
+            resp = _cdn_get(url, headers=_CDN_HEADERS, timeout=12)
             resp.raise_for_status()
             sb_data    = resp.json()
             raw_games  = sb_data.get("scoreboard", {}).get("games", [])
@@ -2753,227 +2767,31 @@ def preview_page():
     return app.send_static_file("preview.html")
 
 
-def _is_espn_wnba_id(game_id: str) -> bool:
-    """ESPN WNBA IDs are 9-digit numbers (not NBA '00…' or WNBA CDN '10…')."""
-    s = str(game_id)
-    return len(s) == 9 and s.isdigit()
-
-
-def _nameI_from_display(full_name: str) -> str:
-    parts = full_name.strip().split()
-    return f"{parts[0][0]}. {parts[-1]}" if len(parts) >= 2 else full_name
-
-
-def _parse_espn_wnba_boxscore(espn_game_id: str) -> dict | None:
-    """Fetch ESPN WNBA summary and return a CDN-compatible boxscore dict."""
-    url = (
-        "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/"
-        f"summary?event={espn_game_id}"
-    )
-    resp = _requests.get(url, timeout=12)
-    resp.raise_for_status()
-    d = resp.json()
-
-    bs_teams = d.get("boxscore", {}).get("players", [])
-    if not bs_teams:
-        return None
-
-    # Status
-    header = d.get("header", {})
-    comp = (header.get("competitions") or [{}])[0]
-    status = comp.get("status", {})
-    stype = status.get("type", {})
-    if stype.get("state") == "in":
-        game_status = 2
-    elif stype.get("completed"):
-        game_status = 3
-    else:
-        game_status = 1
-    game_status_text = stype.get("shortDetail", "")
-    period = status.get("period", 4)
-    game_clock = status.get("displayClock", "")
-    game_time = comp.get("date", "")
-
-    # Score per team id
-    score_map = {c.get("id"): int(c.get("score", 0) or 0) for c in comp.get("competitors", [])}
-    home_away = {c.get("id"): c.get("homeAway", "away") for c in comp.get("competitors", [])}
-
-    def parse_team(block):
-        team_info = block.get("team", {})
-        stats_block = (block.get("statistics") or [{}])[0]
-        labels = stats_block.get("labels", [])
-        athletes = stats_block.get("athletes", [])
-
-        players = []
-        for entry in athletes:
-            athlete = entry.get("athlete", {})
-            stats_arr = entry.get("stats", [])
-            dnp = entry.get("didNotPlay", False)
-
-            person_id = int(athlete.get("id") or 0)
-            name = athlete.get("displayName", "")
-            jersey = athlete.get("jersey", "")
-            pos = (athlete.get("position") or {}).get("abbreviation", "")
-            starter = "1" if entry.get("starter") else "0"
-
-            if dnp or not stats_arr:
-                players.append({
-                    "personId": person_id,
-                    "name": name,
-                    "nameI": _nameI_from_display(name),
-                    "jerseyNum": jersey,
-                    "position": pos,
-                    "starter": starter,
-                    "played": "0",
-                    "statistics": {"minutesCalculated": "PT00M00.00S", "minutes": "PT00M00.00S", "points": 0},
-                })
-                continue
-
-            sv = dict(zip(labels, stats_arr))
-
-            def _int(k, default=0):
-                try: return int(sv.get(k, default) or default)
-                except: return default
-
-            def _split(k):
-                raw = sv.get(k, "0-0")
-                parts = str(raw).split("-")
-                m, a = (int(parts[0] or 0), int(parts[1] or 0)) if len(parts) == 2 else (0, 0)
-                return m, a
-
-            fgm, fga = _split("FG")
-            tpm, tpa = _split("3PT")
-            ftm, fta = _split("FT")
-
-            try:
-                mins_int = int(float(sv.get("MIN", 0) or 0))
-            except Exception:
-                mins_int = 0
-            mins_iso = f"PT{mins_int:02d}M00.00S"
-            mins_calc = f"PT{mins_int:02d}M"
-
-            pm = sv.get("+/-", "0")
-            try:
-                pm_val = float(pm or 0)
-            except Exception:
-                pm_val = 0.0
-
-            players.append({
-                "personId": person_id,
-                "name": name,
-                "nameI": _nameI_from_display(name),
-                "jerseyNum": jersey,
-                "position": pos,
-                "starter": starter,
-                "played": "1",
-                "statistics": {
-                    "assists":                  _int("AST"),
-                    "blocks":                   _int("BLK"),
-                    "fieldGoalsAttempted":      fga,
-                    "fieldGoalsMade":           fgm,
-                    "fieldGoalsPercentage":     fgm / fga if fga else 0.0,
-                    "foulsPersonal":            _int("PF"),
-                    "freeThrowsAttempted":      fta,
-                    "freeThrowsMade":           ftm,
-                    "freeThrowsPercentage":     ftm / fta if fta else 0.0,
-                    "minutes":                  mins_iso,
-                    "minutesCalculated":        mins_calc,
-                    "plusMinusPoints":          pm_val,
-                    "points":                   _int("PTS"),
-                    "reboundsDefensive":        _int("DREB"),
-                    "reboundsOffensive":        _int("OREB"),
-                    "reboundsTotal":            _int("REB"),
-                    "steals":                   _int("STL"),
-                    "threePointersAttempted":   tpa,
-                    "threePointersMade":        tpm,
-                    "threePointersPercentage":  tpm / tpa if tpa else 0.0,
-                    "turnovers":                _int("TO"),
-                },
-            })
-
-        tid = team_info.get("id", "")
-        score = score_map.get(tid) or sum(
-            (p.get("statistics") or {}).get("points", 0) for p in players
-        )
-        return {
-            "teamId": tid,
-            "teamCity": team_info.get("location", ""),
-            "teamName": team_info.get("name", ""),
-            "teamTricode": team_info.get("abbreviation", ""),
-            "score": score,
-            "players": players,
-        }
-
-    away_block = home_block = None
-    for block in bs_teams:
-        tid = (block.get("team") or {}).get("id", "")
-        ha = home_away.get(tid, "away")
-        if ha == "away":
-            away_block = block
-        else:
-            home_block = block
-
-    if not away_block and not home_block:
-        if len(bs_teams) >= 2:
-            away_block, home_block = bs_teams[0], bs_teams[1]
-        else:
-            return None
-
-    return {
-        "gameId":         espn_game_id,
-        "gameStatus":     game_status,
-        "gameStatusText": game_status_text,
-        "homeTeam":       parse_team(home_block) if home_block else {},
-        "awayTeam":       parse_team(away_block) if away_block else {},
-        "gameTimeUTC":    game_time,
-        "period":         period,
-        "gameClock":      game_clock,
-    }
-
-
 # ── /api/live/boxscore/<game_id> ──────────────────────────────────
 @app.route("/api/live/boxscore/<game_id>")
 def get_live_boxscore(game_id):
     """Proxy CDN live boxscore (NBA or WNBA) + auto-upsert completed games.
-    Falls back to ESPN for WNBA ESPN-ID games and nba_api for historical NBA games."""
-    is_wnba_cdn = str(game_id).startswith("10")
-    is_espn_wnba = _is_espn_wnba_id(game_id)
-    is_wnba = is_wnba_cdn or is_espn_wnba
-
-    # ESPN WNBA game IDs → use ESPN summary API directly
-    if is_espn_wnba:
-        try:
-            game = _parse_espn_wnba_boxscore(game_id)
-            if game:
-                if game.get("gameStatus") == 3:
-                    _upsert_game_from_boxscore(game_id, game, league="wnba")
-                return jsonify(game)
-        except Exception as e:
-            return jsonify({"error": f"ESPN boxscore unavailable: {e}"}), 404
-        return jsonify({"error": "boxscore unavailable"}), 404
-
-    # Try CDN first (NBA and WNBA CDN IDs)
+    Falls back to nba_api BoxScoreTraditionalV3 for historical NBA games."""
+    is_wnba = str(game_id).startswith("10")
+    # Try CDN first (works for current season)
     try:
-        if is_wnba_cdn:
+        if is_wnba:
             url = f"https://cdn.wnba.com/static/json/liveData/boxscore/boxscore_{game_id}.json"
         else:
             url = f"https://cdn.nba.com/static/json/liveData/boxscore/boxscore_{game_id}.json"
-        hdrs = _WNBA_CDN_HEADERS if is_wnba_cdn else _CDN_HEADERS
-        resp = _requests.get(url, headers=hdrs, timeout=10)
+        hdrs = _WNBA_CDN_HEADERS if is_wnba else _CDN_HEADERS
+        resp = _cdn_get(url, headers=hdrs, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        if "game" not in data and not any(k in data for k in ("homeTeam", "awayTeam")):
-            raise ValueError("WAF HTML response")
         game = data.get("game", data)
         if game.get("gameStatus") == 3:
-            _upsert_game_from_boxscore(game_id, game, league="wnba" if is_wnba_cdn else "nba")
+            _upsert_game_from_boxscore(game_id, game, league="wnba" if is_wnba else "nba")
         return jsonify(game)
     except Exception:
         pass
 
-    # CDN failed for WNBA CDN ID → try ESPN as fallback using the CDN game ID
-    # (ESPN may have the same game under a different ID; skip for now)
-    if is_wnba_cdn:
+    # CDN failed — fall back to nba_api for historical NBA games only
+    if is_wnba:
         return jsonify({"error": "boxscore unavailable"}), 404
 
     try:
@@ -3151,33 +2969,24 @@ def _upsert_game_from_boxscore(game_id: str, game: dict, league: str = "nba"):
 @app.route("/api/live/pbp/<game_id>")
 def get_live_pbp(game_id):
     """Proxy CDN live play-by-play (NBA or WNBA).
-    Falls back to nba_api PlayByPlayV3 for historical NBA games.
-    ESPN WNBA IDs have no PBP source — returns 404."""
-    is_wnba_cdn = str(game_id).startswith("10")
-    is_espn_wnba = _is_espn_wnba_id(game_id)
-
-    # ESPN WNBA game IDs: no PBP available from ESPN or CDN
-    if is_espn_wnba:
-        return jsonify({"error": "play-by-play unavailable"}), 404
-
-    # Try CDN first (NBA and WNBA CDN IDs)
+    Falls back to nba_api PlayByPlayV3 for historical NBA games."""
+    is_wnba = str(game_id).startswith("10")
+    # Try CDN first
     try:
-        if is_wnba_cdn:
+        if is_wnba:
             url = f"https://cdn.wnba.com/static/json/liveData/playbyplay/playbyplay_{game_id}.json"
         else:
             url = f"https://cdn.nba.com/static/json/liveData/playbyplay/playbyplay_{game_id}.json"
-        hdrs = _WNBA_CDN_HEADERS if is_wnba_cdn else _CDN_HEADERS
-        resp = _requests.get(url, headers=hdrs, timeout=10)
+        hdrs = _WNBA_CDN_HEADERS if is_wnba else _CDN_HEADERS
+        resp = _cdn_get(url, headers=hdrs, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        if "actions" not in data and "game" not in data:
-            raise ValueError("WAF HTML response")
         return jsonify(data.get("game", data))
     except Exception:
         pass
 
     # Fall back to nba_api for historical NBA games only
-    if not is_wnba_cdn:
+    if not is_wnba:
         try:
             from nba_api.stats.endpoints import playbyplayv3
             pbp = playbyplayv3.PlayByPlayV3(game_id=game_id, timeout=30)
@@ -7199,7 +7008,7 @@ def _wnba_cdn_schedule() -> dict:
     if cached.get("dates") and _time.time() - cached.get("ts", 0) < _WNBA_CDN_SCHEDULE_TTL:
         return cached["dates"]
     try:
-        resp = _requests.get(
+        resp = _cdn_get(
             "https://cdn.wnba.com/static/json/staticData/scheduleLeagueV2_1.json",
             headers=_WNBA_CDN_HEADERS, timeout=15)
         resp.raise_for_status()
@@ -7226,7 +7035,7 @@ def _wnba_cdn_scoreboard_today(game_today: str) -> list | None:
     if c.get("date") == game_today and _time.time() - c.get("ts", 0) < 30:
         return c["games"]
     try:
-        resp = _requests.get(
+        resp = _cdn_get(
             "https://cdn.wnba.com/static/json/liveData/scoreboard/todaysScoreboard_10.json",
             headers=_WNBA_CDN_HEADERS, timeout=8)
         resp.raise_for_status()
@@ -7316,7 +7125,7 @@ def _wnba_cdn_ingest_game_bg(game_id: str, home_abbr: str, away_abbr: str):
         return  # ESPN game IDs — CDN boxscore not available
     try:
         url  = f"https://cdn.wnba.com/static/json/liveData/boxscore/boxscore_{game_id}.json"
-        resp = _requests.get(url, headers=_WNBA_CDN_HEADERS, timeout=12)
+        resp = _cdn_get(url, headers=_WNBA_CDN_HEADERS, timeout=12)
         resp.raise_for_status()
         game_data = resp.json().get("game", {})
         season    = _get_wnba_season()
@@ -7522,10 +7331,8 @@ def get_wnba_scoreboard():
             _wnba_cdn_today_cache.update({"games": games, "date": _game_today, "ts": _time.time()})
             return jsonify(payload)
 
-    # CDN season — try static schedule for past/future dates.
-    # Skip for today: the static schedule has no live status (everything shows as
-    # upcoming), so if the CDN live feed failed we want ESPN's live data instead.
-    if is_cdn_season and not is_today:
+    # CDN season — try static schedule (covers both today-when-live-fails and future dates)
+    if is_cdn_season:
         schedule = _wnba_cdn_schedule()
         cdn_games = schedule.get(date_str)
         if cdn_games is not None:
@@ -7835,7 +7642,7 @@ def _wnba_fetch_cdn_boxscores_parallel(game_ids, timeout=8):
     def _fetch_one(gid):
         try:
             url  = f"https://cdn.wnba.com/static/json/liveData/boxscore/boxscore_{gid}.json"
-            resp = _requests.get(url, headers=_WNBA_CDN_HEADERS, timeout=timeout)
+            resp = _cdn_get(url, headers=_WNBA_CDN_HEADERS, timeout=timeout)
             if resp.status_code == 200:
                 return gid, resp.json().get("game", {})
         except Exception:
