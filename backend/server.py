@@ -1599,7 +1599,8 @@ def _crosscheck_tipoff(games: list, nba: bool = True) -> None:
         try:
             cdn_base = "https://cdn.nba.com" if nba else "https://cdn.wnba.com"
             url = f"{cdn_base}/static/json/liveData/boxscore/boxscore_{gid}.json"
-            r = _requests.get(url, headers=_CDN_HEADERS, timeout=5)
+            hdrs = _CDN_HEADERS if nba else _WNBA_CDN_HEADERS
+            r = _requests.get(url, headers=hdrs, timeout=5)
             r.raise_for_status()
             box = r.json().get("game", {})
             real_status = int(box.get("gameStatus", 1) or 1)
@@ -7200,7 +7201,7 @@ def _wnba_cdn_schedule() -> dict:
     try:
         resp = _requests.get(
             "https://cdn.wnba.com/static/json/staticData/scheduleLeagueV2_1.json",
-            headers=_CDN_HEADERS, timeout=15)
+            headers=_WNBA_CDN_HEADERS, timeout=15)
         resp.raise_for_status()
         dates: dict[str, list] = {}
         for entry in resp.json().get("leagueSchedule", {}).get("gameDates", []):
@@ -7227,7 +7228,7 @@ def _wnba_cdn_scoreboard_today(game_today: str) -> list | None:
     try:
         resp = _requests.get(
             "https://cdn.wnba.com/static/json/liveData/scoreboard/todaysScoreboard_10.json",
-            headers=_CDN_HEADERS, timeout=8)
+            headers=_WNBA_CDN_HEADERS, timeout=8)
         resp.raise_for_status()
         cdn_games = resp.json().get("scoreboard", {}).get("games", [])
         cdn_date  = resp.json().get("scoreboard", {}).get("gameDate", "")
@@ -7315,7 +7316,7 @@ def _wnba_cdn_ingest_game_bg(game_id: str, home_abbr: str, away_abbr: str):
         return  # ESPN game IDs — CDN boxscore not available
     try:
         url  = f"https://cdn.wnba.com/static/json/liveData/boxscore/boxscore_{game_id}.json"
-        resp = _requests.get(url, headers=_CDN_HEADERS, timeout=12)
+        resp = _requests.get(url, headers=_WNBA_CDN_HEADERS, timeout=12)
         resp.raise_for_status()
         game_data = resp.json().get("game", {})
         season    = _get_wnba_season()
@@ -7834,7 +7835,7 @@ def _wnba_fetch_cdn_boxscores_parallel(game_ids, timeout=8):
     def _fetch_one(gid):
         try:
             url  = f"https://cdn.wnba.com/static/json/liveData/boxscore/boxscore_{gid}.json"
-            resp = _requests.get(url, headers=_CDN_HEADERS, timeout=timeout)
+            resp = _requests.get(url, headers=_WNBA_CDN_HEADERS, timeout=timeout)
             if resp.status_code == 200:
                 return gid, resp.json().get("game", {})
         except Exception:
