@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ydkball · Survival</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo-icon.png">
+<script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/night-mode.css">
+<style>
+  *,*::before,*::after{box-sizing:border-box; margin:0; padding:0}
+  :root{
+    --ink:#0c0c0d; --ink2:#2a2a2e; --ink3:#6b6b78; --ink4:#a8a8b3;
+    --paper:#F5F0E8; --paper2:#eeecea; --paper3:#e5e2dc; --rule:#d8d5cf;
+    --orange:#e8530a; --orange-lt:#fff0ea; --green:#1a7a4a; --green-lt:#e8f3ec;
+    --red:#c0392b; --red-lt:#fbeceb; --card:#FCFBF8; --field:#fff;
+    --ff-serif:'DM Serif Display',Georgia,serif;
+    --ff-sans:'Instrument Sans',system-ui,sans-serif;
+    --ff-mono:'DM Mono','Courier New',monospace;
+    --nav-h:56px; font-size:15px;
+  }
+  html.night-mode{
+    --card:#222228; --field:#191920; --green-lt:#16271d; --red-lt:#2b1715;
+  }
+  html.night-mode .pill{border-color:transparent}
+  html.night-mode .note{border-color:transparent}
+  html{overflow-x:clip}
+  body{
+    font-family:var(--ff-sans); background:var(--paper); color:var(--ink);
+    min-height:100vh; -webkit-font-smoothing:antialiased; position:relative;
+    display:flex; flex-direction:column; align-items:center;
+  }
+  /* film grain, same as the rest of the site */
+  body::before{
+    content:''; position:fixed; inset:0; z-index:9999; pointer-events:none; opacity:.022;
+    background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* ── nav (shared site nav) ───────────────────────────── */
+  nav{position:fixed; top:0; left:0; right:0; height:var(--nav-h); background:var(--paper);
+      border-bottom:1px solid var(--rule); display:flex; align-items:center; padding:0 24px; gap:24px; z-index:100}
+  .nav-wordmark{font-family:var(--ff-serif); font-size:20px; color:var(--ink); letter-spacing:-.01em;
+                text-decoration:none; flex-shrink:0; display:flex; align-items:center}
+  .nav-logo{height:26px; width:auto; margin-right:8px}
+  .nav-wordmark span{color:var(--orange)}
+  .nav-tabs{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); display:flex; gap:2px}
+  .nav-tab{font-family:var(--ff-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+           color:var(--ink3); background:none; border:none; padding:6px 14px; cursor:pointer; border-radius:4px;
+           transition:color .15s, background .15s; text-decoration:none; display:inline-block}
+  .nav-tab:hover{color:var(--ink); background:var(--paper2)}
+  .nav-tab.active{color:var(--ink); background:var(--paper3)}
+  .nav-auth{margin-left:auto; display:flex; align-items:center; gap:10px; flex-shrink:0}
+  .nav-auth-avatar{width:28px; height:28px; border-radius:50%; object-fit:cover; border:1.5px solid var(--rule)}
+  .nav-signin-btn{font-family:var(--ff-mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+                  padding:5px 12px; background:var(--orange); color:#fff; border:none; border-radius:4px;
+                  cursor:pointer; text-decoration:none}
+  .nav-signin-btn:hover{opacity:.85}
+  .nav-signout-btn{font-family:var(--ff-mono); font-size:10px; letter-spacing:.04em; color:var(--ink3);
+                   background:none; border:none; cursor:pointer; padding:4px 6px}
+  .nav-signout-btn:hover{color:var(--ink)}
+  @media(max-width:720px){
+    nav{padding:0 14px; gap:12px}
+    .nav-tabs{position:static; transform:none; margin-left:6px; overflow-x:auto; -webkit-overflow-scrolling:touch}
+    .nav-tabs::-webkit-scrollbar{display:none}
+    .nav-tab{white-space:nowrap; padding:5px 12px}
+  }
+
+  .eyebrow{font-family:var(--ff-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+           color:var(--orange); text-align:center; margin-bottom:14px}
+  .wrap{width:100%; max-width:540px; padding:calc(var(--nav-h) + 22px) 18px 70px; flex:1; display:flex; flex-direction:column}
+
+  /* ── status row ──────────────────────────────────────── */
+  .statusbar{display:flex; align-items:center; justify-content:space-between; margin:6px 2px 22px}
+  .lives{display:flex; gap:7px; align-items:center}
+  .life{height:27px; width:auto; transition:filter .25s, opacity .25s}
+  .life.spent{filter:grayscale(1); opacity:.2}
+  .score{font-family:var(--ff-mono); font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3)}
+  .score b{font-family:var(--ff-serif); color:var(--ink); font-size:24px; margin-left:8px; letter-spacing:0}
+
+  /* ── card ────────────────────────────────────────────── */
+  .card{
+    background:var(--card); border:1px solid var(--rule); border-radius:12px;
+    padding:26px 24px; box-shadow:0 1px 0 rgba(0,0,0,.03), 0 10px 30px rgba(20,16,10,.06);
+  }
+  .qmeta{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px}
+  .qnum{font-family:var(--ff-mono); font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink3)}
+  .pill{font-family:var(--ff-mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+        padding:4px 11px; border-radius:100px; font-weight:500; border:1px solid transparent}
+  .pill.easy{background:var(--green-lt); color:var(--green); border-color:#cfe6d8}
+  .pill.medium{background:var(--orange-lt); color:var(--orange); border-color:#f6d8c8}
+  .pill.hard{background:var(--red-lt); color:var(--red); border-color:#f0d2cf}
+  .qtext{font-family:var(--ff-serif); font-size:27px; line-height:1.22; color:var(--ink); margin:2px 0 22px}
+
+  /* ── picker ──────────────────────────────────────────── */
+  .picker{position:relative}
+  .picker input{
+    width:100%; padding:14px 16px; font-family:var(--ff-sans); font-size:16px; color:var(--ink);
+    background:var(--field); border:1.5px solid var(--rule); border-radius:9px; outline:none; transition:border-color .15s;
+  }
+  .picker input::placeholder{color:var(--ink4)}
+  .picker input:focus{border-color:var(--orange)}
+  .drop{
+    position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:20;
+    background:var(--field); border:1px solid var(--rule); border-radius:9px; overflow:hidden auto;
+    max-height:258px; box-shadow:0 14px 34px rgba(20,16,10,.14);
+  }
+  .drop div{padding:9px 14px; cursor:pointer; border-bottom:1px solid var(--paper2); font-size:15px;
+            display:flex; align-items:center; gap:11px}
+  .drop div:last-child{border-bottom:none}
+  .drop div.active,.drop div:hover{background:var(--orange-lt); color:var(--orange)}
+  /* player headshot bubble (dropdown + choice buttons) */
+  .shot{width:32px; height:32px; border-radius:50%; overflow:hidden; background:var(--paper3);
+        flex-shrink:0; display:inline-block}
+  .shot img{width:100%; height:100%; object-fit:cover; object-position:center top; display:block}
+
+  /* this-or-that two-button choice */
+  .choices{display:flex; gap:12px; margin-top:4px}
+  .choice{flex:1 1 0; display:flex; flex-direction:column; align-items:center; gap:11px; padding:20px 12px;
+          background:var(--field); border:1.5px solid var(--rule); border-radius:12px; cursor:pointer;
+          font-family:var(--ff-sans); color:var(--ink); transition:border-color .15s, background .15s, transform .1s}
+  .choice:hover:not(:disabled){border-color:var(--orange); transform:translateY(-2px)}
+  .choice:disabled{cursor:default}
+  .choice .shot{width:72px; height:72px}
+  .choice-name{font-family:var(--ff-serif); font-size:18px; text-align:center; line-height:1.16}
+  .choice.correct{border-color:var(--green); background:var(--green-lt)}
+  .choice.wrong{border-color:var(--red); background:var(--red-lt)}
+
+  /* ── buttons ─────────────────────────────────────────── */
+  .btn{
+    display:block; width:100%; margin-top:14px; padding:14px; border:1.5px solid var(--orange);
+    border-radius:9px; font-family:var(--ff-sans); font-size:15px; font-weight:600; cursor:pointer;
+    background:var(--orange); color:#fff; transition:opacity .15s, background .15s;
+  }
+  .btn:hover{opacity:.92}
+  .btn:disabled{opacity:.35; cursor:default}
+  .btn.ghost{background:transparent; color:var(--ink2); border-color:var(--rule)}
+  .btn.ghost:hover{background:var(--paper2); opacity:1}
+
+  .verdict{margin-top:16px; text-align:center; font-size:16px; min-height:24px; font-weight:600; font-family:var(--ff-sans)}
+  .verdict.good{color:var(--green)} .verdict.bad{color:var(--red)}
+  .verdict small{display:block; color:var(--ink3); font-weight:400; margin-top:5px; font-size:14px}
+
+  /* ── results ─────────────────────────────────────────── */
+  .center{text-align:center}
+  .headline{font-family:var(--ff-serif); font-size:30px; line-height:1.1; color:var(--ink); margin-bottom:4px}
+  .headline.win{color:var(--orange)}
+  .big{font-family:var(--ff-serif); font-size:64px; line-height:1; color:var(--ink); margin:14px 0 6px}
+  .sub{color:var(--ink3); font-size:15px; line-height:1.5}
+  .stats{display:flex; justify-content:center; gap:34px; margin:24px 0 8px}
+  .stats .n{font-family:var(--ff-serif); font-size:28px; color:var(--ink)}
+  .stats .l{font-family:var(--ff-mono); font-size:10px; color:var(--ink3); text-transform:uppercase; letter-spacing:.1em; margin-top:2px}
+  .note{font-family:var(--ff-mono); font-size:11.5px; letter-spacing:.04em; color:var(--orange);
+        background:var(--orange-lt); border:1px solid #f6d8c8; border-radius:8px; padding:9px 14px;
+        text-align:center; margin-bottom:14px}
+  .resultlogo{height:46px; width:auto; margin-bottom:10px}
+
+  .foot{margin-top:auto; padding-top:26px; text-align:center; font-family:var(--ff-mono);
+        font-size:11px; letter-spacing:.06em; color:var(--ink4); line-height:1.7}
+  a{color:var(--orange); text-decoration:none}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+  <nav>
+    <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
+    <div class="nav-tabs">
+      <a class="nav-tab" href="/">Home</a>
+      <a class="nav-tab" href="/reviews">BasketBoxd</a>
+      <a class="nav-tab" href="/stats">Stats</a>
+      <a class="nav-tab active" href="/games">Games</a>
+    </div>
+    <div class="nav-auth" id="nav-auth-slot"></div>
+  </nav>
+
+  <div class="wrap">
+    <div class="eyebrow" id="mode">Daily Survival</div>
+    <div class="statusbar">
+      <div class="lives" id="lives"></div>
+      <div class="score">score<b id="score">0</b></div>
+    </div>
+
+    <div id="stage"></div>
+
+    <div class="foot">
+      3 lives · one guess each<br>
+      <span id="streakline"></span>
+    </div>
+  </div>
+
+<script>
+const API = window.location.protocol === 'file:' ? 'http://localhost:5000' : '';
+const stage = document.getElementById('stage');
+const livesEl = document.getElementById('lives');
+const scoreEl = document.getElementById('score');
+const modeEl = document.getElementById('mode');
+const streakEl = document.getElementById('streakline');
+
+let PLAYERS = [];
+let state = null;
+
+function setLives(lives){
+  livesEl.innerHTML = '';
+  for(let i=0;i<3;i++){
+    const img = document.createElement('img');
+    img.src = '/transparent.png'; img.alt=''; img.className = 'life' + (i < lives ? '' : ' spent');
+    livesEl.appendChild(img);
+  }
+}
+function jfetch(url, opts){
+  return fetch(API+url, Object.assign({credentials:'include'}, opts||{}))
+    .then(r=>r.json().then(j=>({ok:r.ok,status:r.status,body:j})));
+}
+
+// ── boot ──────────────────────────────────────────────────────────────
+async function boot(){
+  const players = await jfetch('/api/survival/players');
+  PLAYERS = (players.body.players||[]);
+  // Deep-link straight into unlimited from the games hub (?mode=unlimited).
+  if (new URLSearchParams(location.search).get('mode') === 'unlimited') {
+    return startUnlimited();
+  }
+  const daily = await jfetch('/api/survival/daily');
+  const d = daily.body;
+  // Already played today → locked: show the result, not a fresh playable run.
+  if (d.your_result != null) { return renderAlreadyPlayed(d); }
+  startRun({
+    mode:'daily',
+    questions: d.questions,
+    lives: d.lives,
+    date: d.date,
+    best: d.best, streak: d.streak,
+  });
+}
+
+// ── locked "already played today" screen ──────────────────────────────
+function renderAlreadyPlayed(d){
+  const total = (d.questions && d.questions.length) || 10;
+  const score = d.your_result;
+  const perfect = score === total;
+  // rebuild today's grid from what we saved when you played; if unavailable (e.g. another
+  // device), fall back to score-many 🏀 then ❌ padding.
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('survival_grid_' + d.date) || 'null'); } catch(e){}
+  const results = (saved && saved.results) ? saved.results : Array(score).fill(true);
+  state = { mode:'daily', best:d.best, streak:d.streak, date:d.date, total, score, results };
+  modeEl.textContent = 'Daily Survival';
+  setLives(3); scoreEl.textContent = score;
+  const shareTxt = buildShare();
+  stage.innerHTML = `
+    <div class="card center">
+      <img class="resultlogo" src="/transparent.png" alt="">
+      <div class="headline ${perfect?'win':''}">${perfect ? 'You know ball.' : 'Today’s run'}</div>
+      <div class="big">${score}/${total}</div>
+      <div class="sub">You’ve already played today — come back tomorrow for a new run.</div>
+      <div class="stats">
+        <div><div class="n">${d.streak??0}</div><div class="l">streak</div></div>
+        <div><div class="n">${d.best??score}</div><div class="l">best</div></div>
+      </div>
+      <button class="btn" id="share">Share result</button>
+      <button class="btn ghost" id="unlimited">Unlimited run · Pro</button>
+    </div>`;
+  document.getElementById('share').onclick = ()=>{
+    if(navigator.share){ navigator.share({text:shareTxt}); }
+    else { navigator.clipboard.writeText(shareTxt); document.getElementById('share').textContent='Copied!'; }
+  };
+  document.getElementById('unlimited').onclick = startUnlimited;
+}
+
+function startRun(cfg){
+  state = { ...cfg, total:cfg.questions.length, i:0, score:0, livesLeft:cfg.lives, over:false, picked:null, results:[] };
+  modeEl.textContent = cfg.mode === 'daily' ? 'Daily Survival' : 'Unlimited';
+  scoreEl.textContent = '0';
+  setLives(state.livesLeft);
+  streakEl.textContent = (cfg.streak!=null) ? `streak ${cfg.streak}  ·  best ${cfg.best}` : '';
+  renderQuestion();
+}
+
+// ── one question ──────────────────────────────────────────────────────
+function headshot(id){ return `https://cdn.nba.com/headshots/nba/latest/260x190/${id}.png`; }
+function shotHTML(id){ return `<span class="shot"><img src="${headshot(id)}" onerror="this.remove()" alt=""></span>`; }
+
+// ── share text: date + 🏀 (correct) / ❌ (wrong or not reached) ───────────────
+function fmtDate(iso){
+  const d = iso ? new Date(iso + 'T00:00:00') : new Date();
+  return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+}
+function shareGrid(results, total){
+  let g = '';
+  for(let i=0;i<total;i++) g += (i < results.length ? (results[i] ? '🏀' : '❌') : '❌');
+  return g;
+}
+function buildShare(){
+  const results = state.results || [];
+  if(state.mode === 'daily'){
+    return `ydkball Survival ${state.score}/${state.total} · ${fmtDate(state.date)}\n${shareGrid(results, state.total)}`;
+  }
+  // unlimited: open-ended — score = correct count, grid is the whole run (ends on the 3rd ❌)
+  return `ydkball Unlimited ${state.score} · ${fmtDate()}\n${shareGrid(results, results.length)}`;
+}
+
+async function renderQuestion(){
+  // Daily is a fixed 10-question run (clearing all 10 ends it). Unlimited is open-ended —
+  // it keeps going until you lose 3 lives.
+  if(state.mode==='daily' && state.i >= state.total){ return gameOver(true); }
+  // unlimited: questions are generated one at a time on demand (the next is usually already
+  // prefetched, so this is instant; only the very first / a cold one shows "Loading…").
+  if(state.mode==='unlimited' && !state.questions[state.i]){
+    stage.innerHTML = `<div class="card center"><div class="sub">Loading…</div></div>`;
+    const err = await ensureUnlimited(state.i);
+    if(err) return gameOver(false);
+  }
+  const q = state.questions[state.i];
+  if(!q){ return gameOver(state.mode==='daily'); }   // daily out-of-Qs = cleared; unlimited = over
+  state.picked = null;
+  scoreEl.textContent = state.score;                 // correct-count, starts at 0
+  if(state.mode==='unlimited') prefetchUnlimited();  // load the next while they answer
+  // Daily shows "Question N / 10"; unlimited is open-ended, tracked by the score only (so the
+  // question number can't be misread as the score).
+  const meta = `
+      ${state.mode==='daily' ? `<div class="qmeta"><span class="qnum">Question ${state.i+1} / ${state.total}</span></div>` : ''}
+      <div class="qtext">${q.text}</div>`;
+
+  // this-or-that → two headshot buttons; pick one
+  if(q.options && q.options.length===2){
+    stage.innerHTML = `
+      <div class="card">${meta}
+        <div class="choices" id="choices">
+          ${q.options.map(o=>`<button class="choice" data-id="${o.id}">${shotHTML(o.id)}<span class="choice-name">${o.name}</span></button>`).join('')}
+        </div>
+        <div class="verdict" id="verdict"></div>
+      </div>`;
+    const choices = document.getElementById('choices');
+    choices.querySelectorAll('.choice').forEach(btn=>btn.onclick=()=>{
+      if(state.over || choices.dataset.done) return;
+      choices.dataset.done = '1';
+      resolveAnswer(q, +btn.dataset.id, btn);
+    });
+    return;
+  }
+
+  // default → autocomplete picker
+  stage.innerHTML = `
+    <div class="card">${meta}
+      <div class="picker">
+        <input id="guess" placeholder="Name the player…" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <div class="drop hidden" id="drop"></div>
+      </div>
+      <button class="btn" id="go" disabled>Guess</button>
+      <div class="verdict" id="verdict"></div>
+    </div>`;
+  wirePicker(q);
+}
+
+// shared scoring/verdict for both the picker and the this-or-that buttons
+function resolveAnswer(q, pid, chosenBtn){
+  if(state.over) return;
+  const verdict = document.getElementById('verdict');
+  const correct = pid!=null && q.answer_ids.includes(pid);
+  if(chosenBtn){
+    chosenBtn.classList.add(correct ? 'correct' : 'wrong');
+    if(!correct){
+      const right = document.querySelector(`.choice[data-id="${q.answer_ids[0]}"]`);
+      if(right) right.classList.add('correct');
+    }
+    document.querySelectorAll('.choice').forEach(b=>b.disabled=true);
+  }
+  state.results.push(correct);
+  if(correct){
+    state.score = state.results.filter(Boolean).length; scoreEl.textContent = state.score;
+    verdict.className='verdict good';
+    verdict.innerHTML = `✓ ${q.answers[q.answer_ids.indexOf(pid)] || 'Correct'}`;
+  }else{
+    state.livesLeft--; setLives(state.livesLeft);
+    verdict.className='verdict bad';
+    verdict.innerHTML = `✗ <small>it was ${q.answers.slice(0,3).join(', ')}${q.answers.length>3?'…':''}</small>`;
+  }
+  setTimeout(()=>{
+    if(state.livesLeft<=0){ gameOver(false); }
+    else { state.i++; renderQuestion(); }
+  }, correct ? 750 : 1700);
+}
+
+function wirePicker(q){
+  const input = document.getElementById('guess');
+  const drop  = document.getElementById('drop');
+  const go    = document.getElementById('go');
+  let active = -1, matches = [];
+
+  function close(){ drop.classList.add('hidden'); active=-1; }
+  function pick(p){ state.picked=p; input.value=p.name; go.disabled=false; close(); input.focus(); }
+
+  input.addEventListener('input', ()=>{
+    state.picked=null; go.disabled=true;
+    const v = input.value.trim().toLowerCase();
+    if(v.length<2){ close(); return; }
+    matches = PLAYERS.filter(p=>p.name.toLowerCase().includes(v)).slice(0,8);
+    if(!matches.length){ close(); return; }
+    drop.innerHTML = matches.map((p,i)=>`<div data-i="${i}" class="${i===0?'active':''}">${shotHTML(p.id)}<span>${p.name}</span></div>`).join('');
+    active=0; drop.classList.remove('hidden');
+    [...drop.children].forEach(el=>el.onclick=()=>pick(matches[+el.dataset.i]));
+  });
+  input.addEventListener('keydown', e=>{
+    if(drop.classList.contains('hidden')){
+      if(e.key==='Enter' && !go.disabled){ e.preventDefault(); commit(q); }
+      return;
+    }
+    if(e.key==='ArrowDown'){ e.preventDefault(); active=Math.min(active+1,matches.length-1); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); active=Math.max(active-1,0); }
+    else if(e.key==='Enter'){ e.preventDefault(); if(matches[active]) pick(matches[active]); return; }
+    else return;
+    [...drop.children].forEach((el,i)=>el.classList.toggle('active',i===active));
+  });
+  go.onclick = ()=>commit(q);
+  input.focus();
+}
+
+// ── evaluate one guess ────────────────────────────────────────────────
+function commit(q){
+  if(state.over) return;
+  const input = document.getElementById('guess');
+  const go = document.getElementById('go');
+  let pid = state.picked ? state.picked.id : null;
+  if(pid==null){
+    const exact = PLAYERS.find(p=>p.name.toLowerCase()===input.value.trim().toLowerCase());
+    pid = exact ? exact.id : null;
+  }
+  input.disabled = true; go.disabled = true; go.classList.add('hidden');
+  resolveAnswer(q, pid, null);
+}
+
+// ── game over ─────────────────────────────────────────────────────────
+async function gameOver(beat){
+  state.over = true;
+  let best=state.best, streak=state.streak;
+  if(state.mode==='daily'){
+    const res = await jfetch('/api/survival/daily/result', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({score: state.score})
+    });
+    if(res.ok){ best=res.body.best; streak=res.body.streak; }
+    // save the grid so the locked "already played" screen can still share it on reload
+    try { localStorage.setItem('survival_grid_' + state.date,
+          JSON.stringify({score:state.score, total:state.total, results:state.results})); } catch(e){}
+  } else if(state.mode==='unlimited'){
+    best = Math.max(best||0, state.score);
+    try { localStorage.setItem('survival_unlimited_best', best); } catch(e){}
+  }
+
+  let headline, headClass='', sub, big, logo='';
+  if(state.mode==='daily'){
+    big = `${state.score}/${state.total}`;
+    if(beat){
+      logo = `<img class="resultlogo" src="/transparent.png" alt="">`;
+      headClass = 'win';
+      headline = state.score === state.total ? 'You KNOW ball.' : 'You know ball.';
+      sub = `You cleared all ${state.total} — ${state.score} correct.`;
+    } else {
+      headline = 'Out of lives';
+      sub = `You got ${state.score} of ${state.total}. Run it back tomorrow.`;
+    }
+  } else {  // unlimited — open-ended, score = how many you got right
+    big = `${state.score}`;
+    headline = 'Out of lives';
+    sub = `${state.score} ${state.score===1?'question':'questions'} right${state.score>=best&&best>0?' — new best!':''}`;
+  }
+  const shareTxt = buildShare();
+
+  // daily: shows streak, links to Unlimited. unlimited: shows best, "Play again".
+  const statsHTML = state.mode==='daily'
+    ? `<div><div class="n">${streak??0}</div><div class="l">streak</div></div>
+       <div><div class="n">${best??state.score}</div><div class="l">best</div></div>`
+    : `<div><div class="n">${best??state.score}</div><div class="l">best</div></div>`;
+  const actionHTML = state.mode==='daily'
+    ? `<button class="btn ghost" id="again">Unlimited · Pro</button>`
+    : `<button class="btn" id="again">Play again</button>
+       <a class="btn ghost" href="/games" style="text-decoration:none">Back to games</a>`;
+
+  stage.innerHTML = `
+    <div class="card center">
+      ${logo}
+      <div class="headline ${headClass}">${headline}</div>
+      <div class="big">${big}</div>
+      <div class="sub">${sub}</div>
+      <div class="stats">${statsHTML}</div>
+      <button class="btn" id="share">Share result</button>
+      ${actionHTML}
+    </div>`;
+  document.getElementById('share').onclick = ()=>{
+    if(navigator.share){ navigator.share({text:shareTxt}); }
+    else { navigator.clipboard.writeText(shareTxt); document.getElementById('share').textContent='Copied!'; }
+  };
+  document.getElementById('again').onclick = startUnlimited;
+}
+
+// ── unlimited: questions generated one at a time, on demand ─────────────────────
+// Each run is 3 lives, random difficulty, score = depth. We fetch one question at a
+// time (passing the answer players already used, so none repeat) and prefetch the next
+// while you answer — so transitions feel instant.
+async function fetchUnlimited(pos){
+  let res;
+  try { res = await jfetch('/api/survival/unlimited?pos=' + pos + '&exclude=' + state.used.join(',')); }
+  catch(e){ return {error:'net'}; }
+  if(res.status===401) return {error:'auth'};
+  if(res.status===403) return {error:'pro'};
+  if(res.ok && res.body.question) return {q:res.body.question};
+  return {error:'fail'};
+}
+function addUnlimitedQ(q){
+  state.questions.push(q);
+  if(q.answer_ids && q.answer_ids.length===1) state.used.push(q.answer_ids[0]);
+}
+function startNextFetch(){
+  const pos = state.questions.length + 1;
+  state.nextPromise = fetchUnlimited(pos).then(r=>{
+    state.nextPromise = null;
+    if(r.q) addUnlimitedQ(r.q);
+    return r;
+  });
+  return state.nextPromise;
+}
+function prefetchUnlimited(){
+  if(state.mode==='unlimited' && !state.nextPromise) startNextFetch();
+}
+async function ensureUnlimited(idx){            // returns null if loaded, else an error code
+  while(state.questions.length <= idx){
+    const r = await (state.nextPromise || startNextFetch());
+    if(r.error) return r.error;
+  }
+  return null;
+}
+function unlimitedErrorCard(code){
+  if(code==='auth') return `<div class="card center"><div class="sub">Sign in to play unlimited runs.</div><a class="btn" href="/auth/google/login?next=/survival?mode=unlimited" style="text-decoration:none;margin-top:18px">Sign in</a></div>`;
+  if(code==='pro')  return `<div class="card center"><img class="resultlogo" src="/transparent.png" alt=""><div class="headline">Unlimited is Pro</div><div class="sub">Unlimited runs with ydkball Pro.<br>Free includes today's daily survival.</div><a class="btn ghost" href="/games" style="text-decoration:none;margin-top:18px">Back to games</a></div>`;
+  return `<div class="card center"><div class="sub">Couldn't start unlimited. Try again.</div></div>`;
+}
+
+async function startUnlimited(){
+  // Open-ended: 3 lives, go as far as you can. Score = how many you got right.
+  const prevBest = +(localStorage.getItem('survival_unlimited_best') || 0);
+  state = { mode:'unlimited', i:0, score:0, livesLeft:3, over:false,
+            best:prevBest, streak:null, questions:[], used:[], nextPromise:null, results:[] };
+  modeEl.textContent = 'Unlimited';
+  setLives(3); scoreEl.textContent = '0';
+  streakEl.textContent = `best ${prevBest}`;
+  stage.innerHTML = `<div class="card center"><div class="sub">Starting…</div></div>`;
+  const r = await startNextFetch();               // first question
+  if(r.error){ stage.innerHTML = unlimitedErrorCard(r.error); return; }
+  renderQuestion();
+}
+
+boot().catch(e=>{ stage.innerHTML = `<div class="card center"><div class="sub">Couldn't load today's run.<br>${e}</div></div>`; });
+</script>
+<script>
+// ── Nav auth (shared across all pages) ───────────────────────
+async function initNavAuth() {
+  const slot = document.getElementById('nav-auth-slot');
+  if (!slot) return;
+  try {
+    const res = await fetch(API + '/auth/me', {credentials:'include'});
+    const data = await res.json();
+    const user = data.user;
+    if (user) {
+      slot.innerHTML = `
+        <a href="/profile" style="text-decoration:none;cursor:pointer">${user.avatar_url ? `<img class="nav-auth-avatar" src="${user.avatar_url}" alt="">` : ''}</a>
+        <button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>`;
+      if (typeof user.night_mode !== 'undefined') {
+        const enabled = !!user.night_mode;
+        localStorage.setItem('ydkball_night', enabled ? '1' : '0');
+        document.documentElement.classList.toggle('night-mode', enabled);
+      }
+    } else {
+      slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login?next=${encodeURIComponent(window.location.pathname)}">Sign in</a>`;
+    }
+  } catch {
+    slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login">Sign in</a>`;
+  }
+}
+function navSignOut() {
+  window.location.href = '/auth/logout?next=' + encodeURIComponent(window.location.pathname);
+}
+initNavAuth();
+</script>
+</body>
+</html>

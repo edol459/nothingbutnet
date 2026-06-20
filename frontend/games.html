@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ydkball · Games</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo-icon.png">
+<script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/night-mode.css">
+<style>
+  *,*::before,*::after{box-sizing:border-box; margin:0; padding:0}
+  :root{
+    --ink:#0c0c0d; --ink2:#2a2a2e; --ink3:#6b6b78; --ink4:#a8a8b3;
+    --paper:#F5F0E8; --paper2:#eeecea; --paper3:#e5e2dc; --rule:#d8d5cf;
+    --orange:#e8530a; --orange-lt:#fff0ea; --green:#1a7a4a; --red:#c0392b;
+    --card:#FCFBF8;
+    --ff-serif:'DM Serif Display',Georgia,serif;
+    --ff-sans:'Instrument Sans',system-ui,sans-serif;
+    --ff-mono:'DM Mono','Courier New',monospace;
+    --nav-h:56px; font-size:15px;
+  }
+  html.night-mode{ --card:#222228; }
+  html{overflow-x:clip}
+  body{font-family:var(--ff-sans); background:var(--paper); color:var(--ink); min-height:100vh;
+       -webkit-font-smoothing:antialiased; position:relative}
+  body::before{content:''; position:fixed; inset:0; z-index:9999; pointer-events:none; opacity:.022;
+    background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+
+  /* ── nav (shared site nav) ───────────────────────────── */
+  nav{position:fixed; top:0; left:0; right:0; height:var(--nav-h); background:var(--paper);
+      border-bottom:1px solid var(--rule); display:flex; align-items:center; padding:0 24px; gap:24px; z-index:100}
+  .nav-wordmark{font-family:var(--ff-serif); font-size:20px; color:var(--ink); letter-spacing:-.01em;
+                text-decoration:none; flex-shrink:0; display:flex; align-items:center}
+  .nav-logo{height:26px; width:auto; margin-right:8px}
+  .nav-wordmark span{color:var(--orange)}
+  .nav-tabs{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); display:flex; gap:2px}
+  .nav-tab{font-family:var(--ff-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+           color:var(--ink3); background:none; border:none; padding:6px 14px; cursor:pointer; border-radius:4px;
+           transition:color .15s, background .15s; text-decoration:none; display:inline-block}
+  .nav-tab:hover{color:var(--ink); background:var(--paper2)}
+  .nav-tab.active{color:var(--ink); background:var(--paper3)}
+  .nav-auth{margin-left:auto; display:flex; align-items:center; gap:10px; flex-shrink:0}
+  .nav-auth-avatar{width:28px; height:28px; border-radius:50%; object-fit:cover; border:1.5px solid var(--rule)}
+  .nav-signin-btn{font-family:var(--ff-mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+                  padding:5px 12px; background:var(--orange); color:#fff; border:none; border-radius:4px;
+                  cursor:pointer; text-decoration:none}
+  .nav-signin-btn:hover{opacity:.85}
+  .nav-signout-btn{font-family:var(--ff-mono); font-size:10px; letter-spacing:.04em; color:var(--ink3);
+                   background:none; border:none; cursor:pointer; padding:4px 6px}
+  .nav-signout-btn:hover{color:var(--ink)}
+  @media(max-width:720px){
+    nav{padding:0 14px; gap:12px}
+    .nav-tabs{position:static; transform:none; margin-left:6px; overflow-x:auto; -webkit-overflow-scrolling:touch}
+    .nav-tabs::-webkit-scrollbar{display:none}
+    .nav-tab{white-space:nowrap; padding:5px 12px}
+  }
+
+  /* ── page ────────────────────────────────────────────── */
+  .page{padding-top:var(--nav-h)}
+  .wrap{max-width:760px; margin:0 auto; padding:40px 20px 80px}
+  .pagehead{margin-bottom:6px}
+  .eyebrow{font-family:var(--ff-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--orange)}
+  h1{font-family:var(--ff-serif); font-size:42px; line-height:1.05; color:var(--ink); margin:6px 0 8px}
+  .lede{color:var(--ink3); font-size:16px; max-width:50ch; line-height:1.5}
+
+  .grid{display:grid; grid-template-columns:1fr; gap:18px; margin-top:30px}
+  @media(min-width:640px){ .grid{grid-template-columns:1fr 1fr} }
+
+  .gcard{
+    position:relative; display:flex; flex-direction:column; color:inherit;
+    background:var(--card); border:1px solid var(--rule); border-radius:14px; padding:24px 22px; min-height:210px;
+    box-shadow:0 1px 0 rgba(0,0,0,.03), 0 10px 30px rgba(20,16,10,.06);
+  }
+  .gcard .tag{position:absolute; top:18px; right:18px; font-family:var(--ff-mono); font-size:10px;
+              letter-spacing:.1em; text-transform:uppercase; color:var(--orange); background:var(--orange-lt);
+              border:1px solid #f6d8c8; border-radius:100px; padding:4px 10px}
+  .gcard .glives{display:flex; gap:10px; align-items:center; margin-bottom:18px}
+  .gcard .glives img{height:34px; width:auto}
+  .gcard h2{font-family:var(--ff-serif); font-size:26px; color:var(--ink); margin-bottom:6px; line-height:1.1}
+  .gcard p{color:var(--ink3); font-size:14.5px; line-height:1.5; margin-bottom:auto}
+  .gactions{display:flex; gap:10px; margin-top:20px; flex-wrap:wrap}
+  .gbtn{font-family:var(--ff-mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase;
+        padding:11px 16px; border-radius:9px; text-decoration:none; border:1.5px solid var(--rule);
+        color:var(--ink2); background:transparent; display:inline-flex; align-items:center; gap:6px;
+        transition:border-color .15s, color .15s, opacity .15s; cursor:pointer}
+  .gbtn:hover{border-color:var(--ink3); color:var(--ink)}
+  .gbtn.primary{background:var(--orange); border-color:var(--orange); color:#fff}
+  .gbtn.primary:hover{opacity:.92; color:#fff}
+  .gbtn .arrow{transition:transform .15s}
+  .gbtn.primary:hover .arrow{transform:translateX(3px)}
+
+  .soon{
+    display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;
+    background:transparent; border:1.5px dashed var(--rule); border-radius:14px; padding:24px; min-height:210px; color:var(--ink4);
+  }
+  .soon .s-title{font-family:var(--ff-serif); font-size:22px; color:var(--ink4); margin-bottom:4px}
+  .soon .s-sub{font-family:var(--ff-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase}
+</style>
+</head>
+<body>
+<nav>
+  <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
+  <div class="nav-tabs">
+    <a class="nav-tab" href="/">Home</a>
+    <a class="nav-tab" href="/reviews">BasketBoxd</a>
+    <a class="nav-tab" href="/stats">Stats</a>
+    <a class="nav-tab active" href="/games">Games</a>
+  </div>
+  <div class="nav-auth" id="nav-auth-slot"></div>
+</nav>
+
+<div class="page">
+  <div class="wrap">
+    <div class="pagehead">
+      <div class="eyebrow">ydkball games</div>
+      <h1>Games</h1>
+      <p class="lede">Test your basketball brain. New ways to play all season — starting with daily Survival.</p>
+    </div>
+
+    <div class="grid">
+      <div class="gcard">
+        <span class="tag">Daily · Free</span>
+        <div class="glives" title="three lives">
+          <img src="/transparent.png" alt=""><img src="/transparent.png" alt=""><img src="/transparent.png" alt="">
+        </div>
+        <h2>Survival</h2>
+        <p>Ten NBA stat questions, three lives. Clear them all to prove you know ball — a new run every day. Pro unlocks unlimited runs.</p>
+        <div class="gactions">
+          <a class="gbtn primary" href="/survival">Play today's run <span class="arrow">→</span></a>
+          <a class="gbtn" href="/survival?mode=unlimited">Unlimited · Pro</a>
+        </div>
+      </div>
+
+      <div class="soon">
+        <div class="s-title">More games</div>
+        <div class="s-sub">Coming soon</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Nav auth (shared across all pages) ───────────────────────
+async function initNavAuth() {
+  const slot = document.getElementById('nav-auth-slot');
+  if (!slot) return;
+  try {
+    const res = await fetch('/auth/me');
+    const data = await res.json();
+    const user = data.user;
+    if (user) {
+      slot.innerHTML = `
+        <a href="/profile" style="text-decoration:none;cursor:pointer">${user.avatar_url ? `<img class="nav-auth-avatar" src="${user.avatar_url}" alt="">` : ''}</a>
+        <button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>`;
+      if (typeof user.night_mode !== 'undefined') {
+        const enabled = !!user.night_mode;
+        localStorage.setItem('ydkball_night', enabled ? '1' : '0');
+        document.documentElement.classList.toggle('night-mode', enabled);
+      }
+    } else {
+      slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login?next=${encodeURIComponent(window.location.pathname)}">Sign in</a>`;
+    }
+  } catch {
+    slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login">Sign in</a>`;
+  }
+}
+function navSignOut() {
+  window.location.href = '/auth/logout?next=' + encodeURIComponent(window.location.pathname);
+}
+initNavAuth();
+</script>
+</body>
+</html>

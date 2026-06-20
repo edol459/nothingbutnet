@@ -1024,6 +1024,7 @@
     <a class="nav-tab" href="/">Home</a>
     <a class="nav-tab active" href="/reviews">BasketBoxd</a>
     <a class="nav-tab" href="/stats">Stats</a>
+    <a class="nav-tab" href="/games">Games</a>
   </div>
   <div class="nav-auth" id="nav-auth-slot"></div>
 </nav>
@@ -1343,15 +1344,16 @@ function matchupLabel(g) {
 function scoreline(g) {
   const awayWin = g.away_score > g.home_score;
   const homeWin = g.home_score > g.away_score;
+  const league = g.league || (String(g.game_id).startsWith('10') ? 'wnba' : 'nba');
   return `<div class="scoreline-logo">
     <div class="sl-team">
-      ${logoImg(g.away_team_abbr, 22)}
+      ${logoImgLeague(g.away_team_abbr, league, 22)}
       <span class="${awayWin ? 'win' : ''}">${g.away_team_abbr} <strong>${g.away_score}</strong></span>
     </div>
     <span class="sl-dash">–</span>
     <div class="sl-team">
       <span class="${homeWin ? 'win' : ''}">${g.home_team_abbr} <strong>${g.home_score}</strong></span>
-      ${logoImg(g.home_team_abbr, 22)}
+      ${logoImgLeague(g.home_team_abbr, league, 22)}
     </div>
   </div>`;
 }

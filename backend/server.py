@@ -180,6 +180,12 @@ def _fmt_game_time(val) -> str:
 from auth import auth_bp, init_oauth, login_required, current_user
 from datetime import timedelta
 
+# Survival trivia engine (backend/games/) — explicit path so `import survival_api`
+# works regardless of how gunicorn resolves the `games` package.
+import sys as _sys
+_sys.path.insert(0, os.path.join(os.path.dirname(__file__), "games"))
+import survival_api  # noqa: E402
+
 app.secret_key = os.getenv("SECRET_KEY")
 app.permanent_session_lifetime = timedelta(days=60)
 init_oauth(app)
@@ -500,6 +506,33 @@ def _ensure_tables():
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_predictions_game ON game_predictions(game_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_predictions_user ON game_predictions(user_id)")
+        # ── Survival trivia ──────────────────────────────────────────
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS survival_daily (
+                date       DATE PRIMARY KEY,
+                payload    JSONB NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS survival_used (
+                text    TEXT PRIMARY KEY,
+                used_on DATE NOT NULL
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_survival_used_on ON survival_used(used_on)")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS survival_results (
+                id         SERIAL PRIMARY KEY,
+                user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                mode       TEXT NOT NULL DEFAULT 'daily',
+                date       DATE NOT NULL,
+                score      INTEGER NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(user_id, mode, date)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_survival_results_user ON survival_results(user_id, mode)")
         conn.commit()
         cur.close(); conn.close()
     except Exception as e:
@@ -7947,6 +7980,112 @@ def get_wnba_team_stats(abbr):
         print(f"[wnba] team-stats jsonify error {abbr}: {e}", flush=True)
         return jsonify({"abbr": abbr, "ppg": None, "rpg": None, "apg": None,
                         "topg": None, "fg_pct": None, "fg3_pct": None})
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Survival trivia — procedural NBA stat game (offseason engagement)
+#   Free: one shared daily run.   Pro: unlimited (replayable 10-question) runs.
+#   Answer validation is client-side (the autocomplete picker yields a real
+#   player_id checked against each question's answer_ids); the client submits
+#   its final score.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _survival_streak_best(cur, user_id):
+    """Best score + current consecutive-day streak across this user's daily results."""
+    cur.execute("SELECT date, score FROM survival_results "
+                "WHERE user_id = %s AND mode = 'daily' ORDER BY date DESC", (user_id,))
+    rows = cur.fetchall()
+    best = max((r["score"] for r in rows), default=0)
+    streak, expected = 0, date.today()
+    for r in rows:
+        if r["date"] == expected:
+            streak += 1
+            expected = expected - timedelta(days=1)
+        elif r["date"] < expected:
+            break
+    return best, streak
+
+
+@app.route("/api/survival/daily")
+def survival_daily():
+    """Today's shared daily run (questions + answer sets), plus the player's prior result.
+    Reads the cron-generated row; generates inline only as a fallback (slow off-prod)."""
+    user  = current_user()
+    today = date.today().isoformat()
+    conn  = get_conn()
+    run   = survival_api.ensure_daily(conn, today)
+    your_result, best, streak = None, 0, 0
+    if user:
+        cur = conn.cursor()
+        cur.execute("SELECT score FROM survival_results "
+                    "WHERE user_id = %s AND mode = 'daily' AND date = %s", (user["id"], today))
+        r = cur.fetchone()
+        your_result = r["score"] if r else None
+        best, streak = _survival_streak_best(cur, user["id"])
+    return jsonify({
+        "date": today, "lives": survival_api.LIVES, "questions": run,
+        "your_result": your_result, "best": best, "streak": streak,
+    })
+
+
+@app.route("/api/survival/daily/result", methods=["POST"])
+@login_required
+def survival_daily_result():
+    """Record the player's daily score (first attempt counts) and return streak/best."""
+    user  = current_user()
+    data  = request.get_json(force=True, silent=True) or {}
+    score = max(0, int(data.get("score", 0)))
+    today = date.today().isoformat()
+    conn  = get_conn(); cur = conn.cursor()
+    cur.execute("""INSERT INTO survival_results (user_id, mode, date, score)
+                   VALUES (%s, 'daily', %s, %s)
+                   ON CONFLICT (user_id, mode, date) DO NOTHING""", (user["id"], today, score))
+    conn.commit()
+    cur.execute("SELECT score FROM survival_results "
+                "WHERE user_id = %s AND mode = 'daily' AND date = %s", (user["id"], today))
+    official = cur.fetchone()["score"]
+    best, streak = _survival_streak_best(cur, user["id"])
+    return jsonify({"recorded": official, "best": best, "streak": streak})
+
+
+@app.route("/api/survival/unlimited")
+@login_required
+def survival_unlimited():
+    """One on-demand question for an Unlimited run — Pro only. `pos` = 1-based position;
+    `exclude` = comma-separated answer player_ids already used (so we don't repeat one).
+    The client fetches these one at a time (capped at a 10-question run) and prefetches
+    the next while you answer."""
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    # is_pro lives in the DB, not the session cookie — look it up fresh (also handles
+    # users who upgraded mid-session).
+    cur.execute("SELECT is_pro FROM users WHERE id = %s", (user["id"],))
+    row = cur.fetchone()
+    if not (row and row["is_pro"]):
+        return jsonify({"error": "pro_required",
+                        "message": "Unlimited runs are a Pro feature."}), 403
+    pos = max(1, int(request.args.get("pos", 1)))
+    exclude = [int(x) for x in request.args.get("exclude", "").split(",") if x.strip().isdigit()]
+    q = survival_api.next_unlimited(conn, pos, exclude=exclude)
+    return jsonify({"lives": survival_api.LIVES, "question": q})
+
+
+@app.route("/api/survival/players")
+def survival_players():
+    """All players [{id, name}] for the client's autocomplete picker (cached)."""
+    return jsonify({"players": survival_api.player_list(get_conn())})
+
+
+@app.route("/games")
+@app.route("/games.html")
+def games_page():
+    return app.send_static_file("games.html")
+
+
+@app.route("/survival")
+@app.route("/survival.html")
+def survival_page():
+    return app.send_static_file("survival.html")
 
 
 if __name__ == "__main__":
