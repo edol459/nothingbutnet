@@ -781,16 +781,24 @@ def gen_award(conn, seasons, only=None, lo=None, hi=None):
 # starts at 1996-97, so anyone earlier has a truncated total/count (wrong answers).
 
 _DEBUT_FLOOR  = "1997-98"
-# Season axis uses only intuitive, recognizable stats (box score + shooting %s) — not
-# plus-minus or tracking metrics, which make for noisy/coinflip "who averaged more" calls.
-_TOOT_SEASON  = {"pts", "reb", "ast", "stl", "blk", "fg3m", "pra",
-                 "ts_pct", "fg3_pct", "fg_pct", "ft_pct"}
+# Season axis uses only intuitive, recognizable stats (box score + TS%/3P%) — not FG%/FT%
+# (coinflippy) or plus-minus/tracking metrics (noisy).
+_TOOT_SEASON  = {"pts", "reb", "ast", "stl", "blk", "fg3m", "pra", "ts_pct", "fg3_pct"}
 _CAREER_STATS = [("pts", "career points"), ("reb", "career rebounds"),
                  ("ast", "career assists"), ("stl", "career steals"),
                  ("blk", "career blocks"), ("fg3m", "career made threes")]
+_PEAK_STATS   = [("pts", "single-season scoring average"), ("reb", "single-season rebounding average"),
+                 ("ast", "single-season assist average"), ("fg3m", "single-season made-threes average"),
+                 ("stl", "single-season steals average"), ("blk", "single-season blocks average")]
 _ACCOLADES    = [("All-Star", "made more", "All-Star teams"),
                  ("MVP", "won more", "MVPs"),
                  ("DPOY", "won more", "Defensive Player of the Year awards")]
+# Single-year award → winner vs. their top-scoring teammate that season (a plausible decoy)
+_AWARDS_1YR   = [("Finals MVP", "Finals MVP"), ("MVP", "MVP"),
+                 ("DPOY", "Defensive Player of the Year"), ("ROTY", "Rookie of the Year"),
+                 ("6MOY", "Sixth Man of the Year"), ("MIP", "Most Improved Player")]
+_PEAK_CACHE   = {}     # col   -> [(player_id, name, best_season_value)] desc
+_WINNER_CACHE = {}     # award -> [(season, player_id, name, team)]
 _CAREER_CACHE   = {}    # col   -> [(player_id, name, total)] desc, complete-career players
 _ACCOLADE_CACHE = {}    # award -> [(player_id, name, count)] desc
 
@@ -840,21 +848,23 @@ def _toot(text, statkey, a, b, season="career", season_type="Career"):
 
 
 def _toot_season(conn, seasons):
-    cands = [s for s in STAT_POOL if s.key in _TOOT_SEASON]
-    for stat in random.sample(cands, k=len(cands)):
-        elig = [s for s in seasons if not stat.min_season or s >= stat.min_season]
+    # ~30% of the time, ask about the playoffs (only 2020-21+ has playoff data)
+    po = playoff_seasons(conn)
+    stype = "Playoffs" if po and random.random() < 0.30 else "Regular Season"
+    pool_seasons = po if stype == "Playoffs" else seasons
+    for stat in random.sample([s for s in STAT_POOL if s.key in _TOOT_SEASON], k=len(_TOOT_SEASON)):
+        elig = [s for s in pool_seasons if not stat.min_season or s >= stat.min_season]
         if not elig:
             continue
         season = random.choice(elig)
-        rows = load_qualified(conn, stat, season)
+        rows = load_qualified(conn, stat, season, season_type=stype)
         if len(rows) < 8:
             continue
         a, b = random.sample(rows[:15], 2)          # top of the board → both recognizable
         if a[2] == b[2]:
             continue
         comp = "had a higher" if stat.pct else "averaged more"
-        return _toot(f"Who {comp} {stat.noun} in {when(season, 'Regular Season')}?",
-                     stat.key, a, b, season, "Regular Season")
+        return _toot(f"Who {comp} {stat.noun} in {when(season, stype)}?", stat.key, a, b, season, stype)
     return None
 
 
@@ -869,6 +879,40 @@ def _toot_career(conn):
     return None if a[2] == b[2] else _toot(f"Who has more {noun}?", "career_" + col, a, b)
 
 
+def _peak_board(conn, col):
+    """Each player's best single-season value (qualified seasons), 1997-98+ debuts so the
+    peak isn't truncated by our data window. Top ~120 by peak."""
+    if col not in _PEAK_CACHE:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                WITH peaks AS (
+                    SELECT player_id, MAX({col}) AS peak FROM player_seasons
+                    WHERE season_type='Regular Season' AND gp >= %s AND {col} IS NOT NULL
+                    GROUP BY player_id),
+                debut AS (
+                    SELECT player_id, MIN(season) AS d FROM player_seasons
+                    WHERE season_type='Regular Season' GROUP BY player_id)
+                SELECT pk.player_id, p.player_name AS name, pk.peak
+                FROM peaks pk JOIN debut d ON d.player_id = pk.player_id
+                             JOIN players p ON p.player_id = pk.player_id
+                WHERE d.d >= %s
+                ORDER BY pk.peak DESC LIMIT 120
+            """, (MIN_GP, _DEBUT_FLOOR))
+            _PEAK_CACHE[col] = [(r["player_id"], r["name"], float(r["peak"])) for r in cur.fetchall()]
+    return _PEAK_CACHE[col]
+
+
+def _toot_single_high(conn):
+    col, noun = random.choice(_PEAK_STATS)
+    rows = _peak_board(conn, col)
+    if len(rows) < 30:
+        return None
+    i = random.randrange(0, len(rows) - 1)
+    j = random.randrange(i + 1, min(i + 40, len(rows)))
+    a, b = rows[i], rows[j]
+    return None if a[2] == b[2] else _toot(f"Who had a higher {noun}?", "peak_" + col, a, b)
+
+
 def _toot_accolade(conn):
     award, verb, noun = random.choice(_ACCOLADES + [("All-Star", "made more", "All-Star teams")] * 2)
     rows = [r for r in _accolade_board(conn, award) if r[2] >= 1]
@@ -881,13 +925,64 @@ def _toot_accolade(conn):
     return None
 
 
+def _award_winners(conn, award):
+    """[(season, player_id, name, team)] for every winner of a single-year award."""
+    if award not in _WINNER_CACHE:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT ps.season, ps.player_id, p.player_name AS name, ps.team_abbr AS team
+                FROM   player_seasons ps JOIN players p ON p.player_id = ps.player_id
+                WHERE  ps.season_type='Regular Season' AND %s = ANY(ps.awards) AND ps.team_abbr IS NOT NULL
+                ORDER BY ps.season
+            """, (award,))
+            _WINNER_CACHE[award] = [(r["season"], r["player_id"], r["name"], r["team"]) for r in cur.fetchall()]
+    return _WINNER_CACHE[award]
+
+
+def _team_top_scorer(conn, season, team, exclude):
+    """The highest-PPG player on `team` that season (excluding `exclude`) — the decoy."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT ps.player_id, p.player_name AS name FROM player_seasons ps
+            JOIN players p ON p.player_id = ps.player_id
+            WHERE ps.season=%s AND ps.season_type='Regular Season' AND ps.team_abbr=%s
+              AND ps.player_id != %s AND ps.gp >= 20
+            ORDER BY ps.pts DESC LIMIT 1
+        """, (season, team, exclude))
+        r = cur.fetchone()
+        return (r["player_id"], r["name"]) if r else None
+
+
+def _toot_award(conn):
+    """"Who won [award] in [year]?" — the real winner vs. their top-scoring teammate."""
+    award, label = random.choice(_AWARDS_1YR)
+    winners = _award_winners(conn, award)
+    if not winners:
+        return None
+    for _ in range(10):
+        season, wid, wname, team = random.choice(winners)
+        decoy = _team_top_scorer(conn, season, team, wid)
+        if not decoy:
+            continue
+        opts = [Answer(wid, wname, 1), Answer(decoy[0], decoy[1], 0)]
+        random.shuffle(opts)
+        return Question(f"Who won {label} in {when(season, 'Regular Season')}?",
+                        Stat("award_" + award, "", "", 1), season, "award",
+                        [Answer(wid, wname, 1)], season_type="Regular Season", options=opts)
+    return None
+
+
 def generate_thisorthat(conn, seasons, exclude=None, tries=40):
-    """A this-or-that question whose winner isn't in `exclude` (answer player_ids already
-    used this run). Picks an axis at random: ~50% season stat, ~30% career, ~20% accolade."""
+    """A this-or-that question whose answer player isn't in `exclude` (already used this run).
+    Random axis: season stat, career total, single-season high, accolade count, award decoy."""
     exclude = exclude or set()
+    axes = [(_toot_season, 0.34, (seasons,)), (_toot_career, 0.18, ()),
+            (_toot_single_high, 0.16, ()), (_toot_accolade, 0.16, ()), (_toot_award, 0.16, ())]
+    fns     = [a[0] for a in axes]
+    weights = [a[1] for a in axes]
     for _ in range(tries):
-        r = random.random()
-        q = _toot_season(conn, seasons) if r < 0.50 else _toot_career(conn) if r < 0.80 else _toot_accolade(conn)
+        fn, args = random.choices(list(zip(fns, [a[2] for a in axes])), weights=weights)[0]
+        q = fn(conn, *args)
         if q and q.answers[0].player_id not in exclude:
             return q
     return _toot_season(conn, seasons)
