@@ -7990,13 +7990,24 @@ def get_wnba_team_stats(abbr):
 #   its final score.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+def _survival_today():
+    """The Survival daily rolls over at **midnight ET** (NBA's timezone) — not the server's
+    UTC midnight. Returns today's calendar date in America/New_York."""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+    from datetime import datetime as _dt
+    return _dt.now(ZoneInfo("America/New_York")).date()
+
+
 def _survival_streak_best(cur, user_id):
     """Best score + current consecutive-day streak across this user's daily results."""
     cur.execute("SELECT date, score FROM survival_results "
                 "WHERE user_id = %s AND mode = 'daily' ORDER BY date DESC", (user_id,))
     rows = cur.fetchall()
     best = max((r["score"] for r in rows), default=0)
-    streak, expected = 0, date.today()
+    streak, expected = 0, _survival_today()
     for r in rows:
         if r["date"] == expected:
             streak += 1
@@ -8011,7 +8022,7 @@ def survival_daily():
     """Today's shared daily run (questions + answer sets), plus the player's prior result.
     Reads the cron-generated row; generates inline only as a fallback (slow off-prod)."""
     user  = current_user()
-    today = date.today().isoformat()
+    today = _survival_today().isoformat()
     conn  = get_conn()
     run   = survival_api.ensure_daily(conn, today)
     your_result, best, streak = None, 0, 0
@@ -8031,21 +8042,59 @@ def survival_daily():
 @app.route("/api/survival/daily/result", methods=["POST"])
 @login_required
 def survival_daily_result():
-    """Record the player's daily score (first attempt counts) and return streak/best."""
+    """Record the daily result (first attempt counts) and grant Ball Knowledge XP.
+
+    The client submits `picks` — the player_id it chose for each question, in order — and
+    the **server** scores them against the stored daily (so the score isn't a raw number we
+    blindly trust). XP: +10 for completing, +5 per correct, +50 for a perfect 10/10. Granted
+    once per ET day (idempotent). Unlimited runs grant no XP. (Falls back to a trusted `score`
+    for older clients during a deploy.)"""
     user  = current_user()
     data  = request.get_json(force=True, silent=True) or {}
-    score = max(0, int(data.get("score", 0)))
-    today = date.today().isoformat()
+    today = _survival_today().isoformat()
     conn  = get_conn(); cur = conn.cursor()
+
+    # score server-side against the stored daily
+    cur.execute("SELECT payload FROM survival_daily WHERE date = %s", (today,))
+    row = cur.fetchone()
+    questions = row["payload"] if row else []
+    total = len(questions)
+    picks = data.get("picks")
+    if isinstance(picks, list) and total:
+        correct = sum(1 for i, q in enumerate(questions)
+                      if i < len(picks) and isinstance(picks[i], int)
+                      and picks[i] in (q.get("answer_ids") or []))
+    else:                                              # legacy client → trust the score
+        correct = max(0, int(data.get("score", 0)))
+    perfect = total > 0 and correct == total
+    score = correct
+
     cur.execute("""INSERT INTO survival_results (user_id, mode, date, score)
                    VALUES (%s, 'daily', %s, %s)
                    ON CONFLICT (user_id, mode, date) DO NOTHING""", (user["id"], today, score))
+
+    # Ball Knowledge XP — once per day
+    xp_amount = 10 + 5 * correct + (50 if perfect else 0)
+    new_total = _grant_xp(cur, user["id"], "survival_daily", today, xp_amount)
     conn.commit()
+
+    granted   = new_total != -1
+    xp_gained = xp_amount if granted else 0
+    if granted:
+        total_xp = new_total
+    else:
+        cur.execute("SELECT xp FROM users WHERE id = %s", (user["id"],))
+        total_xp = (cur.fetchone() or {}).get("xp") or 0
+
     cur.execute("SELECT score FROM survival_results "
                 "WHERE user_id = %s AND mode = 'daily' AND date = %s", (user["id"], today))
     official = cur.fetchone()["score"]
     best, streak = _survival_streak_best(cur, user["id"])
-    return jsonify({"recorded": official, "best": best, "streak": streak})
+    return jsonify({
+        "recorded": official, "best": best, "streak": streak,
+        "correct": correct, "perfect": perfect,
+        "xp_gained": xp_gained, "total_xp": total_xp, "rank": get_rank_info(total_xp),
+    })
 
 
 @app.route("/api/survival/unlimited")

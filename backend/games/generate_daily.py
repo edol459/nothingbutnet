@@ -42,7 +42,11 @@ def main():
     if args.date:
         dates = [args.date]
     else:
-        today = datetime.date.today()
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+        today = datetime.datetime.now(ZoneInfo("America/New_York")).date()   # daily = ET day
         dates = [(today + datetime.timedelta(days=d)).isoformat() for d in range(args.days)]
 
     for d in dates:

@@ -772,6 +772,127 @@ def gen_award(conn, seasons, only=None, lo=None, hi=None):
     return None
 
 
+# ── This-or-that generation (the whole game) ─────────────────────────────────
+# Every Survival question is "Who [did more X] — A or B?": two players, tap one. Far
+# more variety than superlatives (pairs × axes × seasons) and a judgment, not recall.
+# Three axes: a single-season stat, a career total, and an accolade count.
+#
+# Career/accolade axes are restricted to players who DEBUTED in 1997-98+ — our data
+# starts at 1996-97, so anyone earlier has a truncated total/count (wrong answers).
+
+_DEBUT_FLOOR  = "1997-98"
+# Season axis uses only intuitive, recognizable stats (box score + shooting %s) — not
+# plus-minus or tracking metrics, which make for noisy/coinflip "who averaged more" calls.
+_TOOT_SEASON  = {"pts", "reb", "ast", "stl", "blk", "fg3m", "pra",
+                 "ts_pct", "fg3_pct", "fg_pct", "ft_pct"}
+_CAREER_STATS = [("pts", "career points"), ("reb", "career rebounds"),
+                 ("ast", "career assists"), ("stl", "career steals"),
+                 ("blk", "career blocks"), ("fg3m", "career made threes")]
+_ACCOLADES    = [("All-Star", "made more", "All-Star teams"),
+                 ("MVP", "won more", "MVPs"),
+                 ("DPOY", "won more", "Defensive Player of the Year awards")]
+_CAREER_CACHE   = {}    # col   -> [(player_id, name, total)] desc, complete-career players
+_ACCOLADE_CACHE = {}    # award -> [(player_id, name, count)] desc
+
+
+def _career_board(conn, col):
+    if col not in _CAREER_CACHE:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                SELECT ps.player_id, p.player_name AS name, SUM(ps.{col} * ps.gp) AS total
+                FROM   player_seasons ps JOIN players p ON p.player_id = ps.player_id
+                WHERE  ps.season_type = 'Regular Season' AND ps.{col} IS NOT NULL
+                GROUP BY ps.player_id, p.player_name
+                HAVING SUM(ps.gp) >= 200 AND MIN(ps.season) >= %s
+                ORDER BY total DESC LIMIT 150
+            """, (_DEBUT_FLOOR,))
+            _CAREER_CACHE[col] = [(r["player_id"], r["name"], float(r["total"])) for r in cur.fetchall()]
+    return _CAREER_CACHE[col]
+
+
+def _accolade_board(conn, award):
+    if award not in _ACCOLADE_CACHE:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH counts AS (
+                    SELECT player_id, COUNT(*) AS n FROM player_seasons
+                    WHERE season_type='Regular Season' AND %s = ANY(awards) GROUP BY player_id),
+                debut AS (
+                    SELECT player_id, MIN(season) AS d FROM player_seasons
+                    WHERE season_type='Regular Season' GROUP BY player_id)
+                SELECT c.player_id, p.player_name AS name, c.n
+                FROM counts c JOIN debut d ON d.player_id = c.player_id
+                             JOIN players p ON p.player_id = c.player_id
+                WHERE d.d >= %s
+                ORDER BY c.n DESC
+            """, (award, _DEBUT_FLOOR))
+            _ACCOLADE_CACHE[award] = [(r["player_id"], r["name"], int(r["n"])) for r in cur.fetchall()]
+    return _ACCOLADE_CACHE[award]
+
+
+def _toot(text, statkey, a, b, season="career", season_type="Career"):
+    """Build a this-or-that Question from two (id, name, value) rows."""
+    winner = a if a[2] > b[2] else b
+    opts = [Answer(a[0], a[1], a[2]), Answer(b[0], b[1], b[2])]
+    random.shuffle(opts)
+    return Question(text, Stat(statkey, "", "", 1), season, "thisorthat",
+                    [Answer(winner[0], winner[1], winner[2])], season_type=season_type, options=opts)
+
+
+def _toot_season(conn, seasons):
+    cands = [s for s in STAT_POOL if s.key in _TOOT_SEASON]
+    for stat in random.sample(cands, k=len(cands)):
+        elig = [s for s in seasons if not stat.min_season or s >= stat.min_season]
+        if not elig:
+            continue
+        season = random.choice(elig)
+        rows = load_qualified(conn, stat, season)
+        if len(rows) < 8:
+            continue
+        a, b = random.sample(rows[:15], 2)          # top of the board → both recognizable
+        if a[2] == b[2]:
+            continue
+        comp = "had a higher" if stat.pct else "averaged more"
+        return _toot(f"Who {comp} {stat.noun} in {when(season, 'Regular Season')}?",
+                     stat.key, a, b, season, "Regular Season")
+    return None
+
+
+def _toot_career(conn):
+    col, noun = random.choice(_CAREER_STATS)
+    rows = _career_board(conn, col)
+    if len(rows) < 30:
+        return None
+    i = random.randrange(0, len(rows) - 1)
+    j = random.randrange(i + 1, min(i + 40, len(rows)))   # nearby ranks = a closer, fairer call
+    a, b = rows[i], rows[j]
+    return None if a[2] == b[2] else _toot(f"Who has more {noun}?", "career_" + col, a, b)
+
+
+def _toot_accolade(conn):
+    award, verb, noun = random.choice(_ACCOLADES + [("All-Star", "made more", "All-Star teams")] * 2)
+    rows = [r for r in _accolade_board(conn, award) if r[2] >= 1]
+    if len(rows) < 6:
+        return None
+    for _ in range(12):
+        a, b = random.sample(rows, 2)
+        if a[2] != b[2]:
+            return _toot(f"Who {verb} {noun}?", "acc_" + award, a, b)
+    return None
+
+
+def generate_thisorthat(conn, seasons, exclude=None, tries=40):
+    """A this-or-that question whose winner isn't in `exclude` (answer player_ids already
+    used this run). Picks an axis at random: ~50% season stat, ~30% career, ~20% accolade."""
+    exclude = exclude or set()
+    for _ in range(tries):
+        r = random.random()
+        q = _toot_season(conn, seasons) if r < 0.50 else _toot_career(conn) if r < 0.80 else _toot_accolade(conn)
+        if q and q.answers[0].player_id not in exclude:
+            return q
+    return _toot_season(conn, seasons)
+
+
 # ── difficulty model ─────────────────────────────────────────────────────────
 
 def score_difficulty(q):

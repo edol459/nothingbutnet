@@ -24,20 +24,12 @@ import psycopg2.extras
 sys.path.insert(0, os.path.dirname(__file__))
 import question_engine as qe  # noqa: E402
 
-# ── config (mirrors survival.py) ──────────────────────────────────────────────
+# ── config ────────────────────────────────────────────────────────────────────
 LIVES         = 3       # cushion — you can miss up to 2 and still finish the daily
-SAFE_OPENING  = 2       # first N questions are guaranteed gimmes (a gentle opener)
 DAILY_LENGTH  = 10      # the daily is a fixed 10-question gauntlet — clear it = "you know ball"
 RECENT_TEXTS  = 400     # cross-day dedup: how many recent question texts to avoid
 
-# No difficulty ramp: after the gimme opener, each question is a random draw weighted to
-# roughly match the natural pool mix, so a run is sometimes easier, sometimes harder.
-DIFF_WEIGHTS  = {"easy": 0.42, "medium": 0.40, "hard": 0.18}
-
-
-def _pick_difficulty():
-    keys = list(DIFF_WEIGHTS)
-    return random.choices(keys, weights=[DIFF_WEIGHTS[k] for k in keys])[0]
+# Every question is a this-or-that ("Who did more X — A or B?"). No difficulty labels.
 
 
 # ── serialization ─────────────────────────────────────────────────────────────
@@ -62,35 +54,23 @@ def serialize(q, idx):
 
 
 # ── run generation ────────────────────────────────────────────────────────────
-def _gen_run(conn, seasons, length, seed=None, asked=None, start=1):
-    """Build a serialized run of `length` questions: the first SAFE_OPENING (from `start`)
-    are guaranteed gimmes, the rest are random difficulty (no ramp). Avoids repeated
-    text/stat/answer/team within the run (and `asked` across runs)."""
+def _gen_run(conn, seasons, length, seed=None, asked=None):
+    """Build a serialized run of `length` this-or-that questions, avoiding repeated
+    question text (within the run and across `asked`) and a repeated answer player."""
     if seed is not None:
         random.seed(seed)
     asked = set(asked or [])
-    run_stats, run_answers, run_teams = set(), set(), set()
+    run_answers = set()
     out = []
     guard = 0
-    while len(out) < length and guard < length * 6:
+    while len(out) < length and guard < length * 10:
         guard += 1
-        pos = start + len(out)
-        safe = pos <= SAFE_OPENING
-        target = "easy" if safe else _pick_difficulty()
-        q = qe.generate_targeted(
-            conn, seasons, target, safe=safe,
-            asked=asked, avoid_stats=run_stats,
-            avoid_answers=run_answers, avoid_teams=run_teams,
-        )
-        if q is None:
+        q = qe.generate_thisorthat(conn, seasons, exclude=run_answers)
+        if q is None or q.text in asked:
             continue
         asked.add(q.text)
-        run_stats.add((q.operator, q.stat.key))
-        if q.n == 1:
-            run_answers.add(q.answers[0].player_id)
-        if q.team:
-            run_teams.add(q.team)
-        out.append(serialize(q, pos))
+        run_answers.add(q.answers[0].player_id)
+        out.append(serialize(q, len(out) + 1))
     return out
 
 
@@ -105,13 +85,11 @@ def build_daily(conn, date_str, recent_texts=None, seed=None):
 
 
 def next_unlimited(conn, pos, exclude=None):
-    """Generate ONE question on demand for an Unlimited run — **totally random** difficulty
-    from the first question (no gimme opener; that's only for the free daily). `exclude` is
-    the set of answer player_ids already used this run, so we don't repeat an answer.
-    Co-located with the DB this is a few ms; the client also prefetches the next while you
-    answer. (Unlimited is open-ended — 3 lives, go as far as you can.)"""
+    """One on-demand this-or-that question for an Unlimited run. `exclude` = answer
+    player_ids already used this run, so the same player isn't the answer twice.
+    (Unlimited is open-ended — 3 lives, go as far as you can.)"""
     seasons = qe.list_seasons(conn)
-    q = qe.generate_targeted(conn, seasons, _pick_difficulty(), avoid_answers=set(exclude or ()))
+    q = qe.generate_thisorthat(conn, seasons, exclude=set(exclude or ()))
     return serialize(q, pos) if q else None
 
 
