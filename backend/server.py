@@ -8037,9 +8037,9 @@ def survival_daily_result():
 
     The client submits `picks` — the player_id it chose for each question, in order — and
     the **server** scores them against the stored daily (so the score isn't a raw number we
-    blindly trust). XP: +10 for completing, +5 per correct, +50 for a perfect 10/10. Granted
-    once per ET day (idempotent). Unlimited runs grant no XP. (Falls back to a trusted `score`
-    for older clients during a deploy.)"""
+    blindly trust). XP: +10 for playing + 5 per correct answer (no perfect bonus — a 10/10
+    is +60). Granted once per ET day (idempotent). Unlimited runs grant no XP. (Falls back to
+    a trusted `score` for older clients during a deploy.)"""
     user  = current_user()
     data  = request.get_json(force=True, silent=True) or {}
     today = _survival_today().isoformat()
@@ -8064,8 +8064,9 @@ def survival_daily_result():
                    VALUES (%s, 'daily', %s, %s)
                    ON CONFLICT (user_id, mode, date) DO NOTHING""", (user["id"], today, score))
 
-    # Ball Knowledge XP — once per day
-    xp_amount = 10 + 5 * correct + (50 if perfect else 0)
+    # Ball Knowledge XP — once per day: +10 for playing + 5 per correct (no perfect bonus)
+    play_xp, per_correct = 10, 5
+    xp_amount = play_xp + per_correct * correct
     new_total = _grant_xp(cur, user["id"], "survival_daily", today, xp_amount)
     conn.commit()
 
@@ -8082,9 +8083,13 @@ def survival_daily_result():
     official = cur.fetchone()["score"]
     best, streak = _survival_streak_best(cur, user["id"])
     return jsonify({
-        "recorded": official, "best": best, "streak": streak,
+        "recorded": official, "best": best, "streak": streak, "total": total,
         "correct": correct, "perfect": perfect,
         "xp_gained": xp_gained, "total_xp": total_xp, "rank": get_rank_info(total_xp),
+        # breakdown for the result screen's "Ball Knowledge earned" panel
+        "xp_breakdown": {"play": play_xp, "per_correct": per_correct,
+                         "correct": correct, "correct_xp": per_correct * correct,
+                         "total": xp_amount},
     })
 
 

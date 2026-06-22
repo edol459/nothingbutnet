@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ydkball · Survival</title>
+<title>ydkball · Ball IQ Test</title>
 <link rel="icon" type="image/png" href="/logo.png">
 <link rel="apple-touch-icon" href="/logo-icon.png">
 <script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
@@ -165,6 +165,16 @@
   .xpline{font-family:var(--ff-mono); font-size:13px; letter-spacing:.04em; color:var(--orange);
           background:var(--orange-lt); border:1px solid #f6d8c8; border-radius:100px;
           padding:8px 18px; display:inline-block; margin-top:14px; font-weight:500}
+  /* Ball Knowledge breakdown panel on the daily result screen */
+  .xpcard{margin:18px auto 4px; max-width:300px; background:var(--orange-lt); border:1px solid #f6d8c8;
+          border-radius:10px; padding:14px 16px; text-align:left}
+  .xpcard .xptitle{font-family:var(--ff-mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase;
+                   color:var(--orange); text-align:center; margin-bottom:10px}
+  .xprow{display:flex; justify-content:space-between; align-items:baseline; font-family:var(--ff-sans);
+         font-size:14px; color:var(--ink2); padding:3px 0}
+  .xprow span:last-child{font-family:var(--ff-mono); color:var(--orange); font-weight:500}
+  .xprow.xptotal{margin-top:6px; padding-top:9px; border-top:1px solid #f1cdb9; font-weight:600; color:var(--ink)}
+  .xprow.xptotal span:last-child{font-size:16px}
 
   .foot{margin-top:auto; padding-top:26px; text-align:center; font-family:var(--ff-mono);
         font-size:11px; letter-spacing:.06em; color:var(--ink4); line-height:1.7}
@@ -185,7 +195,7 @@
   </nav>
 
   <div class="wrap">
-    <div class="eyebrow" id="mode">Daily Survival</div>
+    <div class="eyebrow" id="mode">Ball IQ Test</div>
     <div class="statusbar">
       <div class="lives" id="lives"></div>
       <div class="score">score<b id="score">0</b></div>
@@ -194,7 +204,7 @@
     <div id="stage"></div>
 
     <div class="foot">
-      3 lives · one guess each<br>
+      <span id="footnote">one question · two players · one answer</span><br>
       <span id="streakline"></span>
     </div>
   </div>
@@ -206,6 +216,7 @@ const livesEl = document.getElementById('lives');
 const scoreEl = document.getElementById('score');
 const modeEl = document.getElementById('mode');
 const streakEl = document.getElementById('streakline');
+const footEl = document.getElementById('footnote');
 
 let PLAYERS = [];
 let state = null;
@@ -217,6 +228,27 @@ function setLives(lives){
     img.src = '/transparent.png'; img.alt=''; img.className = 'life' + (i < lives ? '' : ' spent');
     livesEl.appendChild(img);
   }
+}
+// Daily has no lives (answer all 10 → get a score); only Unlimited shows the hoops.
+function showLives(on){ livesEl.style.display = on ? 'flex' : 'none'; }
+
+// Daily Ball Knowledge: +10 for playing + 5 per correct (no perfect bonus). Deterministic
+// from the correct count, so we can render the same breakdown live or on the locked screen.
+function xpBreakdownHTML(correct){
+  const play = 10, per = 5, cx = per * correct, total = play + cx;
+  return `<div class="xpcard">
+    <div class="xptitle">Ball Knowledge earned</div>
+    <div class="xprow"><span>Played today</span><span>+${play}</span></div>
+    <div class="xprow"><span>${correct} correct × ${per}</span><span>+${cx}</span></div>
+    <div class="xprow xptotal"><span>Total</span><span>+${total}</span></div>
+  </div>`;
+}
+// Score-tiered headline for a finished daily (everyone completes — no "out of lives").
+function dailyHeadline(score, total){
+  if(score === total)      return {text:'You KNOW ball.', cls:'win',  logo:true};
+  if(score >= total*0.7)   return {text:'You know ball.',  cls:'win',  logo:true};
+  if(score >= total*0.4)   return {text:'Solid run.',      cls:'',     logo:false};
+  return {text:'Hit the film room.', cls:'', logo:false};
 }
 function jfetch(url, opts){
   return fetch(API+url, Object.assign({credentials:'include'}, opts||{}))
@@ -236,8 +268,8 @@ async function boot(){
     stage.innerHTML = `<div class="card center">
       <img class="resultlogo" src="/transparent.png" alt="">
       <div class="headline">Sign in to play</div>
-      <div class="sub">Survival is free with a ydkball account — your daily run, streak, and
-        Ball Knowledge are saved to it.</div>
+      <div class="sub">Ball IQ Test is free with a ydkball account — your daily run, streak,
+        and Ball Knowledge are saved to it.</div>
       <a class="btn" href="/auth/google/login?next=${encodeURIComponent('/survival')}"
          style="text-decoration:none;margin-top:18px">Sign in</a></div>`;
     return;
@@ -265,15 +297,18 @@ function renderAlreadyPlayed(d){
   try { saved = JSON.parse(localStorage.getItem('survival_grid_' + d.date) || 'null'); } catch(e){}
   const results = (saved && saved.results) ? saved.results : Array(score).fill(true);
   state = { mode:'daily', best:d.best, streak:d.streak, date:d.date, total, score, results };
-  modeEl.textContent = 'Daily Survival';
-  setLives(3); scoreEl.textContent = score;
+  modeEl.textContent = 'Ball IQ Test';
+  showLives(false); scoreEl.textContent = score;
+  footEl.textContent = 'one question · two players · one answer';
+  const head = dailyHeadline(score, total);
   const shareTxt = buildShare();
   stage.innerHTML = `
     <div class="card center">
-      <img class="resultlogo" src="/transparent.png" alt="">
-      <div class="headline ${perfect?'win':''}">${perfect ? 'You know ball.' : 'Today’s run'}</div>
+      ${head.logo ? `<img class="resultlogo" src="/transparent.png" alt="">` : ''}
+      <div class="headline ${head.cls}">${head.text}</div>
       <div class="big">${score}/${total}</div>
       <div class="sub">You’ve already played today — come back tomorrow for a new run.</div>
+      ${xpBreakdownHTML(score)}
       <div class="stats">
         <div><div class="n">${d.streak??0}</div><div class="l">streak</div></div>
         <div><div class="n">${d.best??score}</div><div class="l">best</div></div>
@@ -289,10 +324,12 @@ function renderAlreadyPlayed(d){
 }
 
 function startRun(cfg){
+  // Daily: no lives — answer all 10, get a score. (Unlimited has its own start path.)
   state = { ...cfg, total:cfg.questions.length, i:0, score:0, livesLeft:cfg.lives, over:false, picked:null, results:[], picks:[] };
-  modeEl.textContent = cfg.mode === 'daily' ? 'Daily Survival' : 'Unlimited';
+  modeEl.textContent = 'Ball IQ Test';
+  footEl.textContent = 'answer all 10 · one guess each';
   scoreEl.textContent = '0';
-  setLives(state.livesLeft);
+  showLives(false);
   streakEl.textContent = (cfg.streak!=null) ? `streak ${cfg.streak}  ·  best ${cfg.best}` : '';
   renderQuestion();
 }
@@ -314,10 +351,10 @@ function shareGrid(results, total){
 function buildShare(){
   const results = state.results || [];
   if(state.mode === 'daily'){
-    return `ydkball Survival ${state.score}/${state.total} · ${fmtDate(state.date)}\n${shareGrid(results, state.total)}`;
+    return `ydkball Ball IQ Test ${state.score}/${state.total} · ${fmtDate(state.date)}\n${shareGrid(results, state.total)}`;
   }
   // unlimited: open-ended — score = correct count, grid is the whole run (ends on the 3rd ❌)
-  return `ydkball Unlimited ${state.score} · ${fmtDate()}\n${shareGrid(results, results.length)}`;
+  return `ydkball Ball IQ Test · Unlimited ${state.score} · ${fmtDate()}\n${shareGrid(results, results.length)}`;
 }
 
 async function renderQuestion(){
@@ -393,12 +430,12 @@ function resolveAnswer(q, pid, chosenBtn){
     verdict.className='verdict good';
     verdict.innerHTML = `✓ ${q.answers[q.answer_ids.indexOf(pid)] || 'Correct'}`;
   }else{
-    state.livesLeft--; setLives(state.livesLeft);
+    if(state.mode==='unlimited'){ state.livesLeft--; setLives(state.livesLeft); }  // daily = no lives
     verdict.className='verdict bad';
     verdict.innerHTML = `✗ <small>it was ${q.answers.slice(0,3).join(', ')}${q.answers.length>3?'…':''}</small>`;
   }
   setTimeout(()=>{
-    if(state.livesLeft<=0){ gameOver(false); }
+    if(state.mode==='unlimited' && state.livesLeft<=0){ gameOver(false); }
     else { state.i++; renderQuestion(); }
   }, correct ? 750 : 1700);
 }
@@ -472,22 +509,18 @@ async function gameOver(beat){
   let headline, headClass='', sub, big, logo='';
   if(state.mode==='daily'){
     big = `${state.score}/${state.total}`;
-    if(beat){
-      logo = `<img class="resultlogo" src="/transparent.png" alt="">`;
-      headClass = 'win';
-      headline = state.score === state.total ? 'You KNOW ball.' : 'You know ball.';
-      sub = `You cleared all ${state.total} — ${state.score} correct.`;
-    } else {
-      headline = 'Out of lives';
-      sub = `You got ${state.score} of ${state.total}. Run it back tomorrow.`;
-    }
+    const h = dailyHeadline(state.score, state.total);
+    headline = h.text; headClass = h.cls;
+    if(h.logo) logo = `<img class="resultlogo" src="/transparent.png" alt="">`;
+    sub = `${state.score} of ${state.total} correct. Come back tomorrow for a new run.`;
   } else {  // unlimited — open-ended, score = how many you got right
     big = `${state.score}`;
     headline = 'Out of lives';
     sub = `${state.score} ${state.score===1?'question':'questions'} right${state.score>=best&&best>0?' — new best!':''}`;
   }
   const shareTxt = buildShare();
-  const xpHTML = (xpGained>0) ? `<div class="xpline">+${xpGained} Ball Knowledge</div>` : '';
+  // daily → full Ball Knowledge breakdown; unlimited → no XP
+  const xpHTML = state.mode==='daily' ? xpBreakdownHTML(state.score) : '';
 
   // daily: shows streak, links to Unlimited. unlimited: shows best, "Play again".
   const statsHTML = state.mode==='daily'
@@ -555,7 +588,7 @@ async function ensureUnlimited(idx){            // returns null if loaded, else 
 }
 function unlimitedErrorCard(code){
   if(code==='auth') return `<div class="card center"><div class="sub">Sign in to play unlimited runs.</div><a class="btn" href="/auth/google/login?next=/survival?mode=unlimited" style="text-decoration:none;margin-top:18px">Sign in</a></div>`;
-  if(code==='pro')  return `<div class="card center"><img class="resultlogo" src="/transparent.png" alt=""><div class="headline">Unlimited is Pro</div><div class="sub">Unlimited runs with ydkball Pro.<br>Free includes today's daily survival.</div><a class="btn ghost" href="/games" style="text-decoration:none;margin-top:18px">Back to games</a></div>`;
+  if(code==='pro')  return `<div class="card center"><img class="resultlogo" src="/transparent.png" alt=""><div class="headline">Unlimited is Pro</div><div class="sub">Unlimited runs with ydkball Pro.<br>Free includes today's daily Ball IQ Test.</div><a class="btn ghost" href="/games" style="text-decoration:none;margin-top:18px">Back to games</a></div>`;
   return `<div class="card center"><div class="sub">Couldn't start unlimited. Try again.</div></div>`;
 }
 
@@ -565,7 +598,8 @@ async function startUnlimited(){
   state = { mode:'unlimited', i:0, score:0, livesLeft:3, over:false,
             best:prevBest, streak:null, questions:[], used:[], nextPromise:null, results:[], picks:[] };
   modeEl.textContent = 'Unlimited';
-  setLives(3); scoreEl.textContent = '0';
+  footEl.textContent = '3 lives · one guess each';
+  showLives(true); setLives(3); scoreEl.textContent = '0';
   streakEl.textContent = `best ${prevBest}`;
   stage.innerHTML = `<div class="card center"><div class="sub">Starting…</div></div>`;
   const r = await startNextFetch();               // first question
