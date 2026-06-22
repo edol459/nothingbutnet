@@ -952,32 +952,29 @@ def _award_winners(conn, award):
     return _WINNER_CACHE[award]
 
 
-def _team_top_scorer(conn, season, team, exclude):
-    """The highest-PPG player on `team` that season (excluding `exclude`) — the decoy."""
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT ps.player_id, p.player_name AS name FROM player_seasons ps
-            JOIN players p ON p.player_id = ps.player_id
-            WHERE ps.season=%s AND ps.season_type='Regular Season' AND ps.team_abbr=%s
-              AND ps.player_id != %s AND ps.gp >= 20
-            ORDER BY ps.pts DESC LIMIT 1
-        """, (season, team, exclude))
-        r = cur.fetchone()
-        return (r["player_id"], r["name"]) if r else None
+def _adj_season(season, delta):
+    """'2016-17' shifted by `delta` years → '2015-16' / '2017-18'."""
+    y = int(season[:4]) + delta
+    return f"{y}-{str(y + 1)[2:]}"
 
 
 def _toot_award(conn):
-    """"Who won [award] in [year]?" — the real winner vs. their top-scoring teammate."""
+    """"Who won [award] in [year]?" — the real winner vs. a winner of the SAME award in an
+    adjacent year (both are legit winners, so it's a real 'which year?' test — a far better
+    decoy than a random teammate, which was a tell for role-player awards like 6MOY/MIP)."""
     award, label = random.choice(_AWARDS_1YR)
     winners = _award_winners(conn, award)
-    if not winners:
+    if len(winners) < 3:
         return None
-    for _ in range(10):
-        season, wid, wname, team = random.choice(winners)
-        decoy = _team_top_scorer(conn, season, team, wid)
-        if not decoy:
+    by_season = {w[0]: w for w in winners}
+    for _ in range(12):
+        season, wid, wname, _ = random.choice(winners)
+        cands = [by_season[s] for s in (_adj_season(season, -1), _adj_season(season, 1))
+                 if s in by_season and by_season[s][1] != wid]   # different player, adjacent year
+        if not cands:
             continue
-        opts = [Answer(wid, wname, 1), Answer(decoy[0], decoy[1], 0)]
+        d = random.choice(cands)
+        opts = [Answer(wid, wname, 1), Answer(d[1], d[2], 0)]
         random.shuffle(opts)
         return Question(f"Who won {label} in {when(season, 'Regular Season')}?",
                         Stat("award_" + award, "", "", 1), season, "award",
