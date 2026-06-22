@@ -8011,24 +8011,22 @@ def _survival_streak_best(cur, user_id):
 
 
 @app.route("/api/survival/daily")
+@login_required
 def survival_daily():
     """Today's shared daily run (questions + answer sets), plus the player's prior result.
-    Reads the cron-generated row; generates inline only as a fallback (slow off-prod)."""
+    Login required — the one-run-a-day lock needs an identity (otherwise you could log out
+    and replay forever)."""
     user  = current_user()
     today = _survival_today().isoformat()
-    conn  = get_conn()
+    conn  = get_conn(); cur = conn.cursor()
     run   = survival_api.ensure_daily(conn, today)
-    your_result, best, streak = None, 0, 0
-    if user:
-        cur = conn.cursor()
-        cur.execute("SELECT score FROM survival_results "
-                    "WHERE user_id = %s AND mode = 'daily' AND date = %s", (user["id"], today))
-        r = cur.fetchone()
-        your_result = r["score"] if r else None
-        best, streak = _survival_streak_best(cur, user["id"])
+    cur.execute("SELECT score FROM survival_results "
+                "WHERE user_id = %s AND mode = 'daily' AND date = %s", (user["id"], today))
+    r = cur.fetchone()
+    best, streak = _survival_streak_best(cur, user["id"])
     return jsonify({
         "date": today, "lives": survival_api.LIVES, "questions": run,
-        "your_result": your_result, "best": best, "streak": streak,
+        "your_result": (r["score"] if r else None), "best": best, "streak": streak,
     })
 
 

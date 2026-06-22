@@ -232,6 +232,16 @@ async function boot(){
     return startUnlimited();
   }
   const daily = await jfetch('/api/survival/daily');
+  if (daily.status === 401) {   // must be signed in — the one-a-day lock needs an account
+    stage.innerHTML = `<div class="card center">
+      <img class="resultlogo" src="/transparent.png" alt="">
+      <div class="headline">Sign in to play</div>
+      <div class="sub">Survival is free with a ydkball account — your daily run, streak, and
+        Ball Knowledge are saved to it.</div>
+      <a class="btn" href="/auth/google/login?next=${encodeURIComponent('/survival')}"
+         style="text-decoration:none;margin-top:18px">Sign in</a></div>`;
+    return;
+  }
   const d = daily.body;
   // Already played today → locked: show the result, not a fresh playable run.
   if (d.your_result != null) { return renderAlreadyPlayed(d); }
