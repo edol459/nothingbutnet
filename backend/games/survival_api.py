@@ -48,8 +48,10 @@ def serialize(q, idx):
         "n":           q.n,
         "answer_ids":  [a.player_id for a in q.answers],
         "answers":     [a.name for a in q.answers],
-        # this-or-that: the two players to choose between (headshot buttons in the UI)
-        "options":     [{"id": o.player_id, "name": o.name} for o in q.options] if q.options else None,
+        # this-or-that: the two players to choose between (headshot buttons in the UI).
+        # `value` is the formatted stat revealed after answering (null for award questions).
+        "options":     [{"id": o.player_id, "name": o.name, "value": o.display}
+                        for o in q.options] if q.options else None,
     }
 
 

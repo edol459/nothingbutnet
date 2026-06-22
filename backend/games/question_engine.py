@@ -838,10 +838,22 @@ def _accolade_board(conn, award):
     return _ACCOLADE_CACHE[award]
 
 
-def _toot(text, statkey, a, b, season="career", season_type="Career"):
-    """Build a this-or-that Question from two (id, name, value) rows."""
+_SHORT = {"pts": "PPG", "reb": "RPG", "ast": "APG", "stl": "SPG", "blk": "BPG",
+          "fg3m": "3PM", "pra": "PRA"}
+
+def _fmt_pergame(col):                       # "27.1 PPG"
+    return lambda v: f"{v:.1f} {_SHORT.get(col, '')}".strip()
+def _fmt_pct(v):    return f"{v * 100:.1f}%"           # 0.675 → "67.5%"
+def _fmt_int(v):    return f"{int(round(v)):,}"        # 34580 → "34,580"
+def _fmt_count(v):  return f"{int(round(v))}×"    # 7 → "7×"
+
+
+def _toot(text, statkey, a, b, season="career", season_type="Career", fmt=None):
+    """Build a this-or-that Question from two (id, name, value) rows. `fmt` formats each
+    value into the display string revealed after answering (Answer.display)."""
     winner = a if a[2] > b[2] else b
-    opts = [Answer(a[0], a[1], a[2]), Answer(b[0], b[1], b[2])]
+    f = fmt or (lambda v: None)
+    opts = [Answer(a[0], a[1], a[2], display=f(a[2])), Answer(b[0], b[1], b[2], display=f(b[2]))]
     random.shuffle(opts)
     return Question(text, Stat(statkey, "", "", 1), season, "thisorthat",
                     [Answer(winner[0], winner[1], winner[2])], season_type=season_type, options=opts)
@@ -864,7 +876,8 @@ def _toot_season(conn, seasons):
         if a[2] == b[2]:
             continue
         comp = "had a higher" if stat.pct else "averaged more"
-        return _toot(f"Who {comp} {stat.noun} in {when(season, stype)}?", stat.key, a, b, season, stype)
+        return _toot(f"Who {comp} {stat.noun} in {when(season, stype)}?", stat.key, a, b, season, stype,
+                     fmt=_fmt_pct if stat.pct else _fmt_pergame(stat.key))
     return None
 
 
@@ -876,7 +889,7 @@ def _toot_career(conn):
     i = random.randrange(0, len(rows) - 1)
     j = random.randrange(i + 1, min(i + 40, len(rows)))   # nearby ranks = a closer, fairer call
     a, b = rows[i], rows[j]
-    return None if a[2] == b[2] else _toot(f"Who has more {noun}?", "career_" + col, a, b)
+    return None if a[2] == b[2] else _toot(f"Who has more {noun}?", "career_" + col, a, b, fmt=_fmt_int)
 
 
 def _peak_board(conn, col):
@@ -910,7 +923,7 @@ def _toot_single_high(conn):
     i = random.randrange(0, len(rows) - 1)
     j = random.randrange(i + 1, min(i + 40, len(rows)))
     a, b = rows[i], rows[j]
-    return None if a[2] == b[2] else _toot(f"Who had a higher {noun}?", "peak_" + col, a, b)
+    return None if a[2] == b[2] else _toot(f"Who had a higher {noun}?", "peak_" + col, a, b, fmt=_fmt_pergame(col))
 
 
 def _toot_accolade(conn):
@@ -921,7 +934,7 @@ def _toot_accolade(conn):
     for _ in range(12):
         a, b = random.sample(rows, 2)
         if a[2] != b[2]:
-            return _toot(f"Who {verb} {noun}?", "acc_" + award, a, b)
+            return _toot(f"Who {verb} {noun}?", "acc_" + award, a, b, fmt=_fmt_count)
     return None
 
 

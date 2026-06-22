@@ -126,6 +126,11 @@
   .choice:disabled{cursor:default}
   .choice .shot{width:72px; height:72px}
   .choice-name{font-family:var(--ff-serif); font-size:18px; text-align:center; line-height:1.16}
+  /* the stat value, revealed only after answering */
+  .choice-val{font-family:var(--ff-mono); font-size:14px; color:var(--ink3); margin-top:-4px;
+              opacity:0; transition:opacity .25s}
+  .choices[data-done] .choice-val{opacity:1}
+  .choice.correct .choice-val{color:var(--green)}
   .choice.correct{border-color:var(--green); background:var(--green-lt)}
   .choice.wrong{border-color:var(--red); background:var(--red-lt)}
 
@@ -332,7 +337,7 @@ async function renderQuestion(){
     stage.innerHTML = `
       <div class="card">${meta}
         <div class="choices" id="choices">
-          ${q.options.map(o=>`<button class="choice" data-id="${o.id}">${shotHTML(o.id)}<span class="choice-name">${o.name}</span></button>`).join('')}
+          ${q.options.map(o=>`<button class="choice" data-id="${o.id}">${shotHTML(o.id)}<span class="choice-name">${o.name}</span>${o.value?`<span class="choice-val">${o.value}</span>`:''}</button>`).join('')}
         </div>
         <div class="verdict" id="verdict"></div>
       </div>`;
