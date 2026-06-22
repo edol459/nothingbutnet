@@ -3,9 +3,8 @@ generate_daily.py — pre-generate Survival daily runs.
 =====================================================
 
 Generation is slow over a remote DB (many leaderboard round-trips), so it must NOT run
-in the request path. A cron runs this once a day to populate `survival_daily` (and record
-question text in `survival_used` for cross-day dedup); the `/api/survival/daily` endpoint
-then just reads the cached row.
+in the request path. A cron runs this once a day to populate `survival_daily`; the
+`/api/survival/daily` endpoint then just reads the cached row.
 
     python backend/games/generate_daily.py                    # today (+ default look-ahead)
     python backend/games/generate_daily.py --days 3           # today + next 2 days

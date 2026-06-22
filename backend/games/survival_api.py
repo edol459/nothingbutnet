@@ -27,9 +27,10 @@ import question_engine as qe  # noqa: E402
 # ── config ────────────────────────────────────────────────────────────────────
 LIVES         = 3       # cushion — you can miss up to 2 and still finish the daily
 DAILY_LENGTH  = 10      # the daily is a fixed 10-question gauntlet — clear it = "you know ball"
-RECENT_TEXTS  = 400     # cross-day dedup: how many recent question texts to avoid
 
 # Every question is a this-or-that ("Who did more X — A or B?"). No difficulty labels.
+# Dedup is per-run only (no answer/template repeats within a run); no cross-day dedup —
+# the pair pools are huge (~34k season pairs etc.) and the per-date seed varies days.
 
 
 # ── serialization ─────────────────────────────────────────────────────────────
@@ -56,13 +57,12 @@ def serialize(q, idx):
 
 
 # ── run generation ────────────────────────────────────────────────────────────
-def _gen_run(conn, seasons, length, seed=None, asked=None):
-    """Build a serialized run of `length` this-or-that questions, avoiding repeated
-    question text (within the run and across `asked`) and a repeated answer player."""
+def _gen_run(conn, seasons, length, seed=None):
+    """Build a serialized run of `length` this-or-that questions. Per-run dedup only: no
+    repeated question template (text) or answer player within the same run."""
     if seed is not None:
         random.seed(seed)
-    asked = set(asked or [])
-    run_answers = set()
+    asked, run_answers = set(), set()
     out = []
     guard = 0
     while len(out) < length and guard < length * 10:
@@ -76,14 +76,14 @@ def _gen_run(conn, seasons, length, seed=None, asked=None):
     return out
 
 
-def build_daily(conn, date_str, recent_texts=None, seed=None):
-    """Today's shared daily run. By default deterministically seeded by date (so a
-    regenerate reproduces it); pass an explicit `seed` (e.g. random) to get a different
-    run. Avoids question text used on recent days."""
+def build_daily(conn, date_str, seed=None):
+    """Today's shared daily run. By default deterministically seeded by date (so everyone
+    gets the same questions and a regenerate reproduces them); pass an explicit random
+    `seed` to get a different run."""
     seasons = qe.list_seasons(conn)
     if seed is None:
         seed = int(hashlib.sha256(("survival" + date_str).encode()).hexdigest(), 16) % (2 ** 32)
-    return _gen_run(conn, seasons, DAILY_LENGTH, seed=seed, asked=recent_texts)
+    return _gen_run(conn, seasons, DAILY_LENGTH, seed=seed)
 
 
 def next_unlimited(conn, pos, exclude=None):
@@ -95,18 +95,16 @@ def next_unlimited(conn, pos, exclude=None):
     return serialize(q, pos) if q else None
 
 
-# ── persistence (daily store + cross-day dedup) ───────────────────────────────
+# ── persistence (daily store) ─────────────────────────────────────────────────
 def ensure_daily(conn, date_str, force=False, fresh=False):
     """Return the stored daily run for `date_str`, generating + storing it if absent.
 
-    `force` regenerates even if a row exists (drops the old daily row first; keeps the
-    used-text history so the new run avoids prior questions). `fresh` uses a random seed
-    so a forced regen actually yields *different* questions — handy for testing.
+    `force` regenerates even if a row exists; `fresh` uses a random seed so a forced regen
+    yields *different* questions — handy for testing.
 
-    Generation is slow over a remote DB (many leaderboard round-trips) so this is meant
-    to be called ahead of time by a cron (see generate_daily.py); the endpoint reads the
-    cached row. The inline-generate fallback keeps it correct if the cron ever misses
-    (fast when the DB is co-located in production)."""
+    Generation is slow over a remote DB so this is meant to be called ahead of time by a
+    cron (see generate_daily.py); the endpoint reads the cached row, with an inline-generate
+    fallback (fast when the DB is co-located in production)."""
     with conn.cursor() as cur:
         if force:
             cur.execute("DELETE FROM survival_daily WHERE date = %s", (date_str,))
@@ -115,22 +113,15 @@ def ensure_daily(conn, date_str, force=False, fresh=False):
             row = cur.fetchone()
             if row:
                 return row["payload"]
-        cur.execute("SELECT text FROM survival_used ORDER BY used_on DESC LIMIT %s", (RECENT_TEXTS,))
-        recent = [r["text"] for r in cur.fetchall()]
 
     seed = random.randrange(2 ** 32) if fresh else None
-    run = build_daily(conn, date_str, recent, seed=seed)
+    run = build_daily(conn, date_str, seed=seed)
 
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO survival_daily(date, payload) VALUES(%s, %s) ON CONFLICT(date) DO NOTHING",
             (date_str, psycopg2.extras.Json(run)),
         )
-        for q in run:
-            cur.execute(
-                "INSERT INTO survival_used(text, used_on) VALUES(%s, %s) ON CONFLICT(text) DO NOTHING",
-                (q["text"], date_str),
-            )
     conn.commit()
     return run
 

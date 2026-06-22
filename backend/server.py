@@ -515,13 +515,6 @@ def _ensure_tables():
             )
         """)
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS survival_used (
-                text    TEXT PRIMARY KEY,
-                used_on DATE NOT NULL
-            )
-        """)
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_survival_used_on ON survival_used(used_on)")
-        cur.execute("""
             CREATE TABLE IF NOT EXISTS survival_results (
                 id         SERIAL PRIMARY KEY,
                 user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
