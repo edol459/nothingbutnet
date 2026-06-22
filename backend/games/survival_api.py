@@ -58,7 +58,8 @@ def serialize(q, idx):
 
 # ── run generation ────────────────────────────────────────────────────────────
 def _gen_run(conn, seasons, length, seed=None):
-    """Build a serialized run of `length` this-or-that questions. Per-run dedup only: no
+    """Build a serialized run of `length` higher/lower questions, ramping difficulty easy→hard
+    across the run (the stat gap between the two players shrinks). Per-run dedup only: no
     repeated question template (text) or answer player within the same run."""
     if seed is not None:
         random.seed(seed)
@@ -67,7 +68,8 @@ def _gen_run(conn, seasons, length, seed=None):
     guard = 0
     while len(out) < length and guard < length * 10:
         guard += 1
-        q = qe.generate_thisorthat(conn, seasons, exclude=run_answers)
+        difficulty = len(out) / max(1, length - 1)   # 0 (Q1, easy) → 1 (last Q, hard)
+        q = qe.generate_thisorthat(conn, seasons, exclude=run_answers, difficulty=difficulty)
         if q is None or q.text in asked:
             continue
         asked.add(q.text)
@@ -87,11 +89,13 @@ def build_daily(conn, date_str, seed=None):
 
 
 def next_unlimited(conn, pos, exclude=None):
-    """One on-demand this-or-that question for an Unlimited run. `exclude` = answer
-    player_ids already used this run, so the same player isn't the answer twice.
+    """One on-demand higher/lower question for an Unlimited run. `exclude` = answer
+    player_ids already used this run, so the same player isn't the answer twice. Difficulty
+    ramps with depth — harder the deeper you get (`pos` is 1-based).
     (Unlimited is open-ended — 3 lives, go as far as you can.)"""
     seasons = qe.list_seasons(conn)
-    q = qe.generate_thisorthat(conn, seasons, exclude=set(exclude or ()))
+    difficulty = min(1.0, (pos - 1) / 15.0)          # easy at the start → hard by ~Q16
+    q = qe.generate_thisorthat(conn, seasons, exclude=set(exclude or ()), difficulty=difficulty)
     return serialize(q, pos) if q else None
 
 

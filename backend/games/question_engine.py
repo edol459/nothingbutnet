@@ -772,12 +772,17 @@ def gen_award(conn, seasons, only=None, lo=None, hi=None):
     return None
 
 
-# ── This-or-that generation (the whole game) ─────────────────────────────────
-# Every Survival question is "Who [did more X] — A or B?": two players, tap one. Far
-# more variety than superlatives (pairs × axes × seasons) and a judgment, not recall.
-# Three axes: a single-season stat, a career total, and an accolade count.
+# ── This-or-that / higher-or-lower generation (the whole game) ───────────────
+# Every question is "Who [did more X] — A or B?": two players, tap the higher one. FOUR
+# axes — a single-season stat, a career total, a single-season high, and an accolade
+# count — all genuine higher/lower comparisons. (The old "Who won award X in year Y?"
+# axis was recall, not higher/lower, so it's retired — see _toot_award.)
 #
-# Career/accolade axes are restricted to players who DEBUTED in 1997-98+ — our data
+# Difficulty = the STAT GAP between the two players: a big gap is an obvious pick (easy),
+# a near-tie is brutal (hard). `_pick_pair` selects the two by a target gap, and callers
+# ramp `difficulty` 0→1 (daily: easy→hard across the 10; unlimited: harder the deeper you go).
+#
+# Career/peak/accolade axes are restricted to players who DEBUTED in 1997-98+ — our data
 # starts at 1996-97, so anyone earlier has a truncated total/count (wrong answers).
 
 _DEBUT_FLOOR  = "1997-98"
@@ -859,7 +864,49 @@ def _toot(text, statkey, a, b, season="career", season_type="Career", fmt=None):
                     [Answer(winner[0], winner[1], winner[2])], season_type=season_type, options=opts)
 
 
-def _toot_season(conn, seasons):
+def _band(d):
+    """Numeric difficulty 0..1 → label, for q.difficulty (display/share)."""
+    return "easy" if d < 0.34 else "hard" if d >= 0.67 else "medium"
+
+
+def _pick_pair(rows, difficulty):
+    """Pick two (id, name, value) rows whose STAT GAP encodes difficulty:
+    0.0 = easy (far apart on the board, a big obvious gap) … 1.0 = hard (nearly tied).
+    `rows` must be sorted desc by value. Returns (a, b) with distinct values, or None."""
+    n = len(rows)
+    if n < 2:
+        return None
+    vals = [r[2] for r in rows]
+    spread = vals[0] - vals[-1]
+    if spread <= 0:
+        return None
+    frac = 0.50 * (1 - difficulty) + 0.02 * difficulty   # easy ≈ 50% of the board's spread → hard ≈ 2%
+    target = spread * frac
+    for _ in range(25):
+        i = random.randrange(n)
+        # Try a partner above AND below the anchor; keep whichever's ACHIEVED gap is closest to
+        # target. (Looking only one way collapses to an adjacent player when the anchor is near
+        # an edge — which would turn an "easy" question into a near-tie.)
+        best_j, best_err = None, None
+        for want in (vals[i] + target, vals[i] - target):
+            cj, cd = None, None
+            for k in range(n):
+                if vals[k] == vals[i]:
+                    continue
+                dd = abs(vals[k] - want)
+                if cd is None or dd < cd:
+                    cd, cj = dd, k
+            if cj is None:
+                continue
+            err = abs(abs(vals[cj] - vals[i]) - target)
+            if best_err is None or err < best_err:
+                best_err, best_j = err, cj
+        if best_j is not None:
+            return (rows[i], rows[best_j])
+    return None
+
+
+def _toot_season(conn, seasons, difficulty=0.5):
     # ~30% of the time, ask about the playoffs (only 2020-21+ has playoff data)
     po = playoff_seasons(conn)
     stype = "Playoffs" if po and random.random() < 0.30 else "Regular Season"
@@ -872,24 +919,23 @@ def _toot_season(conn, seasons):
         rows = load_qualified(conn, stat, season, season_type=stype)
         if len(rows) < 8:
             continue
-        a, b = random.sample(rows[:15], 2)          # top of the board → both recognizable
-        if a[2] == b[2]:
+        pair = _pick_pair(rows[:28], difficulty)    # top of the board → both recognizable
+        if not pair:
             continue
+        a, b = pair
         comp = "had a higher" if stat.pct else "averaged more"
         return _toot(f"Who {comp} {stat.noun} in {when(season, stype)}?", stat.key, a, b, season, stype,
                      fmt=_fmt_pct if stat.pct else _fmt_pergame(stat.key))
     return None
 
 
-def _toot_career(conn):
+def _toot_career(conn, difficulty=0.5):
     col, noun = random.choice(_CAREER_STATS)
     rows = _career_board(conn, col)
     if len(rows) < 30:
         return None
-    i = random.randrange(0, len(rows) - 1)
-    j = random.randrange(i + 1, min(i + 40, len(rows)))   # nearby ranks = a closer, fairer call
-    a, b = rows[i], rows[j]
-    return None if a[2] == b[2] else _toot(f"Who has more {noun}?", "career_" + col, a, b, fmt=_fmt_int)
+    pair = _pick_pair(rows[:100], difficulty)       # top 100 career totals → recognizable
+    return _toot(f"Who has more {noun}?", "career_" + col, pair[0], pair[1], fmt=_fmt_int) if pair else None
 
 
 def _peak_board(conn, col):
@@ -915,27 +961,24 @@ def _peak_board(conn, col):
     return _PEAK_CACHE[col]
 
 
-def _toot_single_high(conn):
+def _toot_single_high(conn, difficulty=0.5):
     col, noun = random.choice(_PEAK_STATS)
     rows = _peak_board(conn, col)
     if len(rows) < 30:
         return None
-    i = random.randrange(0, len(rows) - 1)
-    j = random.randrange(i + 1, min(i + 40, len(rows)))
-    a, b = rows[i], rows[j]
-    return None if a[2] == b[2] else _toot(f"Who had a higher {noun}?", "peak_" + col, a, b, fmt=_fmt_pergame(col))
+    pair = _pick_pair(rows[:90], difficulty)
+    return _toot(f"Who had a higher {noun}?", "peak_" + col, pair[0], pair[1], fmt=_fmt_pergame(col)) if pair else None
 
 
-def _toot_accolade(conn):
+def _toot_accolade(conn, difficulty=0.5):
     award, verb, noun = random.choice(_ACCOLADES + [("All-Star", "made more", "All-Star teams")] * 2)
     rows = [r for r in _accolade_board(conn, award) if r[2] >= 1]
     if len(rows) < 6:
         return None
-    for _ in range(12):
-        a, b = random.sample(rows, 2)
-        if a[2] != b[2]:
-            return _toot(f"Who {verb} {noun}?", "acc_" + award, a, b, fmt=_fmt_count)
-    return None
+    # counts are integer-coarse, so the gap ramp is chunky but still real (15× vs 1× = easy,
+    # 8× vs 9× = hard). Top of the board → the decorated (recognizable) names.
+    pair = _pick_pair(rows[:50], difficulty)
+    return _toot(f"Who {verb} {noun}?", "acc_" + award, pair[0], pair[1], fmt=_fmt_count) if pair else None
 
 
 def _award_winners(conn, award):
@@ -958,10 +1001,11 @@ def _adj_season(season, delta):
     return f"{y}-{str(y + 1)[2:]}"
 
 
-def _toot_award(conn):
-    """"Who won [award] in [year]?" — the real winner vs. a winner of the SAME award in an
-    adjacent year (both are legit winners, so it's a real 'which year?' test — a far better
-    decoy than a random teammate, which was a tell for role-player awards like 6MOY/MIP)."""
+def _toot_award(conn, difficulty=0.5):
+    """RETIRED (not in generate_thisorthat's axis list): "Who won [award] in [year]?" is a
+    recall question, not a higher/lower comparison, so it no longer fits the game. Kept for
+    reference / possible reuse. Was: real winner vs. a winner of the SAME award in an adjacent
+    year (both legit winners → a 'which year?' test, better than a random-teammate decoy)."""
     award, label = random.choice(_AWARDS_1YR)
     winners = _award_winners(conn, award)
     if len(winners) < 3:
@@ -982,20 +1026,26 @@ def _toot_award(conn):
     return None
 
 
-def generate_thisorthat(conn, seasons, exclude=None, tries=40):
-    """A this-or-that question whose answer player isn't in `exclude` (already used this run).
-    Random axis: season stat, career total, single-season high, accolade count, award decoy."""
+def generate_thisorthat(conn, seasons, exclude=None, difficulty=0.5, tries=40):
+    """A higher/lower question whose answer player isn't in `exclude` (already used this run).
+    `difficulty` 0=easy (big stat gap) … 1=hard (near-tie) sets how close the two players are.
+    Random axis: season stat, career total, single-season high, accolade count (no award axis —
+    "who won X in year Y?" isn't a higher/lower comparison)."""
     exclude = exclude or set()
-    axes = [(_toot_season, 0.34, (seasons,)), (_toot_career, 0.18, ()),
-            (_toot_single_high, 0.16, ()), (_toot_accolade, 0.16, ()), (_toot_award, 0.16, ())]
+    axes = [(_toot_season, 0.40, (seasons,)), (_toot_career, 0.22, ()),
+            (_toot_single_high, 0.20, ()), (_toot_accolade, 0.18, ())]
     fns     = [a[0] for a in axes]
     weights = [a[1] for a in axes]
     for _ in range(tries):
         fn, args = random.choices(list(zip(fns, [a[2] for a in axes])), weights=weights)[0]
-        q = fn(conn, *args)
+        q = fn(conn, *args, difficulty=difficulty)
         if q and q.answers[0].player_id not in exclude:
+            q.difficulty = _band(difficulty)
             return q
-    return _toot_season(conn, seasons)
+    fb = _toot_season(conn, seasons, difficulty=difficulty)
+    if fb:
+        fb.difficulty = _band(difficulty)
+    return fb
 
 
 # ── difficulty model ─────────────────────────────────────────────────────────
