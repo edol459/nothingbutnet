@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ydkball · Ball IQ Test</title>
+<title>ydkball · Higher or Lower</title>
 <link rel="icon" type="image/png" href="/logo.png">
 <link rel="apple-touch-icon" href="/logo-icon.png">
 <script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
@@ -195,7 +195,7 @@
   </nav>
 
   <div class="wrap">
-    <div class="eyebrow" id="mode">Ball IQ Test</div>
+    <div class="eyebrow" id="mode">Higher or Lower</div>
     <div class="statusbar">
       <div class="lives" id="lives"></div>
       <div class="score">score<b id="score">0</b></div>
@@ -268,7 +268,7 @@ async function boot(){
     stage.innerHTML = `<div class="card center">
       <img class="resultlogo" src="/transparent.png" alt="">
       <div class="headline">Sign in to play</div>
-      <div class="sub">Ball IQ Test is free with a ydkball account — your daily run, streak,
+      <div class="sub">Higher or Lower is free with a ydkball account — your daily run, streak,
         and Ball Knowledge are saved to it.</div>
       <a class="btn" href="/auth/google/login?next=${encodeURIComponent('/survival')}"
          style="text-decoration:none;margin-top:18px">Sign in</a></div>`;
@@ -297,7 +297,7 @@ function renderAlreadyPlayed(d){
   try { saved = JSON.parse(localStorage.getItem('survival_grid_' + d.date) || 'null'); } catch(e){}
   const results = (saved && saved.results) ? saved.results : Array(score).fill(true);
   state = { mode:'daily', best:d.best, streak:d.streak, date:d.date, total, score, results };
-  modeEl.textContent = 'Ball IQ Test';
+  modeEl.textContent = 'Higher or Lower';
   showLives(false); scoreEl.textContent = score;
   footEl.textContent = 'one question · two players · one answer';
   const head = dailyHeadline(score, total);
@@ -326,7 +326,7 @@ function renderAlreadyPlayed(d){
 function startRun(cfg){
   // Daily: no lives — answer all 10, get a score. (Unlimited has its own start path.)
   state = { ...cfg, total:cfg.questions.length, i:0, score:0, livesLeft:cfg.lives, over:false, picked:null, results:[], picks:[] };
-  modeEl.textContent = 'Ball IQ Test';
+  modeEl.textContent = 'Higher or Lower';
   footEl.textContent = 'answer all 10 · one guess each';
   scoreEl.textContent = '0';
   showLives(false);
@@ -351,10 +351,10 @@ function shareGrid(results, total){
 function buildShare(){
   const results = state.results || [];
   if(state.mode === 'daily'){
-    return `ydkball Ball IQ Test ${state.score}/${state.total} · ${fmtDate(state.date)}\n${shareGrid(results, state.total)}`;
+    return `ydkball Higher or Lower ${state.score}/${state.total} · ${fmtDate(state.date)}\n${shareGrid(results, state.total)}`;
   }
   // unlimited: open-ended — score = correct count, grid is the whole run (ends on the 3rd ❌)
-  return `ydkball Ball IQ Test · Unlimited ${state.score} · ${fmtDate()}\n${shareGrid(results, results.length)}`;
+  return `ydkball Higher or Lower · Unlimited ${state.score} · ${fmtDate()}\n${shareGrid(results, results.length)}`;
 }
 
 async function renderQuestion(){
@@ -588,7 +588,7 @@ async function ensureUnlimited(idx){            // returns null if loaded, else 
 }
 function unlimitedErrorCard(code){
   if(code==='auth') return `<div class="card center"><div class="sub">Sign in to play unlimited runs.</div><a class="btn" href="/auth/google/login?next=/survival?mode=unlimited" style="text-decoration:none;margin-top:18px">Sign in</a></div>`;
-  if(code==='pro')  return `<div class="card center"><img class="resultlogo" src="/transparent.png" alt=""><div class="headline">Unlimited is Pro</div><div class="sub">Unlimited runs with ydkball Pro.<br>Free includes today's daily Ball IQ Test.</div><a class="btn ghost" href="/games" style="text-decoration:none;margin-top:18px">Back to games</a></div>`;
+  if(code==='pro')  return `<div class="card center"><img class="resultlogo" src="/transparent.png" alt=""><div class="headline">Unlimited is Pro</div><div class="sub">Unlimited runs with ydkball Pro.<br>Free includes today's daily Higher or Lower.</div><a class="btn ghost" href="/games" style="text-decoration:none;margin-top:18px">Back to games</a></div>`;
   return `<div class="card center"><div class="sub">Couldn't start unlimited. Try again.</div></div>`;
 }
 
