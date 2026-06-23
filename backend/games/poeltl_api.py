@@ -36,13 +36,21 @@ _POOL_WHERE = """
  OR (g.season_type = 'Playoffs' AND g.pts >= 35)
 """
 
-_POOL_CACHE = None   # ordered list of (player_id, game_id, season_type) — stable for seeding
+import bisect
+
+# Two-stage selection so the daily isn't the same prolific stars on repeat: pick a PLAYER with
+# a capped weight, then pick uniformly among ALL their qualifying performances (so every game
+# stays reachable). A player's selection weight = min(their #games, _WEIGHT_CAP) — i.e. a star
+# is at most _WEIGHT_CAP× a one-off player, instead of ~hundreds×.
+_WEIGHT_CAP = 6
+
+_POOL_CACHE = None   # {"players": [(pid, [keys...]), ...], "cum": [cumulative weights], "total": W}
 
 
 # ── performance pool ──────────────────────────────────────────────────────────
 def _pool(conn):
-    """All daily-worthy performances by answer-eligible players, in a STABLE order so a
-    date seed maps to the same performance for everyone. Cached in-process."""
+    """All daily-worthy performances by answer-eligible players, grouped by player with a
+    capped per-player selection weight. Stable order so a date seed is reproducible. Cached."""
     global _POOL_CACHE
     if _POOL_CACHE is None:
         with conn.cursor() as cur:
@@ -55,10 +63,29 @@ def _pool(conn):
                 SELECT g.player_id, g.game_id, g.season_type
                 FROM   player_gamelogs g JOIN elig e ON e.player_id = g.player_id
                 WHERE  {_POOL_WHERE}
-                ORDER BY g.season, g.game_id, g.player_id
+                ORDER BY g.player_id, g.game_id
             """)
-            _POOL_CACHE = [(r["player_id"], r["game_id"], r["season_type"]) for r in cur.fetchall()]
+            groups = {}
+            for r in cur.fetchall():
+                groups.setdefault(r["player_id"], []).append(
+                    (r["player_id"], r["game_id"], r["season_type"]))
+        players = sorted(groups.items())          # [(pid, [keys])] in stable pid order
+        cum, total = [], 0
+        for _pid, keys in players:
+            total += min(len(keys), _WEIGHT_CAP)
+            cum.append(total)
+        _POOL_CACHE = {"players": players, "cum": cum, "total": total}
     return _POOL_CACHE
+
+
+def _pick(pool, seed):
+    """Deterministic two-stage pick: weighted player (capped), then uniform among their games."""
+    players, cum, total = pool["players"], pool["cum"], pool["total"]
+    if not total:
+        return None
+    pi = bisect.bisect_right(cum, seed % total)   # which player (by cumulative weight)
+    _pid, keys = players[pi]
+    return keys[(seed // total) % len(keys)]       # which of their games (uniform)
 
 
 def _load_perf(conn, player_id, game_id, season_type):
@@ -178,11 +205,11 @@ def _build(perf):
 def build_daily(conn, date_str, seed=None):
     """Today's shared performance, deterministically seeded by date (everyone gets the same)."""
     pool = _pool(conn)
-    if not pool:
+    if not pool["players"]:
         return None
     if seed is None:
         seed = int(hashlib.sha256(("poeltl" + date_str).encode()).hexdigest(), 16)
-    key = pool[seed % len(pool)]
+    key = _pick(pool, seed)
     perf = _load_perf(conn, *key)
     return _build(perf) if perf else None
 
@@ -206,11 +233,14 @@ def unlimited_round(conn):
 
 
 def random_performance(conn):
-    """A random daily-worthy performance (built like the daily). Used by unlimited_round."""
+    """A random daily-worthy performance (same capped-per-player weighting as the daily, so
+    unlimited practice is varied too). Used by unlimited_round."""
     pool = _pool(conn)
-    if not pool:
+    if not pool["players"]:
         return None
-    perf = _load_perf(conn, *random.choice(pool))
+    weights = [min(len(keys), _WEIGHT_CAP) for _pid, keys in pool["players"]]
+    _pid, keys = random.choices(pool["players"], weights=weights)[0]
+    perf = _load_perf(conn, *random.choice(keys))
     return _build(perf) if perf else None
 
 
