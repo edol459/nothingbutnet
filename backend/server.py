@@ -185,6 +185,7 @@ from datetime import timedelta
 import sys as _sys
 _sys.path.insert(0, os.path.join(os.path.dirname(__file__), "games"))
 import survival_api  # noqa: E402
+import poeltl_api    # noqa: E402  — "guess the performance" daily game
 
 app.secret_key = os.getenv("SECRET_KEY")
 app.permanent_session_lifetime = timedelta(days=60)
@@ -526,6 +527,28 @@ def _ensure_tables():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_survival_results_user ON survival_results(user_id, mode)")
+
+        # ── Poeltl ("guess the performance") ─────────────────────────
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS poeltl_daily (
+                date       DATE PRIMARY KEY,
+                payload    JSONB NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS poeltl_results (
+                id         SERIAL PRIMARY KEY,
+                user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                mode       TEXT NOT NULL DEFAULT 'daily',
+                date       DATE NOT NULL,
+                solved     BOOLEAN NOT NULL,
+                guesses    INTEGER NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(user_id, mode, date)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_poeltl_results_user ON poeltl_results(user_id, mode)")
         conn.commit()
         cur.close(); conn.close()
     except Exception as e:
@@ -8119,6 +8142,95 @@ def survival_unlimited():
 def survival_players():
     """All players [{id, name}] for the client's autocomplete picker (cached)."""
     return jsonify({"players": survival_api.player_list(get_conn())})
+
+
+# ── Poeltl: "guess the performance" ──────────────────────────────────────────
+def _poeltl_streak(cur, user_id):
+    """Current consecutive-day SOLVED streak (a missed/failed day ends it)."""
+    cur.execute("SELECT date, solved FROM poeltl_results "
+                "WHERE user_id = %s AND mode = 'daily' ORDER BY date DESC", (user_id,))
+    rows = cur.fetchall()
+    streak, expected = 0, _survival_today()
+    for r in rows:
+        if r["date"] == expected and r["solved"]:
+            streak += 1
+            expected = expected - timedelta(days=1)
+        elif r["date"] == expected:        # played today/expected but didn't solve
+            break
+        elif r["date"] < expected:
+            break
+    return streak
+
+
+@app.route("/api/poeltl/daily")
+@login_required
+def poeltl_daily():
+    """Today's shared performance puzzle (box score only — the answer stays server-side),
+    the autocomplete player bank, and the player's prior result. Login-gated, once/ET-day."""
+    user  = current_user()
+    today = _survival_today().isoformat()
+    conn  = get_conn(); cur = conn.cursor()
+    daily = poeltl_api.ensure_daily(conn, today)
+    if not daily:
+        return jsonify({"error": "unavailable", "message": "No puzzle for today yet."}), 503
+
+    cur.execute("SELECT solved, guesses FROM poeltl_results "
+                "WHERE user_id = %s AND mode = 'daily' AND date = %s", (user["id"], today))
+    r = cur.fetchone()
+    body = {
+        "date": today,
+        **poeltl_api.puzzle_view(daily),
+        "players": survival_api.player_list(conn),
+        "your_result": ({"solved": r["solved"], "guesses": r["guesses"]} if r else None),
+        "streak": _poeltl_streak(cur, user["id"]),
+    }
+    if r:                                  # already played → reveal so the client can show it
+        body["clues"]  = daily["clues"]
+        body["answer"] = daily["answer"]
+    return jsonify(body)
+
+
+@app.route("/api/poeltl/guess", methods=["POST"])
+@login_required
+def poeltl_guess():
+    """Score the player's ordered guesses against today's stored answer; reveal one clue per
+    wrong guess. When the round is done (solved or out of guesses) record the result + grant
+    Ball Knowledge (once/ET-day, idempotent) and reveal the answer."""
+    user  = current_user()
+    data  = request.get_json(force=True, silent=True) or {}
+    today = _survival_today().isoformat()
+    conn  = get_conn(); cur = conn.cursor()
+
+    daily = poeltl_api.ensure_daily(conn, today)
+    if not daily:
+        return jsonify({"error": "unavailable"}), 503
+
+    guesses = [g for g in (data.get("guesses") or []) if isinstance(g, int)]
+    res = poeltl_api.score_guesses(daily, guesses)
+
+    out = dict(res)
+    if res["done"]:
+        solved = res["solved"]
+        used   = res["guesses_used"]
+        cur.execute("""INSERT INTO poeltl_results (user_id, mode, date, solved, guesses)
+                       VALUES (%s, 'daily', %s, %s, %s)
+                       ON CONFLICT (user_id, mode, date) DO NOTHING""",
+                    (user["id"], today, solved, used))
+        # XP: solve fast = more. +10 base + 5/remaining guess; an unsolved day still earns +5.
+        xp_amount = (10 + 5 * (poeltl_api.MAX_GUESSES - used + 1)) if solved else 5
+        new_total = _grant_xp(cur, user["id"], "poeltl_daily", today, xp_amount)
+        conn.commit()
+        granted = new_total != -1
+        if granted:
+            total_xp = new_total
+        else:
+            cur.execute("SELECT xp FROM users WHERE id = %s", (user["id"],))
+            total_xp = (cur.fetchone() or {}).get("xp") or 0
+        out["xp_gained"] = xp_amount if granted else 0
+        out["total_xp"] = total_xp
+        out["rank"] = get_rank_info(total_xp)
+        out["streak"] = _poeltl_streak(cur, user["id"])
+    return jsonify(out)
 
 
 @app.route("/games")
