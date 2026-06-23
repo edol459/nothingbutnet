@@ -8184,9 +8184,8 @@ def poeltl_daily():
         "your_result": ({"solved": r["solved"], "guesses": r["guesses"]} if r else None),
         "streak": _poeltl_streak(cur, user["id"]),
     }
-    if r:                                  # already played → reveal so the client can show it
-        body["clues"]  = daily["clues"]
-        body["answer"] = daily["answer"]
+    if r:                                  # already played → reveal everything (clues/answer/opp/date)
+        body.update(poeltl_api.end_reveal(daily))
     return jsonify(body)
 
 
@@ -8216,8 +8215,8 @@ def poeltl_guess():
                        VALUES (%s, 'daily', %s, %s, %s)
                        ON CONFLICT (user_id, mode, date) DO NOTHING""",
                     (user["id"], today, solved, used))
-        # XP: solve fast = more. +10 base + 5/remaining guess; an unsolved day still earns +5.
-        xp_amount = (10 + 5 * (poeltl_api.MAX_GUESSES - used + 1)) if solved else 5
+        # XP: +10 for playing, +10 more for solving.
+        xp_amount = 20 if solved else 10
         new_total = _grant_xp(cur, user["id"], "poeltl_daily", today, xp_amount)
         conn.commit()
         granted = new_total != -1

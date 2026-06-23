@@ -188,14 +188,13 @@ def _build(perf):
     season_label = perf["season"] + (" · Playoffs" if perf["season_type"] == "Playoffs"
                                      else " · Regular season")
     name = perf["player_name"]
-    # Clue ladder, revealed one per guess used (a miss OR a "reveal hint"): who the player is
-    # (bio) → where/when (context) → the name skeleton (first+last initials) as the final hint.
-    # Bio clues are skipped when genuinely unknown.
+    # Clue ladder, revealed one per guess used (a miss OR a "reveal a clue"). Season leads so you
+    # get an era gauge first; then bio → team → name skeleton. Skipped when genuinely unknown.
     ladder = [
+        ("Season",   season_label),
         ("Position", _pos_label(perf)),
         ("Height",   _height_label(perf)),
         ("Draft",    _draft_label(perf)),
-        ("Season",   season_label),
         ("College",  _college_label(perf)),
         ("Team",     team),
         ("Name",     _name_mask(name, 0)),   # first + last initials, rest as underscores
@@ -203,8 +202,9 @@ def _build(perf):
     clues = [{"label": k, "value": v} for k, v in ladder if v]
     return {
         "box": box,
-        "opponent": opp,        # shown on the card from the start (with the team logo)
-        "home": home,           # True = player's team hosted (vs.), False = away (@)
+        "opponent": opp,                       # part of the end-of-game reveal (not shown during play)
+        "home": home,                          # True = player's team hosted (vs.), False = away (@)
+        "game_date": _date_label(perf["game_date"]),
         "clues": clues,
         "max_guesses": MAX_GUESSES,
         "answer": {"player_id": perf["player_id"], "name": name},
@@ -234,6 +234,7 @@ def unlimited_round(conn):
         "box": daily["box"],
         "opponent": daily.get("opponent"),
         "home": daily.get("home"),
+        "game_date": daily.get("game_date"),
         "max_guesses": daily["max_guesses"],
         "clue_plan": [c["label"] for c in daily["clues"]],
         "clues": daily["clues"],
@@ -255,21 +256,30 @@ def random_performance(conn):
 
 # ── client view + guess scoring ───────────────────────────────────────────────
 def puzzle_view(daily):
-    """What ships to the client up front: the box score + opponent (shown on the card) + guess
-    budget + the clue ladder's labels (for placeholders). NO clue values, NO answer."""
+    """What ships to the client up front: the box score + guess budget + the clue ladder's
+    labels (for placeholders). NO clue values, NO opponent/date, NO answer."""
     return {
         "box": daily["box"],
-        "opponent": daily.get("opponent"),
-        "home": daily.get("home"),
         "max_guesses": daily["max_guesses"],
         "clue_plan": [c["label"] for c in daily["clues"]],
     }
 
 
+def end_reveal(daily):
+    """Everything shown once the round is over: all clues, the answer, opponent + game date."""
+    return {
+        "clues": daily["clues"],
+        "answer": daily["answer"],
+        "opponent": daily.get("opponent"),
+        "home": daily.get("home"),
+        "game_date": daily.get("game_date"),
+    }
+
+
 def score_guesses(daily, guesses):
     """Score an ordered list of guesses against the stored answer. Each guess USED (a wrong
-    player guess, OR a 0 sentinel = 'reveal a hint') reveals the next clue. The answer is
-    returned only once the round is done (solved or out of guesses)."""
+    player guess, OR a 0 sentinel = 'reveal a clue') reveals the next clue. Once the round is
+    done (solved or out of guesses) EVERYTHING is revealed: all clues, opponent, date, answer."""
     answer_id = daily["answer"]["player_id"]
     guesses = [g for g in (guesses or []) if isinstance(g, int)][:daily["max_guesses"]]
     results = [g == answer_id for g in guesses]
@@ -279,9 +289,9 @@ def score_guesses(daily, guesses):
         if r:
             break
         wrong += 1
-    revealed = list(daily["clues"][:min(wrong, len(daily["clues"]))])
     done = solved or len(guesses) >= daily["max_guesses"]
-    return {
+    revealed = list(daily["clues"]) if done else list(daily["clues"][:min(wrong, len(daily["clues"]))])
+    out = {
         "results": results,
         "solved": solved,
         "guesses_used": len(guesses),
@@ -289,6 +299,11 @@ def score_guesses(daily, guesses):
         "done": done,
         "answer": daily["answer"] if done else None,
     }
+    if done:
+        out["opponent"]  = daily.get("opponent")
+        out["home"]      = daily.get("home")
+        out["game_date"] = daily.get("game_date")
+    return out
 
 
 # ── persistence (daily store) ─────────────────────────────────────────────────

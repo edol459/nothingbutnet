@@ -215,13 +215,14 @@ async function boot(){
   if(d.status === 401){ stage.innerHTML = signinCard('/poeltl'); return; }
   if(!d.ok){ stage.innerHTML = `<div class="card center"><div class="sub">No puzzle today. Check back soon.</div></div>`; return; }
   const b = d.body;
-  state = { mode:'daily', date:b.date, box:b.box, opponent:b.opponent, home:b.home,
+  state = { mode:'daily', date:b.date, box:b.box, opponent:null, home:null, gameDate:null,
             maxGuesses:b.max_guesses, cluePlan:b.clue_plan||[],
             players:b.players||[], guesses:[], results:[], revealed:[], done:false, solved:false,
-            answer:b.answer||null, streak:b.streak||0, xpGained:0, picked:null };
-  if(b.your_result){            // already played today → show the finished puzzle
+            answer:null, streak:b.streak||0, xpGained:0, picked:null };
+  if(b.your_result){            // already played today → reveal the finished puzzle (everything)
     state.done = true; state.solved = b.your_result.solved;
     state.revealed = b.clues || []; state.answer = b.answer || null;
+    state.opponent = b.opponent; state.home = b.home; state.gameDate = b.game_date;
     state.playedGuesses = b.your_result.guesses;
     return renderDone(true);
   }
@@ -236,7 +237,7 @@ async function startUnlimited(){
   if(d.status === 403){ stage.innerHTML = proCard(); return; }
   if(!d.ok){ stage.innerHTML = `<div class="card center"><div class="sub">Couldn't start. Try again.</div></div>`; return; }
   const b = d.body;
-  state = { mode:'unlimited', box:b.box, opponent:b.opponent, home:b.home,
+  state = { mode:'unlimited', box:b.box, opponent:b.opponent, home:b.home, gameDate:b.game_date,
             maxGuesses:b.max_guesses, cluePlan:b.clue_plan||[],
             players:b.players||[], fullClues:b.clues||[], answer:b.answer,
             guesses:[], results:[], revealed:[], done:false, solved:false };
@@ -254,9 +255,11 @@ function perfCard(){
   const nm = (solved && state.answer)
     ? `<div class="nm">${state.answer.name}</div>`
     : `<div class="nm hidden-nm">Mystery player</div>`;
-  const fgpct = s.fga ? (100*s.fgm/s.fga).toFixed(1)+'%' : '–';
+  // once the round is over, reveal the matchup + exact date on the card
+  const doneCtx = (solved && state.opponent)
+    ? `<div class="ctx">${oppHTML()}${state.gameDate?` · ${state.gameDate}`:''}</div>` : '';
   return `<div class="perf">
-    <div class="perf-head">${mug}<div class="perf-id">${nm}</div></div>
+    <div class="perf-head">${mug}<div class="perf-id">${nm}${doneCtx}</div></div>
     <div class="big3">
       <div class="b"><div class="v">${s.pts}</div><div class="l">pts</div></div>
       <div class="b"><div class="v">${s.reb}</div><div class="l">reb</div></div>
@@ -336,8 +339,8 @@ async function submitGuess(pid){
     state.results = state.guesses.map(g=>g===state.answer.player_id);
     state.solved = state.results.some(Boolean);
     let wrong=0; for(const r of state.results){ if(r) break; wrong++; }
-    state.revealed = state.fullClues.slice(0, wrong);
     state.done = state.solved || state.guesses.length >= state.maxGuesses;
+    state.revealed = state.done ? state.fullClues : state.fullClues.slice(0, wrong);  // reveal all on done
     return state.done ? renderDone(false) : render();
   }
   const res = await jfetch('/api/poeltl/guess', {
@@ -348,7 +351,11 @@ async function submitGuess(pid){
   const b = res.body;
   state.results = b.results; state.revealed = b.revealed; state.done = b.done;
   state.solved = b.solved; state.answer = b.answer || state.answer;
-  if(b.done){ state.xpGained = b.xp_gained||0; state.streak = b.streak ?? state.streak; return renderDone(false); }
+  if(b.done){
+    state.xpGained = b.xp_gained||0; state.streak = b.streak ?? state.streak;
+    state.opponent = b.opponent; state.home = b.home; state.gameDate = b.game_date;   // reveal everything
+    return renderDone(false);
+  }
   render();
 }
 
@@ -360,7 +367,7 @@ function renderDone(already){
     ? `<div class="headline win">Solved in ${used}!</div>`
     : `<div class="headline lose">Out of guesses</div>`;
   const sub = state.solved
-    ? `You knew ball.` : `It was ${state.answer ? state.answer.name : 'a mystery'}.`;
+    ? `You know ball.` : `It was ${state.answer ? state.answer.name : 'a mystery'}.`;
   const xpHTML = (!already && !unlimited && state.xpGained>0) ? `<div class="xpline">+${state.xpGained} Ball Knowledge</div>` : '';
   const statsHTML = unlimited ? '' : `<div class="stats"><div><div class="n">${state.streak}</div><div class="l">streak</div></div></div>`;
   const actions = unlimited
