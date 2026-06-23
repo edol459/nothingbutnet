@@ -134,8 +134,9 @@ def _draft_label(perf):
     return f"{int(y)} · #{int(n)} pick" if n else f"{int(y)}"
 
 def _college_label(perf):
+    # "No college" is itself a strong clue (prep-to-pro or international), so always show it.
     c = (perf.get("college") or "").strip()
-    return c if c and c.lower() != "none" else None
+    return c if c and c.lower() != "none" else "No college"
 
 
 def _build(perf):
@@ -158,8 +159,8 @@ def _build(perf):
         ("Position", _pos_label(perf)),
         ("Height",   _height_label(perf)),
         ("Draft",    _draft_label(perf)),
-        ("College",  _college_label(perf)),
         ("Season",   season_label),
+        ("College",  _college_label(perf)),
         ("Team",     team),
         ("Name",     _name_mask(name, 0)),   # first + last initials, rest as underscores
     ]

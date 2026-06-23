@@ -256,8 +256,7 @@ function perfCard(){
     : `<div class="nm hidden-nm">Mystery player</div>`;
   const fgpct = s.fga ? (100*s.fgm/s.fga).toFixed(1)+'%' : '–';
   return `<div class="perf">
-    <div class="perf-head">${mug}<div class="perf-id">${nm}
-      <div class="ctx">${oppHTML()}</div></div></div>
+    <div class="perf-head">${mug}<div class="perf-id">${nm}</div></div>
     <div class="big3">
       <div class="b"><div class="v">${s.pts}</div><div class="l">pts</div></div>
       <div class="b"><div class="v">${s.reb}</div><div class="l">reb</div></div>
