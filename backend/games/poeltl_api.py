@@ -139,9 +139,9 @@ def _college_label(perf):
 
 
 def _build(perf):
-    """The full daily object: the box-score line (shown), the ordered clues (revealed on
-    misses), and the answer (server-side only)."""
-    team, opp, _home = _parse_matchup(perf["matchup"])
+    """The full daily object: the box-score line + opponent (shown on the card), the ordered
+    clues (revealed on misses), and the answer (server-side only)."""
+    team, opp, home = _parse_matchup(perf["matchup"])
     box = {
         "pts": _f(perf["pts"]), "reb": _f(perf["reb"]), "ast": _f(perf["ast"]),
         "fg3m": _f(perf["fg3m"]), "fgm": _f(perf["fgm"]), "fga": _f(perf["fga"]),
@@ -150,23 +150,27 @@ def _build(perf):
     }
     season_label = perf["season"] + (" · Playoffs" if perf["season_type"] == "Playoffs"
                                      else " · Regular season")
-    # Clue ladder, vague → specific: who the player is (bio) → where/when (context). Revealed
-    # one per miss; then the name skeleton (Hangman) for any further misses. Bio clues are
-    # skipped when unknown, so the ladder may be a touch shorter for a few players.
+    name = perf["player_name"]
+    # Clue ladder, revealed one per guess used (a miss OR a "reveal hint"): who the player is
+    # (bio) → where/when (context) → the name skeleton (first+last initials) as the final hint.
+    # Bio clues are skipped when genuinely unknown.
     ladder = [
         ("Position", _pos_label(perf)),
-        ("Draft",    _draft_label(perf)),
         ("Height",   _height_label(perf)),
+        ("Draft",    _draft_label(perf)),
         ("College",  _college_label(perf)),
-        ("Team",     team),
         ("Season",   season_label),
+        ("Team",     team),
+        ("Name",     _name_mask(name, 0)),   # first + last initials, rest as underscores
     ]
     clues = [{"label": k, "value": v} for k, v in ladder if v]
     return {
         "box": box,
+        "opponent": opp,        # shown on the card from the start (with the team logo)
+        "home": home,           # True = player's team hosted (vs.), False = away (@)
         "clues": clues,
         "max_guesses": MAX_GUESSES,
-        "answer": {"player_id": perf["player_id"], "name": perf["player_name"]},
+        "answer": {"player_id": perf["player_id"], "name": name},
     }
 
 
@@ -183,21 +187,19 @@ def build_daily(conn, date_str, seed=None):
 
 
 def unlimited_round(conn):
-    """A random round for Pro unlimited practice. Unlike the daily, this ships the answer +
-    the FULL clue ladder (context clues + every Hangman name-mask step) so the client can play
-    and reveal locally — it's solo practice, not a shared/scored daily, so that's fine."""
+    """A random round for Pro unlimited practice. Unlike the daily, this ships the answer + the
+    full clue ladder so the client can play and reveal locally — it's solo practice, not a
+    shared/scored daily, so that's fine."""
     daily = random_performance(conn)
     if daily is None:
         return None
-    name = daily["answer"]["name"]
-    steps = max(0, daily["max_guesses"] - len(daily["clues"]))   # name-reveal steps available
-    ladder = list(daily["clues"]) + [{"label": "Name", "value": _name_mask(name, i)}
-                                     for i in range(steps)]
     return {
         "box": daily["box"],
+        "opponent": daily.get("opponent"),
+        "home": daily.get("home"),
         "max_guesses": daily["max_guesses"],
-        "clue_plan": [c["label"] for c in daily["clues"]] + ["Name"],
-        "clues": ladder,
+        "clue_plan": [c["label"] for c in daily["clues"]],
+        "clues": daily["clues"],
         "answer": daily["answer"],
     }
 
@@ -213,19 +215,21 @@ def random_performance(conn):
 
 # ── client view + guess scoring ───────────────────────────────────────────────
 def puzzle_view(daily):
-    """What ships to the client up front: the box score + guess budget + the clue ladder's
-    labels (for placeholder rendering). NO clue values, NO answer."""
+    """What ships to the client up front: the box score + opponent (shown on the card) + guess
+    budget + the clue ladder's labels (for placeholders). NO clue values, NO answer."""
     return {
         "box": daily["box"],
+        "opponent": daily.get("opponent"),
+        "home": daily.get("home"),
         "max_guesses": daily["max_guesses"],
-        "clue_plan": [c["label"] for c in daily["clues"]] + ["Name"],
+        "clue_plan": [c["label"] for c in daily["clues"]],
     }
 
 
 def score_guesses(daily, guesses):
-    """Score an ordered list of guessed player_ids against the stored answer. Each WRONG guess
-    reveals the next clue: the 3 context clues, then the name skeleton (Hangman) — one more
-    letter per further miss. The answer is returned only once the round is done."""
+    """Score an ordered list of guesses against the stored answer. Each guess USED (a wrong
+    player guess, OR a 0 sentinel = 'reveal a hint') reveals the next clue. The answer is
+    returned only once the round is done (solved or out of guesses)."""
     answer_id = daily["answer"]["player_id"]
     guesses = [g for g in (guesses or []) if isinstance(g, int)][:daily["max_guesses"]]
     results = [g == answer_id for g in guesses]
@@ -235,11 +239,7 @@ def score_guesses(daily, guesses):
         if r:
             break
         wrong += 1
-    ctx = daily["clues"]
-    revealed = list(ctx[:min(wrong, len(ctx))])
-    if wrong > len(ctx):                       # name skeleton appears + reveals progressively
-        revealed.append({"label": "Name", "value": _name_mask(daily["answer"]["name"],
-                                                               wrong - len(ctx) - 1)})
+    revealed = list(daily["clues"][:min(wrong, len(daily["clues"]))])
     done = solved or len(guesses) >= daily["max_guesses"]
     return {
         "results": results,

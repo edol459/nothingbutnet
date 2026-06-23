@@ -74,7 +74,10 @@
   .perf-id{flex:1}
   .perf-id .nm{font-family:var(--ff-serif); font-size:21px; line-height:1.1}
   .perf-id .nm.hidden-nm{color:var(--ink4); letter-spacing:.06em}
-  .perf-id .ctx{font-family:var(--ff-mono); font-size:11px; color:var(--ink3); margin-top:3px}
+  .perf-id .ctx{font-family:var(--ff-mono); font-size:12px; color:var(--ink3); margin-top:5px; display:flex; align-items:center; gap:6px}
+  .ctx .vs{text-transform:uppercase; letter-spacing:.06em; font-size:11px}
+  .ctx .opplogo{width:22px; height:22px; object-fit:contain}
+  .ctx .oppabbr{font-weight:500; color:var(--ink2)}
   .big3{display:flex; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule)}
   .big3 .b{flex:1; text-align:center; padding:16px 6px}
   .big3 .b + .b{border-left:1px solid var(--rule)}
@@ -104,6 +107,8 @@
         border:1px solid var(--rule); background:var(--field)}
   .grow.miss{border-color:var(--red); background:var(--red-lt)}
   .grow.hit{border-color:var(--green); background:var(--green-lt)}
+  .grow.hint{border-style:dashed; color:var(--ink3)}
+  .grow.hint .mark{font-size:13px}
   .grow .shot{width:30px; height:30px; border-radius:50%; overflow:hidden; background:var(--paper3); flex-shrink:0}
   .grow .shot img{width:100%; height:100%; object-fit:cover; object-position:center top}
   .grow .gn{flex:1; font-size:15px}
@@ -181,6 +186,14 @@ function jfetch(url, opts){
 function headshot(id){ return `https://cdn.nba.com/headshots/nba/latest/260x190/${id}.png`; }
 function shotHTML(id){ return `<span class="shot"><img src="${headshot(id)}" onerror="this.remove()" alt=""></span>`; }
 function nameOf(id){ const p = state.players.find(p=>p.id===id); return p ? p.name : '—'; }
+const TEAM_ID = {ATL:1610612737,BKN:1610612751,BOS:1610612738,CHA:1610612766,CHI:1610612741,CLE:1610612739,DAL:1610612742,DEN:1610612743,DET:1610612765,GSW:1610612744,HOU:1610612745,IND:1610612754,LAC:1610612746,LAL:1610612747,MEM:1610612763,MIA:1610612748,MIL:1610612749,MIN:1610612750,NOP:1610612740,NYK:1610612752,OKC:1610612760,ORL:1610612753,PHI:1610612755,PHX:1610612756,POR:1610612757,SAC:1610612758,SAS:1610612759,TOR:1610612761,UTA:1610612762,WAS:1610612764};
+function teamLogo(abbr){ const id = TEAM_ID[abbr]; return id ? `https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg` : null; }
+function oppHTML(){   // opponent shown on the card from the start: "vs/@ [logo] ABBR"
+  if(!state.opponent) return '';
+  const logo = teamLogo(state.opponent);
+  const badge = logo ? `<img class="opplogo" src="${logo}" onerror="this.style.display='none'" alt="">` : '';
+  return `<span class="vs">${state.home?'vs':'@'}</span>${badge}<span class="oppabbr">${state.opponent}</span>`;
+}
 
 function signinCard(next){ return `<div class="card center">
   <img class="resultlogo" src="/transparent.png" alt="">
@@ -202,7 +215,8 @@ async function boot(){
   if(d.status === 401){ stage.innerHTML = signinCard('/poeltl'); return; }
   if(!d.ok){ stage.innerHTML = `<div class="card center"><div class="sub">No puzzle today. Check back soon.</div></div>`; return; }
   const b = d.body;
-  state = { mode:'daily', date:b.date, box:b.box, maxGuesses:b.max_guesses, cluePlan:b.clue_plan||[],
+  state = { mode:'daily', date:b.date, box:b.box, opponent:b.opponent, home:b.home,
+            maxGuesses:b.max_guesses, cluePlan:b.clue_plan||[],
             players:b.players||[], guesses:[], results:[], revealed:[], done:false, solved:false,
             answer:b.answer||null, streak:b.streak||0, xpGained:0, picked:null };
   if(b.your_result){            // already played today → show the finished puzzle
@@ -222,7 +236,8 @@ async function startUnlimited(){
   if(d.status === 403){ stage.innerHTML = proCard(); return; }
   if(!d.ok){ stage.innerHTML = `<div class="card center"><div class="sub">Couldn't start. Try again.</div></div>`; return; }
   const b = d.body;
-  state = { mode:'unlimited', box:b.box, maxGuesses:b.max_guesses, cluePlan:b.clue_plan||[],
+  state = { mode:'unlimited', box:b.box, opponent:b.opponent, home:b.home,
+            maxGuesses:b.max_guesses, cluePlan:b.clue_plan||[],
             players:b.players||[], fullClues:b.clues||[], answer:b.answer,
             guesses:[], results:[], revealed:[], done:false, solved:false };
   footEl.textContent = `unlimited · ${state.maxGuesses} guesses`;
@@ -242,7 +257,7 @@ function perfCard(){
   const fgpct = s.fga ? (100*s.fgm/s.fga).toFixed(1)+'%' : '–';
   return `<div class="perf">
     <div class="perf-head">${mug}<div class="perf-id">${nm}
-      <div class="ctx">${state.maxGuesses - state.guesses.length} of ${state.maxGuesses} guesses left</div></div></div>
+      <div class="ctx">${oppHTML()}</div></div></div>
     <div class="big3">
       <div class="b"><div class="v">${s.pts}</div><div class="l">pts</div></div>
       <div class="b"><div class="v">${s.reb}</div><div class="l">reb</div></div>
@@ -271,15 +286,22 @@ function cluesHTML(){
 function guessHTML(){
   if(!state.guesses.length) return '';
   return `<div class="glist">` + state.guesses.map((g,i)=>{
+    if(g===0){ return `<div class="grow hint"><span class="mark">💡</span><span class="gn">Clue revealed</span></div>`; }
     const hit = state.results[i];
     return `<div class="grow ${hit?'hit':'miss'}">${shotHTML(g)}<span class="gn">${nameOf(g)}</span><span class="mark">${hit?'✓':'✗'}</span></div>`;
   }).join('') + `</div>`;
 }
 function render(){
+  const remaining = state.maxGuesses - state.guesses.length;
+  const cluesLeft = (state.cluePlan||[]).length - state.revealed.length;
+  const hintBtn = cluesLeft>0
+    ? `<button class="btn ghost" id="hintbtn" style="margin-top:10px">Reveal a clue · uses a guess</button>` : '';
   stage.innerHTML = perfCard() + cluesHTML() +
-    `<div class="guesscount">Name the player</div>` + guessHTML() +
-    `<div class="picker"><input id="guess" placeholder="Search a player…" autocomplete="off" autocapitalize="off" spellcheck="false"><div class="drop" id="drop" style="display:none"></div></div>`;
+    `<div class="guesscount">Name the player · ${remaining} ${remaining===1?'guess':'guesses'} left</div>` + guessHTML() +
+    `<div class="picker"><input id="guess" placeholder="Search a player…" autocomplete="off" autocapitalize="off" spellcheck="false"><div class="drop" id="drop" style="display:none"></div></div>` +
+    hintBtn;
   wirePicker();
+  const hb = document.getElementById('hintbtn'); if(hb) hb.onclick = ()=>submitGuess(0);
 }
 
 function wirePicker(){
@@ -308,7 +330,8 @@ function wirePicker(){
 }
 
 async function submitGuess(pid){
-  if(state.done || state.guesses.includes(pid)) { return; }
+  if(state.done) return;
+  if(pid!==0 && state.guesses.includes(pid)) return;   // dedupe real guesses; 0 = reveal-a-clue
   state.guesses.push(pid);
   if(state.mode === 'unlimited'){          // play locally — answer + full clue ladder are loaded
     state.results = state.guesses.map(g=>g===state.answer.player_id);
