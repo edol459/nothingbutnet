@@ -65,7 +65,8 @@ def _load_perf(conn, player_id, game_id, season_type):
     with conn.cursor() as cur:
         cur.execute("""
             SELECT g.player_id, p.player_name, g.season, g.season_type, g.game_date, g.matchup, g.wl,
-                   g.min, g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga, g.ftm, g.fta, g.ts_pct
+                   g.min, g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga, g.ftm, g.fta, g.ts_pct,
+                   p.position, p.position_group, p.height_inches, p.draft_year, p.draft_number, p.college
             FROM   player_gamelogs g JOIN players p ON p.player_id = g.player_id
             WHERE  g.player_id = %s AND g.game_id = %s AND g.season_type = %s
         """, (player_id, game_id, season_type))
@@ -108,6 +109,35 @@ def _f(v):
     return None if v is None else int(round(float(v)))
 
 
+_POS_MAP = {"G": "Guard", "F": "Forward", "C": "Center"}
+
+def _pos_label(perf):
+    p = perf.get("position") or perf.get("position_group")
+    if not p:
+        return None
+    return "-".join(_POS_MAP.get(t.strip(), t.strip()) for t in p.split("-") if t.strip())
+
+def _height_label(perf):
+    h = perf.get("height_inches")
+    if not h:
+        return None
+    h = int(round(float(h)))
+    return f"{h // 12}'{h % 12}\""
+
+def _draft_label(perf):
+    """'2003 · #1 pick' / '2003'. None when unknown — we can't tell undrafted from missing,
+    so we skip rather than risk asserting a false 'undrafted'."""
+    y = perf.get("draft_year")
+    if not y:
+        return None
+    n = perf.get("draft_number")
+    return f"{int(y)} · #{int(n)} pick" if n else f"{int(y)}"
+
+def _college_label(perf):
+    c = (perf.get("college") or "").strip()
+    return c if c and c.lower() != "none" else None
+
+
 def _build(perf):
     """The full daily object: the box-score line (shown), the ordered clues (revealed on
     misses), and the answer (server-side only)."""
@@ -120,13 +150,18 @@ def _build(perf):
     }
     season_label = perf["season"] + (" · Playoffs" if perf["season_type"] == "Playoffs"
                                      else " · Regular season")
-    # 3 context clues (revealed on misses 1-3), then the name skeleton (miss 4+) reveals
-    # itself Hangman-style — one more letter per further miss.
-    clues = [
-        {"label": "Opponent", "value": opp},
-        {"label": "Season",   "value": season_label},
-        {"label": "Team",     "value": team},
+    # Clue ladder, vague → specific: who the player is (bio) → where/when (context). Revealed
+    # one per miss; then the name skeleton (Hangman) for any further misses. Bio clues are
+    # skipped when unknown, so the ladder may be a touch shorter for a few players.
+    ladder = [
+        ("Position", _pos_label(perf)),
+        ("Draft",    _draft_label(perf)),
+        ("Height",   _height_label(perf)),
+        ("College",  _college_label(perf)),
+        ("Team",     team),
+        ("Season",   season_label),
     ]
+    clues = [{"label": k, "value": v} for k, v in ladder if v]
     return {
         "box": box,
         "clues": clues,
