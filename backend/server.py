@@ -8233,6 +8233,24 @@ def poeltl_guess():
     return jsonify(out)
 
 
+@app.route("/api/poeltl/unlimited")
+@login_required
+def poeltl_unlimited():
+    """A random practice round — Pro only. Ships the answer + full clue ladder for local play
+    (unlimited is solo practice, no streak/XP). Also returns the autocomplete player bank."""
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("SELECT is_pro FROM users WHERE id = %s", (user["id"],))
+    row = cur.fetchone()
+    if not (row and row["is_pro"]):
+        return jsonify({"error": "pro_required", "message": "Unlimited is a Pro feature."}), 403
+    r = poeltl_api.unlimited_round(conn)
+    if not r:
+        return jsonify({"error": "unavailable"}), 503
+    r["players"] = survival_api.player_list(conn)
+    return jsonify(r)
+
+
 @app.route("/games")
 @app.route("/games.html")
 def games_page():

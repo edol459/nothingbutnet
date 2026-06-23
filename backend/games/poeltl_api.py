@@ -147,8 +147,28 @@ def build_daily(conn, date_str, seed=None):
     return _build(perf) if perf else None
 
 
+def unlimited_round(conn):
+    """A random round for Pro unlimited practice. Unlike the daily, this ships the answer +
+    the FULL clue ladder (context clues + every Hangman name-mask step) so the client can play
+    and reveal locally — it's solo practice, not a shared/scored daily, so that's fine."""
+    daily = random_performance(conn)
+    if daily is None:
+        return None
+    name = daily["answer"]["name"]
+    steps = max(0, daily["max_guesses"] - len(daily["clues"]))   # name-reveal steps available
+    ladder = list(daily["clues"]) + [{"label": "Name", "value": _name_mask(name, i)}
+                                     for i in range(steps)]
+    return {
+        "box": daily["box"],
+        "max_guesses": daily["max_guesses"],
+        "clue_plan": [c["label"] for c in daily["clues"]] + ["Name"],
+        "clues": ladder,
+        "answer": daily["answer"],
+    }
+
+
 def random_performance(conn):
-    """A random daily-worthy performance — for Pro unlimited practice."""
+    """A random daily-worthy performance (built like the daily). Used by unlimited_round."""
     pool = _pool(conn)
     if not pool:
         return None

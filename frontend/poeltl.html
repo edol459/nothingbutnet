@@ -182,22 +182,27 @@ function headshot(id){ return `https://cdn.nba.com/headshots/nba/latest/260x190/
 function shotHTML(id){ return `<span class="shot"><img src="${headshot(id)}" onerror="this.remove()" alt=""></span>`; }
 function nameOf(id){ const p = state.players.find(p=>p.id===id); return p ? p.name : '—'; }
 
+function signinCard(next){ return `<div class="card center">
+  <img class="resultlogo" src="/transparent.png" alt="">
+  <div class="headline">Sign in to play</div>
+  <div class="sub">The Daily Performance is free with a ydkball account — your streak and
+    Ball Knowledge are saved to it.</div>
+  <a class="btn" href="/auth/google/login?next=${encodeURIComponent(next||'/poeltl')}"
+     style="text-decoration:none;margin-top:18px">Sign in</a></div>`; }
+function proCard(){ return `<div class="card center">
+  <img class="resultlogo" src="/transparent.png" alt="">
+  <div class="headline">Unlimited is Pro</div>
+  <div class="sub">Unlimited practice rounds with ydkball Pro.<br>Today's puzzle is always free.</div>
+  <a class="btn ghost" href="/games" style="text-decoration:none;margin-top:18px">Back to games</a></div>`; }
+
 // ── boot ──────────────────────────────────────────────────────────────
 async function boot(){
+  if(new URLSearchParams(location.search).get('mode') === 'unlimited'){ return startUnlimited(); }
   const d = await jfetch('/api/poeltl/daily');
-  if(d.status === 401){
-    stage.innerHTML = `<div class="card center">
-      <img class="resultlogo" src="/transparent.png" alt="">
-      <div class="headline">Sign in to play</div>
-      <div class="sub">The Daily Performance is free with a ydkball account — your streak and
-        Ball Knowledge are saved to it.</div>
-      <a class="btn" href="/auth/google/login?next=${encodeURIComponent('/poeltl')}"
-         style="text-decoration:none;margin-top:18px">Sign in</a></div>`;
-    return;
-  }
+  if(d.status === 401){ stage.innerHTML = signinCard('/poeltl'); return; }
   if(!d.ok){ stage.innerHTML = `<div class="card center"><div class="sub">No puzzle today. Check back soon.</div></div>`; return; }
   const b = d.body;
-  state = { date:b.date, box:b.box, maxGuesses:b.max_guesses, cluePlan:b.clue_plan||[],
+  state = { mode:'daily', date:b.date, box:b.box, maxGuesses:b.max_guesses, cluePlan:b.clue_plan||[],
             players:b.players||[], guesses:[], results:[], revealed:[], done:false, solved:false,
             answer:b.answer||null, streak:b.streak||0, xpGained:0, picked:null };
   if(b.your_result){            // already played today → show the finished puzzle
@@ -207,6 +212,20 @@ async function boot(){
     return renderDone(true);
   }
   footEl.textContent = `${state.maxGuesses} guesses · one a day`;
+  render();
+}
+
+async function startUnlimited(){
+  stage.innerHTML = `<div class="card center"><div class="sub">Loading…</div></div>`;
+  const d = await jfetch('/api/poeltl/unlimited');
+  if(d.status === 401){ stage.innerHTML = signinCard('/poeltl?mode=unlimited'); return; }
+  if(d.status === 403){ stage.innerHTML = proCard(); return; }
+  if(!d.ok){ stage.innerHTML = `<div class="card center"><div class="sub">Couldn't start. Try again.</div></div>`; return; }
+  const b = d.body;
+  state = { mode:'unlimited', box:b.box, maxGuesses:b.max_guesses, cluePlan:b.clue_plan||[],
+            players:b.players||[], fullClues:b.clues||[], answer:b.answer,
+            guesses:[], results:[], revealed:[], done:false, solved:false };
+  footEl.textContent = `unlimited · ${state.maxGuesses} guesses`;
   render();
 }
 
@@ -291,6 +310,14 @@ function wirePicker(){
 async function submitGuess(pid){
   if(state.done || state.guesses.includes(pid)) { return; }
   state.guesses.push(pid);
+  if(state.mode === 'unlimited'){          // play locally — answer + full clue ladder are loaded
+    state.results = state.guesses.map(g=>g===state.answer.player_id);
+    state.solved = state.results.some(Boolean);
+    let wrong=0; for(const r of state.results){ if(r) break; wrong++; }
+    state.revealed = state.fullClues.slice(0, wrong);
+    state.done = state.solved || state.guesses.length >= state.maxGuesses;
+    return state.done ? renderDone(false) : render();
+  }
   const res = await jfetch('/api/poeltl/guess', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({guesses: state.guesses})
@@ -305,26 +332,32 @@ async function submitGuess(pid){
 
 // ── done ──────────────────────────────────────────────────────────────
 function renderDone(already){
+  const unlimited = state.mode === 'unlimited';
   const used = already ? state.playedGuesses : state.guesses.length;
   const head = state.solved
     ? `<div class="headline win">Solved in ${used}!</div>`
     : `<div class="headline lose">Out of guesses</div>`;
   const sub = state.solved
     ? `You knew ball.` : `It was ${state.answer ? state.answer.name : 'a mystery'}.`;
-  const xpHTML = (!already && state.xpGained>0) ? `<div class="xpline">+${state.xpGained} Ball Knowledge</div>` : '';
-  const shareTxt = buildShare(used);
+  const xpHTML = (!already && !unlimited && state.xpGained>0) ? `<div class="xpline">+${state.xpGained} Ball Knowledge</div>` : '';
+  const statsHTML = unlimited ? '' : `<div class="stats"><div><div class="n">${state.streak}</div><div class="l">streak</div></div></div>`;
+  const actions = unlimited
+    ? `<button class="btn" id="again">Play again</button>
+       <a class="btn ghost" href="/games" style="text-decoration:none">Back to games</a>`
+    : `<button class="btn" id="share">Share result</button>
+       <a class="btn ghost" href="/games" style="text-decoration:none">Back to games</a>`;
   stage.innerHTML = perfCard() + cluesHTML() + (already?'':guessHTML()) +
-    `<div class="card center" style="margin-top:16px">
-       ${head}<div class="sub">${sub}</div>${xpHTML}
-       <div class="stats"><div><div class="n">${state.streak}</div><div class="l">streak</div></div></div>
-       <button class="btn" id="share">Share result</button>
-       <a class="btn ghost" href="/games" style="text-decoration:none">Back to games</a>
-     </div>`;
-  footEl.textContent = 'come back tomorrow for a new performance';
-  document.getElementById('share').onclick = ()=>{
-    if(navigator.share){ navigator.share({text:shareTxt}); }
-    else { navigator.clipboard.writeText(shareTxt); document.getElementById('share').textContent='Copied!'; }
-  };
+    `<div class="card center" style="margin-top:16px">${head}<div class="sub">${sub}</div>${xpHTML}${statsHTML}${actions}</div>`;
+  footEl.textContent = unlimited ? 'unlimited practice' : 'come back tomorrow for a new performance';
+  if(unlimited){
+    document.getElementById('again').onclick = startUnlimited;
+  } else {
+    const shareTxt = buildShare(used);
+    document.getElementById('share').onclick = ()=>{
+      if(navigator.share){ navigator.share({text:shareTxt}); }
+      else { navigator.clipboard.writeText(shareTxt); document.getElementById('share').textContent='Copied!'; }
+    };
+  }
 }
 function buildShare(used){
   const squares = state.results.map(r=>r?'🟩':'⬛').join('');
