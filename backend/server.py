@@ -8245,5 +8245,11 @@ def survival_page():
     return app.send_static_file("survival.html")
 
 
+@app.route("/poeltl")
+@app.route("/poeltl.html")
+def poeltl_page():
+    return app.send_static_file("poeltl.html")
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)

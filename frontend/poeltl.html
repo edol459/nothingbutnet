@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ydkball · Daily Performance</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo-icon.png">
+<script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/night-mode.css">
+<style>
+  *,*::before,*::after{box-sizing:border-box; margin:0; padding:0}
+  :root{
+    --ink:#0c0c0d; --ink2:#2a2a2e; --ink3:#6b6b78; --ink4:#a8a8b3;
+    --paper:#F5F0E8; --paper2:#eeecea; --paper3:#e5e2dc; --rule:#d8d5cf;
+    --orange:#e8530a; --orange-lt:#fff0ea; --green:#1a7a4a; --green-lt:#e8f3ec;
+    --red:#c0392b; --red-lt:#fbeceb; --card:#FCFBF8; --field:#fff;
+    --ff-serif:'DM Serif Display',Georgia,serif;
+    --ff-sans:'Instrument Sans',system-ui,sans-serif;
+    --ff-mono:'DM Mono','Courier New',monospace;
+    --nav-h:56px; font-size:15px;
+  }
+  html.night-mode{ --card:#222228; --field:#191920; --green-lt:#16271d; --red-lt:#2b1715; }
+  html{overflow-x:clip}
+  body{font-family:var(--ff-sans); background:var(--paper); color:var(--ink);
+       min-height:100vh; -webkit-font-smoothing:antialiased; position:relative;
+       display:flex; flex-direction:column; align-items:center}
+  body::before{content:''; position:fixed; inset:0; z-index:9999; pointer-events:none; opacity:.022;
+    background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+
+  nav{position:fixed; top:0; left:0; right:0; height:var(--nav-h); background:var(--paper);
+      border-bottom:1px solid var(--rule); display:flex; align-items:center; padding:0 24px; gap:24px; z-index:100}
+  .nav-wordmark{font-family:var(--ff-serif); font-size:20px; color:var(--ink); letter-spacing:-.01em;
+                text-decoration:none; flex-shrink:0; display:flex; align-items:center}
+  .nav-logo{height:26px; width:auto; margin-right:8px}
+  .nav-wordmark span{color:var(--orange)}
+  .nav-tabs{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); display:flex; gap:2px}
+  .nav-tab{font-family:var(--ff-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+           color:var(--ink3); background:none; border:none; padding:6px 14px; cursor:pointer; border-radius:4px;
+           transition:color .15s, background .15s; text-decoration:none; display:inline-block}
+  .nav-tab:hover{color:var(--ink); background:var(--paper2)}
+  .nav-tab.active{color:var(--ink); background:var(--paper3)}
+  .nav-auth{margin-left:auto; display:flex; align-items:center; gap:10px; flex-shrink:0}
+  .nav-auth-avatar{width:28px; height:28px; border-radius:50%; object-fit:cover; border:1.5px solid var(--rule)}
+  .nav-signin-btn{font-family:var(--ff-mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+                  padding:5px 12px; background:var(--orange); color:#fff; border:none; border-radius:4px;
+                  cursor:pointer; text-decoration:none}
+  .nav-signout-btn{font-family:var(--ff-mono); font-size:10px; letter-spacing:.04em; color:var(--ink3);
+                   background:none; border:none; cursor:pointer; padding:4px 6px}
+  @media(max-width:720px){
+    nav{padding:0 14px; gap:12px}
+    .nav-tabs{position:static; transform:none; margin-left:6px; overflow-x:auto}
+    .nav-tabs::-webkit-scrollbar{display:none}
+    .nav-tab{white-space:nowrap; padding:5px 12px}
+  }
+
+  .eyebrow{font-family:var(--ff-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+           color:var(--orange); text-align:center; margin-bottom:6px}
+  .subhead{font-family:var(--ff-sans); font-size:14px; color:var(--ink3); text-align:center; margin-bottom:18px}
+  .wrap{width:100%; max-width:480px; padding:calc(var(--nav-h) + 22px) 18px 70px; flex:1; display:flex; flex-direction:column}
+
+  /* ── the mystery box-score card ───────────────────────── */
+  .perf{background:var(--card); border:1px solid var(--rule); border-radius:14px; overflow:hidden;
+        box-shadow:0 1px 0 rgba(0,0,0,.03), 0 10px 30px rgba(20,16,10,.06)}
+  .perf-head{display:flex; align-items:center; gap:14px; padding:18px 20px}
+  .mug{width:64px; height:64px; border-radius:50%; flex-shrink:0; background:var(--paper3);
+       display:flex; align-items:center; justify-content:center; overflow:hidden;
+       border:1.5px solid var(--rule)}
+  .mug .q{font-family:var(--ff-serif); font-size:34px; color:var(--ink4)}
+  .mug img{width:100%; height:100%; object-fit:cover; object-position:center top}
+  .perf-id{flex:1}
+  .perf-id .nm{font-family:var(--ff-serif); font-size:21px; line-height:1.1}
+  .perf-id .nm.hidden-nm{color:var(--ink4); letter-spacing:.06em}
+  .perf-id .ctx{font-family:var(--ff-mono); font-size:11px; color:var(--ink3); margin-top:3px}
+  .big3{display:flex; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule)}
+  .big3 .b{flex:1; text-align:center; padding:16px 6px}
+  .big3 .b + .b{border-left:1px solid var(--rule)}
+  .big3 .v{font-family:var(--ff-serif); font-size:40px; line-height:1}
+  .big3 .l{font-family:var(--ff-mono); font-size:10px; color:var(--ink3); text-transform:uppercase; letter-spacing:.1em; margin-top:4px}
+  .statrow{display:flex; padding:12px 6px}
+  .statrow .c{flex:1; text-align:center}
+  .statrow .v{font-family:var(--ff-mono); font-size:14px; font-weight:500}
+  .statrow .l{font-family:var(--ff-mono); font-size:9px; color:var(--ink3); text-transform:uppercase; letter-spacing:.06em; margin-top:3px}
+
+  /* ── clues ────────────────────────────────────────────── */
+  .clues{display:flex; flex-wrap:wrap; gap:7px; margin:18px 0 6px; justify-content:center}
+  .clue{font-family:var(--ff-mono); font-size:11px; letter-spacing:.03em; border-radius:100px;
+        padding:6px 12px; border:1px solid var(--rule); background:var(--field); color:var(--ink4)}
+  .clue.on{border-color:#f6d8c8; background:var(--orange-lt); color:var(--orange)}
+  .clue .k{opacity:.6; text-transform:uppercase; font-size:9px; letter-spacing:.08em}
+  .clue .v{font-weight:500}
+
+  /* ── guesses ──────────────────────────────────────────── */
+  .guesscount{font-family:var(--ff-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+              color:var(--ink3); text-align:center; margin:16px 0 10px}
+  .glist{display:flex; flex-direction:column; gap:7px; margin-bottom:14px}
+  .grow{display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:9px;
+        border:1px solid var(--rule); background:var(--field)}
+  .grow.miss{border-color:var(--red); background:var(--red-lt)}
+  .grow.hit{border-color:var(--green); background:var(--green-lt)}
+  .grow .shot{width:30px; height:30px; border-radius:50%; overflow:hidden; background:var(--paper3); flex-shrink:0}
+  .grow .shot img{width:100%; height:100%; object-fit:cover; object-position:center top}
+  .grow .gn{flex:1; font-size:15px}
+  .grow .mark{font-family:var(--ff-mono); font-weight:600}
+  .grow.miss .mark{color:var(--red)} .grow.hit .mark{color:var(--green)}
+
+  /* ── picker ───────────────────────────────────────────── */
+  .picker{position:relative}
+  .picker input{width:100%; padding:14px 16px; font-family:var(--ff-sans); font-size:16px; color:var(--ink);
+    background:var(--field); border:1.5px solid var(--rule); border-radius:9px; outline:none; transition:border-color .15s}
+  .picker input::placeholder{color:var(--ink4)}
+  .picker input:focus{border-color:var(--orange)}
+  .drop{position:absolute; left:0; right:0; bottom:calc(100% + 6px); z-index:20; background:var(--field);
+        border:1px solid var(--rule); border-radius:9px; overflow:hidden auto; max-height:258px;
+        box-shadow:0 -14px 34px rgba(20,16,10,.14)}
+  .drop div{padding:9px 14px; cursor:pointer; border-bottom:1px solid var(--paper2); font-size:15px;
+            display:flex; align-items:center; gap:11px}
+  .drop div:last-child{border-bottom:none}
+  .drop div.active,.drop div:hover{background:var(--orange-lt); color:var(--orange)}
+  .shot{width:32px; height:32px; border-radius:50%; overflow:hidden; background:var(--paper3); flex-shrink:0; display:inline-block}
+  .shot img{width:100%; height:100%; object-fit:cover; object-position:center top; display:block}
+
+  .btn{display:block; width:100%; margin-top:14px; padding:14px; border:1.5px solid var(--orange);
+    border-radius:9px; font-family:var(--ff-sans); font-size:15px; font-weight:600; cursor:pointer;
+    background:var(--orange); color:#fff; transition:opacity .15s}
+  .btn:hover{opacity:.92}
+  .btn.ghost{background:transparent; color:var(--ink2); border-color:var(--rule)}
+
+  .center{text-align:center}
+  .headline{font-family:var(--ff-serif); font-size:28px; line-height:1.1; margin-bottom:4px}
+  .headline.win{color:var(--green)} .headline.lose{color:var(--red)}
+  .sub{color:var(--ink3); font-size:15px; line-height:1.5}
+  .stats{display:flex; justify-content:center; gap:34px; margin:20px 0 6px}
+  .stats .n{font-family:var(--ff-serif); font-size:26px}
+  .stats .l{font-family:var(--ff-mono); font-size:10px; color:var(--ink3); text-transform:uppercase; letter-spacing:.1em; margin-top:2px}
+  .xpline{font-family:var(--ff-mono); font-size:13px; color:var(--orange); background:var(--orange-lt);
+          border:1px solid #f6d8c8; border-radius:100px; padding:8px 18px; display:inline-block; margin-top:14px; font-weight:500}
+  .card{background:var(--card); border:1px solid var(--rule); border-radius:12px; padding:26px 24px;
+        box-shadow:0 1px 0 rgba(0,0,0,.03), 0 10px 30px rgba(20,16,10,.06)}
+  .resultlogo{height:42px; margin-bottom:10px}
+  .foot{margin-top:auto; padding-top:26px; text-align:center; font-family:var(--ff-mono);
+        font-size:11px; letter-spacing:.06em; color:var(--ink4); line-height:1.7}
+  a{color:var(--orange); text-decoration:none}
+</style>
+</head>
+<body>
+  <nav>
+    <a class="nav-wordmark" href="/"><img class="nav-logo" src="/logo.png" alt="">ydk<span>ball</span></a>
+    <div class="nav-tabs">
+      <a class="nav-tab" href="/">Home</a>
+      <a class="nav-tab" href="/reviews">BasketBoxd</a>
+      <a class="nav-tab" href="/stats">Stats</a>
+      <a class="nav-tab active" href="/games">Games</a>
+    </div>
+    <div class="nav-auth" id="nav-auth-slot"></div>
+  </nav>
+
+  <div class="wrap">
+    <div class="eyebrow">Daily Performance</div>
+    <div class="subhead">Whose game was this? Each miss reveals a clue.</div>
+    <div id="stage"></div>
+    <div class="foot"><span id="footnote"></span></div>
+  </div>
+
+<script>
+const API = window.location.protocol === 'file:' ? 'http://localhost:5000' : '';
+const stage = document.getElementById('stage');
+const footEl = document.getElementById('footnote');
+let state = null;
+
+function jfetch(url, opts){
+  return fetch(API+url, Object.assign({credentials:'include'}, opts||{}))
+    .then(r=>r.json().then(j=>({ok:r.ok,status:r.status,body:j})).catch(()=>({ok:r.ok,status:r.status,body:{}})));
+}
+function headshot(id){ return `https://cdn.nba.com/headshots/nba/latest/260x190/${id}.png`; }
+function shotHTML(id){ return `<span class="shot"><img src="${headshot(id)}" onerror="this.remove()" alt=""></span>`; }
+function nameOf(id){ const p = state.players.find(p=>p.id===id); return p ? p.name : '—'; }
+
+// ── boot ──────────────────────────────────────────────────────────────
+async function boot(){
+  const d = await jfetch('/api/poeltl/daily');
+  if(d.status === 401){
+    stage.innerHTML = `<div class="card center">
+      <img class="resultlogo" src="/transparent.png" alt="">
+      <div class="headline">Sign in to play</div>
+      <div class="sub">The Daily Performance is free with a ydkball account — your streak and
+        Ball Knowledge are saved to it.</div>
+      <a class="btn" href="/auth/google/login?next=${encodeURIComponent('/poeltl')}"
+         style="text-decoration:none;margin-top:18px">Sign in</a></div>`;
+    return;
+  }
+  if(!d.ok){ stage.innerHTML = `<div class="card center"><div class="sub">No puzzle today. Check back soon.</div></div>`; return; }
+  const b = d.body;
+  state = { date:b.date, box:b.box, maxGuesses:b.max_guesses, clueCount:b.clue_count,
+            players:b.players||[], guesses:[], results:[], revealed:[], done:false, solved:false,
+            answer:b.answer||null, streak:b.streak||0, xpGained:0, picked:null };
+  if(b.your_result){            // already played today → show the finished puzzle
+    state.done = true; state.solved = b.your_result.solved;
+    state.revealed = b.clues || []; state.answer = b.answer || null;
+    state.playedGuesses = b.your_result.guesses;
+    return renderDone(true);
+  }
+  footEl.textContent = `${state.maxGuesses} guesses · one a day`;
+  render();
+}
+
+// ── play render ───────────────────────────────────────────────────────
+function perfCard(){
+  const s = state.box;
+  const solved = state.done;
+  const mug = (solved && state.answer)
+    ? `<span class="mug"><img src="${headshot(state.answer.player_id)}" onerror="this.parentNode.innerHTML='<span class=\\'q\\'>?</span>'" alt=""></span>`
+    : `<span class="mug"><span class="q">?</span></span>`;
+  const nm = (solved && state.answer)
+    ? `<div class="nm">${state.answer.name}</div>`
+    : `<div class="nm hidden-nm">Mystery player</div>`;
+  const fgpct = s.fga ? (100*s.fgm/s.fga).toFixed(1)+'%' : '–';
+  return `<div class="perf">
+    <div class="perf-head">${mug}<div class="perf-id">${nm}
+      <div class="ctx">${state.maxGuesses - state.guesses.length} of ${state.maxGuesses} guesses left</div></div></div>
+    <div class="big3">
+      <div class="b"><div class="v">${s.pts}</div><div class="l">pts</div></div>
+      <div class="b"><div class="v">${s.reb}</div><div class="l">reb</div></div>
+      <div class="b"><div class="v">${s.ast}</div><div class="l">ast</div></div>
+    </div>
+    <div class="statrow">
+      <div class="c"><div class="v">${s.min}</div><div class="l">min</div></div>
+      <div class="c"><div class="v">${s.fgm}/${s.fga}</div><div class="l">fg</div></div>
+      <div class="c"><div class="v">${s.fg3m}</div><div class="l">3pm</div></div>
+      <div class="c"><div class="v">${s.ftm}/${s.fta}</div><div class="l">ft</div></div>
+      <div class="c"><div class="v">${s.ts_pct!=null?s.ts_pct+'%':'–'}</div><div class="l">ts%</div></div>
+    </div>
+  </div>`;
+}
+function cluesHTML(){
+  const labels = ['Type','Season','Team','Opponent','Result','Date','Initial'];
+  const byLabel = {}; state.revealed.forEach(c=>byLabel[c.label]=c.value);
+  return `<div class="clues">` + labels.slice(0, state.clueCount).map(l=>{
+    const on = byLabel[l]!=null;
+    return `<span class="clue ${on?'on':''}"><span class="k">${l}</span> <span class="v">${on?byLabel[l]:'?'}</span></span>`;
+  }).join('') + `</div>`;
+}
+function guessHTML(){
+  if(!state.guesses.length) return '';
+  return `<div class="glist">` + state.guesses.map((g,i)=>{
+    const hit = state.results[i];
+    return `<div class="grow ${hit?'hit':'miss'}">${shotHTML(g)}<span class="gn">${nameOf(g)}</span><span class="mark">${hit?'✓':'✗'}</span></div>`;
+  }).join('') + `</div>`;
+}
+function render(){
+  stage.innerHTML = perfCard() + cluesHTML() +
+    `<div class="guesscount">Name the player</div>` + guessHTML() +
+    `<div class="picker"><input id="guess" placeholder="Search a player…" autocomplete="off" autocapitalize="off" spellcheck="false"><div class="drop" id="drop" style="display:none"></div></div>`;
+  wirePicker();
+}
+
+function wirePicker(){
+  const input = document.getElementById('guess');
+  const drop  = document.getElementById('drop');
+  let active = -1, matches = [];
+  const close = ()=>{ drop.style.display='none'; active=-1; };
+  input.addEventListener('input', ()=>{
+    const v = input.value.trim().toLowerCase();
+    if(v.length<2){ close(); return; }
+    matches = state.players.filter(p=>p.name.toLowerCase().includes(v)).slice(0,8);
+    if(!matches.length){ close(); return; }
+    drop.innerHTML = matches.map((p,i)=>`<div data-i="${i}" class="${i===0?'active':''}">${shotHTML(p.id)}<span>${p.name}</span></div>`).join('');
+    active=0; drop.style.display='block';
+    [...drop.children].forEach(el=>el.onclick=()=>submitGuess(matches[+el.dataset.i].id));
+  });
+  input.addEventListener('keydown', e=>{
+    if(drop.style.display==='none') return;
+    if(e.key==='ArrowDown'){ e.preventDefault(); active=Math.min(active+1,matches.length-1); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); active=Math.max(active-1,0); }
+    else if(e.key==='Enter'){ e.preventDefault(); if(matches[active]) submitGuess(matches[active].id); return; }
+    else return;
+    [...drop.children].forEach((el,i)=>el.classList.toggle('active',i===active));
+  });
+  input.focus();
+}
+
+async function submitGuess(pid){
+  if(state.done || state.guesses.includes(pid)) { return; }
+  state.guesses.push(pid);
+  const res = await jfetch('/api/poeltl/guess', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({guesses: state.guesses})
+  });
+  if(!res.ok){ state.guesses.pop(); return; }
+  const b = res.body;
+  state.results = b.results; state.revealed = b.revealed; state.done = b.done;
+  state.solved = b.solved; state.answer = b.answer || state.answer;
+  if(b.done){ state.xpGained = b.xp_gained||0; state.streak = b.streak ?? state.streak; return renderDone(false); }
+  render();
+}
+
+// ── done ──────────────────────────────────────────────────────────────
+function renderDone(already){
+  const used = already ? state.playedGuesses : state.guesses.length;
+  const head = state.solved
+    ? `<div class="headline win">Solved in ${used}!</div>`
+    : `<div class="headline lose">Out of guesses</div>`;
+  const sub = state.solved
+    ? `You knew ball.` : `It was ${state.answer ? state.answer.name : 'a mystery'}.`;
+  const xpHTML = (!already && state.xpGained>0) ? `<div class="xpline">+${state.xpGained} Ball Knowledge</div>` : '';
+  const shareTxt = buildShare(used);
+  stage.innerHTML = perfCard() + cluesHTML() + (already?'':guessHTML()) +
+    `<div class="card center" style="margin-top:16px">
+       ${head}<div class="sub">${sub}</div>${xpHTML}
+       <div class="stats"><div><div class="n">${state.streak}</div><div class="l">streak</div></div></div>
+       <button class="btn" id="share">Share result</button>
+       <a class="btn ghost" href="/games" style="text-decoration:none">Back to games</a>
+     </div>`;
+  footEl.textContent = 'come back tomorrow for a new performance';
+  document.getElementById('share').onclick = ()=>{
+    if(navigator.share){ navigator.share({text:shareTxt}); }
+    else { navigator.clipboard.writeText(shareTxt); document.getElementById('share').textContent='Copied!'; }
+  };
+}
+function buildShare(used){
+  const squares = state.results.map(r=>r?'🟩':'⬛').join('');
+  const line = state.solved ? `${used}/${state.maxGuesses}` : `X/${state.maxGuesses}`;
+  return `ydkball Daily Performance ${line}\n${squares||'⬛'}`;
+}
+
+boot().catch(e=>{ stage.innerHTML = `<div class="card center"><div class="sub">Couldn't load today's puzzle.<br>${e}</div></div>`; });
+</script>
+<script>
+async function initNavAuth(){
+  const slot = document.getElementById('nav-auth-slot'); if(!slot) return;
+  try{
+    const res = await fetch(API + '/auth/me', {credentials:'include'});
+    const user = (await res.json()).user;
+    if(user){
+      slot.innerHTML = `<a href="/profile" style="text-decoration:none">${user.avatar_url?`<img class="nav-auth-avatar" src="${user.avatar_url}" alt="">`:''}</a>
+        <button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>`;
+      if(typeof user.night_mode!=='undefined'){ document.documentElement.classList.toggle('night-mode', !!user.night_mode); }
+    } else {
+      slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login?next=${encodeURIComponent(location.pathname)}">Sign in</a>`;
+    }
+  }catch{ slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login">Sign in</a>`; }
+}
+function navSignOut(){ location.href = '/auth/logout?next=' + encodeURIComponent(location.pathname); }
+initNavAuth();
+</script>
+</body>
+</html>
