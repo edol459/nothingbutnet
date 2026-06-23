@@ -92,6 +92,9 @@
   .clue.on{border-color:#f6d8c8; background:var(--orange-lt); color:var(--orange)}
   .clue .k{opacity:.6; text-transform:uppercase; font-size:9px; letter-spacing:.08em}
   .clue .v{font-weight:500}
+  /* Hangman name skeleton */
+  .nameskel{font-family:var(--ff-mono); font-size:23px; letter-spacing:.16em; text-align:center;
+            color:var(--orange); margin:10px 0 2px; white-space:pre-wrap; font-weight:500}
 
   /* ── guesses ──────────────────────────────────────────── */
   .guesscount{font-family:var(--ff-mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
@@ -194,7 +197,7 @@ async function boot(){
   }
   if(!d.ok){ stage.innerHTML = `<div class="card center"><div class="sub">No puzzle today. Check back soon.</div></div>`; return; }
   const b = d.body;
-  state = { date:b.date, box:b.box, maxGuesses:b.max_guesses, clueCount:b.clue_count,
+  state = { date:b.date, box:b.box, maxGuesses:b.max_guesses, cluePlan:b.clue_plan||[],
             players:b.players||[], guesses:[], results:[], revealed:[], done:false, solved:false,
             answer:b.answer||null, streak:b.streak||0, xpGained:0, picked:null };
   if(b.your_result){            // already played today → show the finished puzzle
@@ -236,12 +239,15 @@ function perfCard(){
   </div>`;
 }
 function cluesHTML(){
-  const labels = ['Type','Season','Team','Opponent','Result','Date','Initial'];
-  const byLabel = {}; state.revealed.forEach(c=>byLabel[c.label]=c.value);
-  return `<div class="clues">` + labels.slice(0, state.clueCount).map(l=>{
+  const byLabel = {}; let nameMask = null;
+  state.revealed.forEach(c=>{ if(c.label==='Name') nameMask=c.value; else byLabel[c.label]=c.value; });
+  const ctx = (state.cluePlan||[]).filter(l=>l!=='Name');
+  const chips = ctx.map(l=>{
     const on = byLabel[l]!=null;
     return `<span class="clue ${on?'on':''}"><span class="k">${l}</span> <span class="v">${on?byLabel[l]:'?'}</span></span>`;
-  }).join('') + `</div>`;
+  }).join('');
+  const skel = nameMask ? `<div class="nameskel">${nameMask}</div>` : '';
+  return `<div class="clues">${chips}</div>${skel}`;
 }
 function guessHTML(){
   if(!state.guesses.length) return '';

@@ -83,9 +83,24 @@ def _parse_matchup(matchup):
     return m.strip(), "", True
 
 
-def _last_initial(name):
-    parts = (name or "").split()
-    return (parts[-1][0] if parts else "?").upper()
+def _name_mask(name, reveal):
+    """Hangman skeleton: each word's first letter (initial) is always shown; the next `reveal`
+    alphabetic letters (left→right across the name) are shown; the rest become '_'. Spaces and
+    punctuation (apostrophes, hyphens, periods) are always shown.
+      reveal=0  → "S________ O'____"   reveal=2 → "Sha______ O'____"  (Shaquille O'Neal)"""
+    budget = max(0, reveal)
+    out = []
+    for w in name.split(" "):
+        chars = []
+        for i, ch in enumerate(w):
+            if i == 0 or not ch.isalpha():
+                chars.append(ch)                       # initial / punctuation — always shown
+            elif budget > 0:
+                chars.append(ch); budget -= 1          # revealed letter
+            else:
+                chars.append("_")
+        out.append("".join(chars))
+    return " ".join(out)
 
 
 def _f(v):
@@ -103,14 +118,14 @@ def _build(perf):
         "ftm": _f(perf["ftm"]), "fta": _f(perf["fta"]), "min": _f(perf["min"]),
         "ts_pct": (round(float(perf["ts_pct"]) * 100, 1) if perf["ts_pct"] is not None else None),
     }
+    season_label = perf["season"] + (" · Playoffs" if perf["season_type"] == "Playoffs"
+                                     else " · Regular season")
+    # 3 context clues (revealed on misses 1-3), then the name skeleton (miss 4+) reveals
+    # itself Hangman-style — one more letter per further miss.
     clues = [
-        {"label": "Type",     "value": "Playoffs" if perf["season_type"] == "Playoffs" else "Regular season"},
-        {"label": "Season",   "value": perf["season"]},
-        {"label": "Team",     "value": team},
         {"label": "Opponent", "value": opp},
-        {"label": "Result",   "value": "Win" if perf["wl"] == "W" else "Loss"},
-        {"label": "Date",     "value": str(perf["game_date"])},
-        {"label": "Initial",  "value": _last_initial(perf["player_name"]) + "."},
+        {"label": "Season",   "value": season_label},
+        {"label": "Team",     "value": team},
     ]
     return {
         "box": box,
@@ -143,13 +158,19 @@ def random_performance(conn):
 
 # ── client view + guess scoring ───────────────────────────────────────────────
 def puzzle_view(daily):
-    """What ships to the client up front: the box score + guess budget. NO clues, NO answer."""
-    return {"box": daily["box"], "max_guesses": daily["max_guesses"], "clue_count": len(daily["clues"])}
+    """What ships to the client up front: the box score + guess budget + the clue ladder's
+    labels (for placeholder rendering). NO clue values, NO answer."""
+    return {
+        "box": daily["box"],
+        "max_guesses": daily["max_guesses"],
+        "clue_plan": [c["label"] for c in daily["clues"]] + ["Name"],
+    }
 
 
 def score_guesses(daily, guesses):
-    """Score an ordered list of guessed player_ids against the stored answer. Reveals one clue
-    per WRONG guess; returns the answer only once the round is done (solved or out of guesses)."""
+    """Score an ordered list of guessed player_ids against the stored answer. Each WRONG guess
+    reveals the next clue: the 3 context clues, then the name skeleton (Hangman) — one more
+    letter per further miss. The answer is returned only once the round is done."""
     answer_id = daily["answer"]["player_id"]
     guesses = [g for g in (guesses or []) if isinstance(g, int)][:daily["max_guesses"]]
     results = [g == answer_id for g in guesses]
@@ -159,7 +180,11 @@ def score_guesses(daily, guesses):
         if r:
             break
         wrong += 1
-    revealed = daily["clues"][:min(wrong, len(daily["clues"]))]
+    ctx = daily["clues"]
+    revealed = list(ctx[:min(wrong, len(ctx))])
+    if wrong > len(ctx):                       # name skeleton appears + reveals progressively
+        revealed.append({"label": "Name", "value": _name_mask(daily["answer"]["name"],
+                                                               wrong - len(ctx) - 1)})
     done = solved or len(guesses) >= daily["max_guesses"]
     return {
         "results": results,
