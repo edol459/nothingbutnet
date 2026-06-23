@@ -165,6 +165,15 @@ def _college_label(perf):
     c = (perf.get("college") or "").strip()
     return c if c and c.lower() != "none" else "No college"
 
+def _date_label(d):
+    """'2002-04-15' → 'Apr 15, 2002'."""
+    import datetime as _dt
+    try:
+        x = _dt.datetime.strptime(str(d)[:10], "%Y-%m-%d")
+        return x.strftime("%b ") + str(x.day) + x.strftime(", %Y")
+    except Exception:
+        return str(d)
+
 
 def _build(perf):
     """The full daily object: the box-score line + opponent (shown on the card), the ordered
