@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import question_engine as qe  # reuse get_conn()  # noqa: E402
 
 # ── config ────────────────────────────────────────────────────────────────────
-MAX_GUESSES = 8
+MAX_GUESSES = 7
 
 # A performance is "daily-worthy" (memorable + guessable) if it clears one of these bars.
 # (gamelogs carry pts/reb/ast/fg3m + shooting — no stl/blk — so milestones are scoring/
@@ -191,8 +191,8 @@ def _build(perf):
     # Clue ladder, revealed one per guess used (a miss OR a "reveal a clue"). Season leads so you
     # get an era gauge first; then bio → team → name skeleton. Skipped when genuinely unknown.
     ladder = [
-        ("Season",   season_label),
         ("Position", _pos_label(perf)),
+        ("Season",   season_label),
         ("Height",   _height_label(perf)),
         ("Draft",    _draft_label(perf)),
         ("College",  _college_label(perf)),
@@ -256,10 +256,12 @@ def random_performance(conn):
 
 # ── client view + guess scoring ───────────────────────────────────────────────
 def puzzle_view(daily):
-    """What ships to the client up front: the box score + guess budget + the clue ladder's
-    labels (for placeholders). NO clue values, NO opponent/date, NO answer."""
+    """What ships to the client up front: the box score + opponent (shown on the card, abbr
+    only) + guess budget + the clue ladder's labels. NO clue values, NO game date, NO answer."""
     return {
         "box": daily["box"],
+        "opponent": daily.get("opponent"),
+        "home": daily.get("home"),
         "max_guesses": daily["max_guesses"],
         "clue_plan": [c["label"] for c in daily["clues"]],
     }
@@ -290,7 +292,13 @@ def score_guesses(daily, guesses):
             break
         wrong += 1
     done = solved or len(guesses) >= daily["max_guesses"]
-    revealed = list(daily["clues"]) if done else list(daily["clues"][:min(wrong, len(daily["clues"]))])
+    if done:
+        revealed = list(daily["clues"])                 # reveal everything when the round ends
+    else:
+        ctx = daily["clues"][:-1]                        # context clues (all but the name skeleton)
+        revealed = list(ctx[:wrong])
+        if len(guesses) >= daily["max_guesses"] - 1:     # on the FINAL guess, surface the name too
+            revealed.append(daily["clues"][-1])
     out = {
         "results": results,
         "solved": solved,

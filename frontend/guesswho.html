@@ -188,11 +188,9 @@ function shotHTML(id){ return `<span class="shot"><img src="${headshot(id)}" one
 function nameOf(id){ const p = state.players.find(p=>p.id===id); return p ? p.name : '—'; }
 const TEAM_ID = {ATL:1610612737,BKN:1610612751,BOS:1610612738,CHA:1610612766,CHI:1610612741,CLE:1610612739,DAL:1610612742,DEN:1610612743,DET:1610612765,GSW:1610612744,HOU:1610612745,IND:1610612754,LAC:1610612746,LAL:1610612747,MEM:1610612763,MIA:1610612748,MIL:1610612749,MIN:1610612750,NOP:1610612740,NYK:1610612752,OKC:1610612760,ORL:1610612753,PHI:1610612755,PHX:1610612756,POR:1610612757,SAC:1610612758,SAS:1610612759,TOR:1610612761,UTA:1610612762,WAS:1610612764};
 function teamLogo(abbr){ const id = TEAM_ID[abbr]; return id ? `https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg` : null; }
-function oppHTML(){   // opponent shown on the card from the start: "vs/@ [logo] ABBR"
+function oppHTML(){   // opponent on the card (abbreviation only, no logo)
   if(!state.opponent) return '';
-  const logo = teamLogo(state.opponent);
-  const badge = logo ? `<img class="opplogo" src="${logo}" onerror="this.style.display='none'" alt="">` : '';
-  return `<span class="vs">${state.home?'vs':'@'}</span>${badge}<span class="oppabbr">${state.opponent}</span>`;
+  return `<span class="vs">${state.home?'vs':'@'}</span> <span class="oppabbr">${state.opponent}</span>`;
 }
 
 function signinCard(next){ return `<div class="card center">
@@ -215,7 +213,7 @@ async function boot(){
   if(d.status === 401){ stage.innerHTML = signinCard('/guesswho'); return; }
   if(!d.ok){ stage.innerHTML = `<div class="card center"><div class="sub">No puzzle today. Check back soon.</div></div>`; return; }
   const b = d.body;
-  state = { mode:'daily', date:b.date, box:b.box, opponent:null, home:null, gameDate:null,
+  state = { mode:'daily', date:b.date, box:b.box, opponent:b.opponent, home:b.home, gameDate:null,
             maxGuesses:b.max_guesses, cluePlan:b.clue_plan||[],
             players:b.players||[], guesses:[], results:[], revealed:[], done:false, solved:false,
             answer:null, streak:b.streak||0, xpGained:0, picked:null };
@@ -255,11 +253,11 @@ function perfCard(){
   const nm = (solved && state.answer)
     ? `<div class="nm">${state.answer.name}</div>`
     : `<div class="nm hidden-nm">Mystery player</div>`;
-  // once the round is over, reveal the matchup + exact date on the card
-  const doneCtx = (solved && state.opponent)
-    ? `<div class="ctx">${oppHTML()}${state.gameDate?` · ${state.gameDate}`:''}</div>` : '';
+  // opponent shown throughout; the exact date is added once the round is over
+  const ctxLine = state.opponent
+    ? `<div class="ctx">${oppHTML()}${(solved && state.gameDate)?` · ${state.gameDate}`:''}</div>` : '';
   return `<div class="perf">
-    <div class="perf-head">${mug}<div class="perf-id">${nm}${doneCtx}</div></div>
+    <div class="perf-head">${mug}<div class="perf-id">${nm}${ctxLine}</div></div>
     <div class="big3">
       <div class="b"><div class="v">${s.pts}</div><div class="l">pts</div></div>
       <div class="b"><div class="v">${s.reb}</div><div class="l">reb</div></div>
@@ -340,7 +338,12 @@ async function submitGuess(pid){
     state.solved = state.results.some(Boolean);
     let wrong=0; for(const r of state.results){ if(r) break; wrong++; }
     state.done = state.solved || state.guesses.length >= state.maxGuesses;
-    state.revealed = state.done ? state.fullClues : state.fullClues.slice(0, wrong);  // reveal all on done
+    if(state.done){ state.revealed = state.fullClues; }   // reveal everything on done
+    else {
+      const ctx = state.fullClues.slice(0, -1);           // context clues (all but the name)
+      state.revealed = ctx.slice(0, wrong);
+      if(state.guesses.length >= state.maxGuesses - 1) state.revealed = state.revealed.concat([state.fullClues[state.fullClues.length-1]]);  // name on final guess
+    }
     return state.done ? renderDone(false) : render();
   }
   const res = await jfetch('/api/poeltl/guess', {
