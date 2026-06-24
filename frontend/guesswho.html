@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>ydkball · Daily Performance</title>
+<title>ydkball · Guess Who</title>
 <link rel="icon" type="image/png" href="/logo.png">
 <link rel="apple-touch-icon" href="/logo-icon.png">
 <script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
@@ -167,7 +167,7 @@
   </nav>
 
   <div class="wrap">
-    <div class="eyebrow">Daily Performance</div>
+    <div class="eyebrow">Guess Who</div>
     <div class="subhead">Whose game was this? Each miss reveals a clue.</div>
     <div id="stage"></div>
     <div class="foot"><span id="footnote"></span></div>
@@ -198,9 +198,9 @@ function oppHTML(){   // opponent shown on the card from the start: "vs/@ [logo]
 function signinCard(next){ return `<div class="card center">
   <img class="resultlogo" src="/transparent.png" alt="">
   <div class="headline">Sign in to play</div>
-  <div class="sub">The Daily Performance is free with a ydkball account — your streak and
+  <div class="sub">Guess Who is free with a ydkball account — your streak and
     Ball Knowledge are saved to it.</div>
-  <a class="btn" href="/auth/google/login?next=${encodeURIComponent(next||'/poeltl')}"
+  <a class="btn" href="/auth/google/login?next=${encodeURIComponent(next||'/guesswho')}"
      style="text-decoration:none;margin-top:18px">Sign in</a></div>`; }
 function proCard(){ return `<div class="card center">
   <img class="resultlogo" src="/transparent.png" alt="">
@@ -212,7 +212,7 @@ function proCard(){ return `<div class="card center">
 async function boot(){
   if(new URLSearchParams(location.search).get('mode') === 'unlimited'){ return startUnlimited(); }
   const d = await jfetch('/api/poeltl/daily');
-  if(d.status === 401){ stage.innerHTML = signinCard('/poeltl'); return; }
+  if(d.status === 401){ stage.innerHTML = signinCard('/guesswho'); return; }
   if(!d.ok){ stage.innerHTML = `<div class="card center"><div class="sub">No puzzle today. Check back soon.</div></div>`; return; }
   const b = d.body;
   state = { mode:'daily', date:b.date, box:b.box, opponent:null, home:null, gameDate:null,
@@ -233,7 +233,7 @@ async function boot(){
 async function startUnlimited(){
   stage.innerHTML = `<div class="card center"><div class="sub">Loading…</div></div>`;
   const d = await jfetch('/api/poeltl/unlimited');
-  if(d.status === 401){ stage.innerHTML = signinCard('/poeltl?mode=unlimited'); return; }
+  if(d.status === 401){ stage.innerHTML = signinCard('/guesswho?mode=unlimited'); return; }
   if(d.status === 403){ stage.innerHTML = proCard(); return; }
   if(!d.ok){ stage.innerHTML = `<div class="card center"><div class="sub">Couldn't start. Try again.</div></div>`; return; }
   const b = d.body;
@@ -391,7 +391,7 @@ function renderDone(already){
 function buildShare(used){
   const squares = state.results.map(r=>r?'🟩':'⬛').join('');
   const line = state.solved ? `${used}/${state.maxGuesses}` : `X/${state.maxGuesses}`;
-  return `ydkball Daily Performance ${line}\n${squares||'⬛'}`;
+  return `ydkball Guess Who ${line}\n${squares||'⬛'}`;
 }
 
 boot().catch(e=>{ stage.innerHTML = `<div class="card center"><div class="sub">Couldn't load today's puzzle.<br>${e}</div></div>`; });

@@ -8262,10 +8262,10 @@ def survival_page():
     return app.send_static_file("survival.html")
 
 
-@app.route("/poeltl")
-@app.route("/poeltl.html")
-def poeltl_page():
-    return app.send_static_file("poeltl.html")
+@app.route("/guesswho")
+@app.route("/guesswho.html")
+def guesswho_page():
+    return app.send_static_file("guesswho.html")
 
 
 if __name__ == "__main__":
