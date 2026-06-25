@@ -3689,6 +3689,155 @@ def delete_review(game_id):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Performance reviews
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_PERF_TABLE = """
+    CREATE TABLE IF NOT EXISTS performance_reviews (
+        id          SERIAL PRIMARY KEY,
+        game_id     TEXT    NOT NULL,
+        person_id   INTEGER NOT NULL,
+        user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        rating      INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 10),
+        review_text TEXT,
+        created_at  TIMESTAMPTZ DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(user_id, game_id, person_id)
+    )
+"""
+
+def _format_perf_review(r: dict) -> dict:
+    return {
+        "id":           r["id"],
+        "game_id":      r["game_id"],
+        "person_id":    r["person_id"],
+        "user_id":      r["user_id"],
+        "display_name": r.get("display_name", ""),
+        "avatar_url":   r.get("avatar_url") or "",
+        "rating":       r["rating"],
+        "stars":        round(r["rating"] / 2, 1),
+        "review_text":  r.get("review_text"),
+        "created_at":   str(r.get("created_at", "")),
+    }
+
+
+# GET /api/performances/<game_id>/<person_id>/reviews
+@app.route("/api/performances/<game_id>/<int:person_id>/reviews")
+def get_performance_reviews(game_id, person_id):
+    limit  = min(int(request.args.get("limit", 20)), 100)
+    offset = int(request.args.get("offset", 0))
+    user    = current_user()
+    user_id = user["id"] if user else None
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute(_PERF_TABLE); conn.commit()
+
+        cur.execute("""
+            SELECT COUNT(*) AS review_count,
+                   COALESCE(AVG(rating::float), 0) AS avg_rating
+            FROM performance_reviews
+            WHERE game_id = %s AND person_id = %s
+        """, (game_id, person_id))
+        agg = dict(cur.fetchone())
+        count = int(agg["review_count"])
+        avg_stars = round(agg["avg_rating"] / 2, 2) if count > 0 else None
+
+        my_rating, my_stars, my_text = None, None, None
+        if user_id:
+            cur.execute("""
+                SELECT rating, review_text FROM performance_reviews
+                WHERE game_id = %s AND person_id = %s AND user_id = %s
+            """, (game_id, person_id, user_id))
+            row = cur.fetchone()
+            if row:
+                my_rating = row["rating"]
+                my_stars  = round(row["rating"] / 2, 1)
+                my_text   = row["review_text"]
+
+        cur.execute("""
+            SELECT pr.*, u.display_name, u.avatar_url
+            FROM performance_reviews pr
+            JOIN users u ON pr.user_id = u.id
+            WHERE pr.game_id = %s AND pr.person_id = %s
+            ORDER BY pr.created_at DESC
+            LIMIT %s OFFSET %s
+        """, (game_id, person_id, limit, offset))
+        reviews = [_format_perf_review(dict(r)) for r in cur.fetchall()]
+
+        cur.close(); conn.close()
+        return jsonify({
+            "avg_stars":    avg_stars,
+            "review_count": count,
+            "my_rating":    my_rating,
+            "my_stars":     my_stars,
+            "my_text":      my_text,
+            "reviews":      reviews,
+            "has_more":     offset + len(reviews) < count,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# POST /api/performances/<game_id>/<person_id>/reviews
+@app.route("/api/performances/<game_id>/<int:person_id>/reviews", methods=["POST"])
+@login_required
+def submit_performance_review(game_id, person_id):
+    user = current_user()
+    body = request.get_json() or {}
+    rating = body.get("rating")
+    if rating is None or not isinstance(rating, int) or not (1 <= rating <= 10):
+        return jsonify({"error": "rating must be an integer 1–10"}), 400
+    review_text = (body.get("review_text") or "").strip() or None
+    if review_text and _contains_slur(review_text):
+        return jsonify({"error": "Your review contains language that isn't allowed."}), 400
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute(_PERF_TABLE); conn.commit()
+        cur.execute("""
+            INSERT INTO performance_reviews (user_id, game_id, person_id, rating, review_text)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (user_id, game_id, person_id) DO UPDATE SET
+                rating      = EXCLUDED.rating,
+                review_text = EXCLUDED.review_text,
+                updated_at  = NOW()
+            RETURNING *
+        """, (user["id"], game_id, person_id, rating, review_text))
+        row = dict(cur.fetchone())
+        row["display_name"] = user["display_name"]
+        cur.execute("SELECT avatar_url FROM users WHERE id = %s", (user["id"],))
+        u = cur.fetchone()
+        row["avatar_url"] = (u["avatar_url"] if u else None) or ""
+        conn.commit(); cur.close(); conn.close()
+        return jsonify({"review": _format_perf_review(row)}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# DELETE /api/performances/<game_id>/<person_id>/reviews
+@app.route("/api/performances/<game_id>/<int:person_id>/reviews", methods=["DELETE"])
+@login_required
+def delete_performance_review(game_id, person_id):
+    user = current_user()
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            DELETE FROM performance_reviews
+            WHERE user_id = %s AND game_id = %s AND person_id = %s
+            RETURNING id
+        """, (user["id"], game_id, person_id))
+        deleted = cur.fetchone()
+        conn.commit(); cur.close(); conn.close()
+        if not deleted:
+            return jsonify({"error": "Review not found"}), 404
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # POST /api/reviews/<review_id>/like  — toggle like on a review
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/reviews/<int:review_id>/like", methods=["POST"])
