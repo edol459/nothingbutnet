@@ -3699,12 +3699,14 @@ _PERF_TABLE = """
         person_id   INTEGER NOT NULL,
         user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         rating      INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 10),
+        player_name TEXT,
         review_text TEXT,
         created_at  TIMESTAMPTZ DEFAULT NOW(),
         updated_at  TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE(user_id, game_id, person_id)
     )
 """
+_PERF_MIGRATE = "ALTER TABLE performance_reviews ADD COLUMN IF NOT EXISTS player_name TEXT"
 
 def _format_perf_review(r: dict) -> dict:
     return {
@@ -3712,6 +3714,7 @@ def _format_perf_review(r: dict) -> dict:
         "game_id":      r["game_id"],
         "person_id":    r["person_id"],
         "user_id":      r["user_id"],
+        "player_name":  r.get("player_name") or "",
         "display_name": r.get("display_name", ""),
         "avatar_url":   r.get("avatar_url") or "",
         "rating":       r["rating"],
@@ -3731,7 +3734,7 @@ def get_performance_reviews(game_id, person_id):
     try:
         conn = get_conn()
         cur  = conn.cursor()
-        cur.execute(_PERF_TABLE); conn.commit()
+        cur.execute(_PERF_TABLE); cur.execute(_PERF_MIGRATE); conn.commit()
 
         cur.execute("""
             SELECT COUNT(*) AS review_count,
@@ -3791,19 +3794,21 @@ def submit_performance_review(game_id, person_id):
     review_text = (body.get("review_text") or "").strip() or None
     if review_text and _contains_slur(review_text):
         return jsonify({"error": "Your review contains language that isn't allowed."}), 400
+    player_name = (body.get("player_name") or "").strip()[:100] or None
     try:
         conn = get_conn()
         cur  = conn.cursor()
-        cur.execute(_PERF_TABLE); conn.commit()
+        cur.execute(_PERF_TABLE); cur.execute(_PERF_MIGRATE); conn.commit()
         cur.execute("""
-            INSERT INTO performance_reviews (user_id, game_id, person_id, rating, review_text)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO performance_reviews (user_id, game_id, person_id, rating, player_name, review_text)
+            VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_id, game_id, person_id) DO UPDATE SET
                 rating      = EXCLUDED.rating,
+                player_name = EXCLUDED.player_name,
                 review_text = EXCLUDED.review_text,
                 updated_at  = NOW()
             RETURNING *
-        """, (user["id"], game_id, person_id, rating, review_text))
+        """, (user["id"], game_id, person_id, rating, player_name, review_text))
         row = dict(cur.fetchone())
         row["display_name"] = user["display_name"]
         cur.execute("SELECT avatar_url FROM users WHERE id = %s", (user["id"],))
@@ -4355,6 +4360,177 @@ def get_recent_reviews():
             })
         return jsonify({"reviews": result, "total": total,
                         "has_more": offset + len(result) < total})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/feed  — unified stream of game + performance reviews
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/feed")
+def get_feed():
+    limit        = min(int(request.args.get("limit", 20)), 100)
+    offset       = int(request.args.get("offset", 0))
+    friends_only = request.args.get("friends") in ("1", "true")
+    user         = current_user()
+    user_id      = user["id"] if user else None
+
+    if friends_only and not user_id:
+        return jsonify({"items": [], "has_more": False})
+
+    game_friends_join   = ""
+    game_friends_params = []
+    perf_friends_join   = ""
+    perf_friends_params = []
+    if friends_only:
+        game_friends_join = """
+            JOIN friendships fr ON (
+                (fr.sender_id = %s AND fr.receiver_id = gr.user_id)
+                OR (fr.receiver_id = %s AND fr.sender_id = gr.user_id)
+            ) AND fr.status = 'accepted'
+        """
+        game_friends_params = [user_id, user_id]
+        perf_friends_join = """
+            JOIN friendships fr ON (
+                (fr.sender_id = %s AND fr.receiver_id = pr.user_id)
+                OR (fr.receiver_id = %s AND fr.sender_id = pr.user_id)
+            ) AND fr.status = 'accepted'
+        """
+        perf_friends_params = [user_id, user_id]
+
+    game_block_where  = ""
+    game_block_params = []
+    perf_block_where  = ""
+    perf_block_params = []
+    if user_id:
+        game_block_where  = "AND gr.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = %s)"
+        game_block_params = [user_id]
+        perf_block_where  = "AND pr.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = %s)"
+        perf_block_params = [user_id]
+
+    if user_id:
+        rl_me_join      = "LEFT JOIN review_likes rl_me ON rl_me.review_id = gr.id AND rl_me.user_id = %s"
+        liked_by_me_col = "BOOL_OR(rl_me.user_id IS NOT NULL) AS liked_by_me"
+        rl_me_params    = [user_id]
+    else:
+        rl_me_join      = ""
+        liked_by_me_col = "FALSE AS liked_by_me"
+        rl_me_params    = []
+
+    sql = f"""
+        WITH combined AS (
+            SELECT
+                'game_review'::text                  AS type,
+                gr.id,
+                gr.game_id,
+                NULL::integer                        AS person_id,
+                NULL::text                           AS player_name,
+                gr.user_id,
+                gr.rating,
+                round(gr.rating / 2.0, 1)            AS stars,
+                gr.review_text,
+                COALESCE(gr.tags, '[]'::jsonb)       AS tags,
+                gr.attended,
+                gr.created_at,
+                u.display_name, u.avatar_url, u.favorite_team,
+                u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
+                g.game_date, g.home_team_abbr, g.away_team_abbr,
+                g.home_score, g.away_score,
+                COUNT(rl.review_id)                  AS like_count,
+                {liked_by_me_col},
+                (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
+            FROM game_reviews gr
+            JOIN users u  ON gr.user_id = u.id
+            JOIN games g  ON gr.game_id = g.game_id
+            LEFT JOIN review_likes rl ON rl.review_id = gr.id
+            {rl_me_join}
+            {game_friends_join}
+            WHERE 1=1 {game_block_where}
+            GROUP BY gr.id, u.id, g.game_id
+
+            UNION ALL
+
+            SELECT
+                'performance_review'::text           AS type,
+                pr.id,
+                pr.game_id,
+                pr.person_id,
+                COALESCE(pr.player_name, '')         AS player_name,
+                pr.user_id,
+                pr.rating,
+                round(pr.rating / 2.0, 1)            AS stars,
+                pr.review_text,
+                '[]'::jsonb                          AS tags,
+                FALSE                                AS attended,
+                pr.created_at,
+                u.display_name, u.avatar_url, u.favorite_team,
+                u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
+                g.game_date, g.home_team_abbr, g.away_team_abbr,
+                g.home_score, g.away_score,
+                0::bigint                            AS like_count,
+                FALSE                                AS liked_by_me,
+                0::bigint                            AS reply_count
+            FROM performance_reviews pr
+            JOIN users u ON pr.user_id = u.id
+            LEFT JOIN games g ON pr.game_id = g.game_id
+            {perf_friends_join}
+            WHERE 1=1 {perf_block_where}
+        )
+        SELECT * FROM combined
+        ORDER BY created_at DESC
+        LIMIT %s OFFSET %s
+    """
+
+    params = (
+        rl_me_params +
+        game_friends_params +
+        game_block_params +
+        perf_friends_params +
+        perf_block_params +
+        [limit, offset]
+    )
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute(_PERF_TABLE); cur.execute(_PERF_MIGRATE); conn.commit()
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        items = []
+        for r in rows:
+            d = dict(r)
+            items.append({
+                "type":               d["type"],
+                "id":                 d["id"],
+                "game_id":            d["game_id"],
+                "person_id":          d.get("person_id"),
+                "player_name":        d.get("player_name"),
+                "user_id":            d["user_id"],
+                "display_name":       d.get("display_name", ""),
+                "avatar_url":         d.get("avatar_url") or "",
+                "favorite_team":      d.get("favorite_team") or "",
+                "is_pro":             bool(d.get("is_pro", False)),
+                "xp":                 d.get("xp"),
+                "equipped_ring":      d.get("equipped_ring"),
+                "equipped_title":     d.get("equipped_title"),
+                "rating":             d["rating"],
+                "stars":              float(d["stars"]),
+                "review_text":        d.get("review_text"),
+                "tags":               d.get("tags") or [],
+                "attended":           bool(d.get("attended", False)),
+                "created_at":         str(d["created_at"]),
+                "game_date":          str(d["game_date"]) if d.get("game_date") else None,
+                "home_team_abbr":     d.get("home_team_abbr"),
+                "away_team_abbr":     d.get("away_team_abbr"),
+                "home_score":         d.get("home_score"),
+                "away_score":         d.get("away_score"),
+                "like_count":         int(d.get("like_count", 0)),
+                "liked_by_me":        bool(d.get("liked_by_me", False)),
+                "reply_count":        int(d.get("reply_count", 0)),
+                "ball_knowledge_level": _xp_to_level(int(d.get("xp") or 0)),
+            })
+        return jsonify({"items": items, "has_more": len(items) == limit})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
