@@ -4365,7 +4365,7 @@ def get_recent_reviews():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# GET /api/feed  — unified stream of game + performance reviews
+# GET /api/feed  — unified stream: game reviews + performance reviews
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/feed")
 def get_feed():
@@ -4497,42 +4497,141 @@ def get_feed():
         cur.execute(sql, params)
         rows = cur.fetchall()
         cur.close(); conn.close()
-        items = []
-        for r in rows:
-            d = dict(r)
-            items.append({
-                "type":               d["type"],
-                "id":                 d["id"],
-                "game_id":            d["game_id"],
-                "person_id":          d.get("person_id"),
-                "player_name":        d.get("player_name"),
-                "user_id":            d["user_id"],
-                "display_name":       d.get("display_name", ""),
-                "avatar_url":         d.get("avatar_url") or "",
-                "favorite_team":      d.get("favorite_team") or "",
-                "is_pro":             bool(d.get("is_pro", False)),
-                "xp":                 d.get("xp"),
-                "equipped_ring":      d.get("equipped_ring"),
-                "equipped_title":     d.get("equipped_title"),
-                "rating":             d["rating"],
-                "stars":              float(d["stars"]),
-                "review_text":        d.get("review_text"),
-                "tags":               d.get("tags") or [],
-                "attended":           bool(d.get("attended", False)),
-                "created_at":         str(d["created_at"]),
-                "game_date":          str(d["game_date"]) if d.get("game_date") else None,
-                "home_team_abbr":     d.get("home_team_abbr"),
-                "away_team_abbr":     d.get("away_team_abbr"),
-                "home_score":         d.get("home_score"),
-                "away_score":         d.get("away_score"),
-                "like_count":         int(d.get("like_count", 0)),
-                "liked_by_me":        bool(d.get("liked_by_me", False)),
-                "reply_count":        int(d.get("reply_count", 0)),
-                "ball_knowledge_level": _xp_to_level(int(d.get("xp") or 0)),
-            })
-        return jsonify({"items": items, "has_more": len(items) == limit})
+        return jsonify({"items": _format_feed_rows(rows), "has_more": len(rows) == limit})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/users/<user_id>/activity — game + performance reviews for one user
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/users/<int:user_id>/activity")
+def get_user_activity(user_id):
+    limit     = min(int(request.args.get("limit", 20)), 100)
+    offset    = int(request.args.get("offset", 0))
+    viewer    = current_user()
+    viewer_id = viewer["id"] if viewer else None
+
+    if viewer_id:
+        rl_me_join      = "LEFT JOIN review_likes rl_me ON rl_me.review_id = gr.id AND rl_me.user_id = %s"
+        liked_by_me_col = "BOOL_OR(rl_me.user_id IS NOT NULL) AS liked_by_me"
+        rl_me_params    = [viewer_id]
+    else:
+        rl_me_join      = ""
+        liked_by_me_col = "FALSE AS liked_by_me"
+        rl_me_params    = []
+
+    sql = f"""
+        WITH combined AS (
+            SELECT
+                'game_review'::text                  AS type,
+                gr.id,
+                gr.game_id,
+                NULL::integer                        AS person_id,
+                NULL::text                           AS player_name,
+                gr.user_id,
+                gr.rating,
+                round(gr.rating / 2.0, 1)            AS stars,
+                gr.review_text,
+                COALESCE(gr.tags, '[]'::jsonb)       AS tags,
+                gr.attended,
+                gr.created_at,
+                u.display_name, u.avatar_url, u.favorite_team,
+                u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
+                g.game_date, g.home_team_abbr, g.away_team_abbr,
+                g.home_score, g.away_score,
+                COUNT(rl.review_id)                  AS like_count,
+                {liked_by_me_col},
+                (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
+            FROM game_reviews gr
+            JOIN users u  ON gr.user_id = u.id
+            JOIN games g  ON gr.game_id = g.game_id
+            LEFT JOIN review_likes rl ON rl.review_id = gr.id
+            {rl_me_join}
+            WHERE gr.user_id = %s
+            GROUP BY gr.id, u.id, g.game_id
+
+            UNION ALL
+
+            SELECT
+                'performance_review'::text           AS type,
+                pr.id,
+                pr.game_id,
+                pr.person_id,
+                COALESCE(pr.player_name, '')         AS player_name,
+                pr.user_id,
+                pr.rating,
+                round(pr.rating / 2.0, 1)            AS stars,
+                pr.review_text,
+                '[]'::jsonb                          AS tags,
+                FALSE                                AS attended,
+                pr.created_at,
+                u.display_name, u.avatar_url, u.favorite_team,
+                u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
+                g.game_date, g.home_team_abbr, g.away_team_abbr,
+                g.home_score, g.away_score,
+                0::bigint                            AS like_count,
+                FALSE                                AS liked_by_me,
+                0::bigint                            AS reply_count
+            FROM performance_reviews pr
+            JOIN users u ON pr.user_id = u.id
+            LEFT JOIN games g ON pr.game_id = g.game_id
+            WHERE pr.user_id = %s
+        )
+        SELECT * FROM combined
+        ORDER BY COALESCE(game_date, created_at::date) DESC, created_at DESC
+        LIMIT %s OFFSET %s
+    """
+
+    params = rl_me_params + [user_id, user_id, limit, offset]
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute(_PERF_TABLE); cur.execute(_PERF_MIGRATE); conn.commit()
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        return jsonify({"items": _format_feed_rows(rows), "has_more": len(rows) == limit})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def _format_feed_rows(rows) -> list:
+    items = []
+    for r in rows:
+        d = dict(r)
+        items.append({
+            "type":               d["type"],
+            "id":                 d["id"],
+            "game_id":            d["game_id"],
+            "person_id":          d.get("person_id"),
+            "player_name":        d.get("player_name"),
+            "user_id":            d["user_id"],
+            "display_name":       d.get("display_name", ""),
+            "avatar_url":         d.get("avatar_url") or "",
+            "favorite_team":      d.get("favorite_team") or "",
+            "is_pro":             bool(d.get("is_pro", False)),
+            "xp":                 d.get("xp"),
+            "equipped_ring":      d.get("equipped_ring"),
+            "equipped_title":     d.get("equipped_title"),
+            "rating":             d["rating"],
+            "stars":              float(d["stars"]),
+            "review_text":        d.get("review_text"),
+            "tags":               d.get("tags") or [],
+            "attended":           bool(d.get("attended", False)),
+            "created_at":         str(d["created_at"]),
+            "game_date":          str(d["game_date"]) if d.get("game_date") else None,
+            "home_team_abbr":     d.get("home_team_abbr"),
+            "away_team_abbr":     d.get("away_team_abbr"),
+            "home_score":         d.get("home_score"),
+            "away_score":         d.get("away_score"),
+            "like_count":         int(d.get("like_count", 0)),
+            "liked_by_me":        bool(d.get("liked_by_me", False)),
+            "reply_count":        int(d.get("reply_count", 0)),
+            "ball_knowledge_level": _xp_to_level(int(d.get("xp") or 0)),
+        })
+    return items
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
