@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import question_engine as qe  # reuse get_conn()  # noqa: E402
 
 # ── config ────────────────────────────────────────────────────────────────────
-MAX_GUESSES = 7
+MAX_GUESSES = 8
 
 # A performance is "daily-worthy" (memorable + guessable) if it clears one of these bars.
 # (gamelogs carry pts/reb/ast/fg3m + shooting — no stl/blk — so milestones are scoring/
