@@ -1,11 +1,14 @@
 """
-Fetch per-game season averages for all WNBA players from stats.wnba.com
+Fetch per-game season averages for ALL WNBA players from stats.wnba.com
 and upsert them into the wnba_player_seasons PostgreSQL table.
 
+Uses leaguedashplayerstats (not leagueLeaders) so all players are returned,
+including those with limited games due to injury or roster call-ups.
+
 Usage:
-    python backend/ingest/fetch_wnba_player_stats.py               # 2025 Regular Season
-    python backend/ingest/fetch_wnba_player_stats.py --season 2024
-    python backend/ingest/fetch_wnba_player_stats.py --season all  # 2018–2025
+    python backend/ingest/fetch_wnba_player_stats.py               # current WNBA season
+    python backend/ingest/fetch_wnba_player_stats.py --season 2025
+    python backend/ingest/fetch_wnba_player_stats.py --season all  # 2018–present
     python backend/ingest/fetch_wnba_player_stats.py --season 2025 --season-type "Playoffs"
 """
 
@@ -13,6 +16,7 @@ import os
 import sys
 import time
 import argparse
+from datetime import date
 
 from dotenv import load_dotenv
 
@@ -27,12 +31,13 @@ if not DATABASE_URL:
     print("❌ DATABASE_URL not set.")
     sys.exit(1)
 
-WNBA_STATS_URL = 'https://stats.wnba.com/stats/leagueLeaders'
+WNBA_STATS_URL = 'https://stats.wnba.com/stats/leaguedashplayerstats'
 
 WNBA_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
     'Referer':    'https://stats.wnba.com',
     'Accept':     'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
 }
 
 # stats.wnba.com abbreviation → app abbreviation
@@ -44,7 +49,11 @@ ABBR_MAP = {
     'WAS': 'WSH',  # Washington Mystics
 }
 
-ALL_SEASONS = [str(y) for y in range(2018, 2026)]  # 2018–2025
+def _current_wnba_year() -> str:
+    today = date.today()
+    return str(today.year)
+
+ALL_SEASONS = [str(y) for y in range(2018, date.today().year + 1)]
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -92,18 +101,37 @@ def ensure_table(conn):
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────
 
-def fetch_leaders(season: str, season_type: str) -> list[dict]:
+def fetch_players(season: str, season_type: str) -> list[dict]:
     """
-    Fetch leagueLeaders from stats.wnba.com. Returns a list of dicts keyed
-    by the header names from the response.
+    Fetch leaguedashplayerstats from stats.wnba.com.
+    Returns all players regardless of games-played threshold.
     """
     params = {
-        'LeagueID':   '10',
-        'PerMode':    'PerGame',
-        'Scope':      'S',
-        'Season':     season,
-        'SeasonType': season_type,
-        'StatCategory': 'PTS',
+        'LeagueID':        '10',
+        'PerMode':         'PerGame',
+        'Season':          season,
+        'SeasonType':      season_type,
+        'MeasureType':     'Base',
+        'PlayerExperience': '',
+        'PlayerPosition':  '',
+        'StarterBench':    '',
+        'LastNGames':      0,
+        'Month':           0,
+        'OpponentTeamID':  0,
+        'PaceAdjust':      'N',
+        'PlusMinus':       'N',
+        'Rank':            'N',
+        'DateFrom':        '',
+        'DateTo':          '',
+        'GameScope':       '',
+        'GameSegment':     '',
+        'Location':        '',
+        'Outcome':         '',
+        'Period':          0,
+        'SeasonSegment':   '',
+        'ShotClockRange':  '',
+        'VsConference':    '',
+        'VsDivision':      '',
     }
 
     for attempt in range(3):
@@ -112,7 +140,7 @@ def fetch_leaders(season: str, season_type: str) -> list[dict]:
                                 headers=WNBA_HEADERS, timeout=30)
             resp.raise_for_status()
             data = resp.json()
-            result_set = data.get('resultSet', {})
+            result_set = data.get('resultSets', [{}])[0]
             headers = result_set.get('headers', [])
             rows    = result_set.get('rowSet', [])
             if not headers or not rows:
@@ -139,7 +167,7 @@ def upsert_players(players: list[dict], season: str, season_type: str) -> int:
     count = 0
 
     for p in players:
-        raw_team = p.get('TEAM', '') or ''
+        raw_team = p.get('TEAM_ABBREVIATION', '') or ''
         team = ABBR_MAP.get(raw_team, raw_team) or None
 
         try:
@@ -182,14 +210,15 @@ def upsert_players(players: list[dict], season: str, season_type: str) -> int:
                     eff         = EXCLUDED.eff,
                     updated_at  = NOW()
             """, (
-                p.get('PLAYER_ID'),  p.get('PLAYER'),  season, season_type,
+                p.get('PLAYER_ID'),   p.get('PLAYER_NAME'), season, season_type,
                 team,
-                p.get('GP'),   p.get('MIN'),  p.get('PTS'),  p.get('REB'),
-                p.get('AST'),  p.get('STL'),  p.get('BLK'),  p.get('TOV'),
-                p.get('FGM'),  p.get('FGA'),  p.get('FG_PCT'),
-                p.get('FG3M'), p.get('FG3A'), p.get('FG3_PCT'),
-                p.get('FTM'),  p.get('FTA'),  p.get('FT_PCT'),
-                p.get('OREB'), p.get('DREB'), p.get('EFF'),
+                p.get('GP'),    p.get('MIN'),     p.get('PTS'),    p.get('REB'),
+                p.get('AST'),   p.get('STL'),     p.get('BLK'),    p.get('TOV'),
+                p.get('FGM'),   p.get('FGA'),     p.get('FG_PCT'),
+                p.get('FG3M'),  p.get('FG3A'),    p.get('FG3_PCT'),
+                p.get('FTM'),   p.get('FTA'),     p.get('FT_PCT'),
+                p.get('OREB'),  p.get('DREB'),
+                None,  # eff not available in leaguedashplayerstats
             ))
             count += 1
         except Exception as e:
@@ -209,8 +238,8 @@ def main():
     )
     parser.add_argument(
         '--season',
-        default='2025',
-        help='Season year (e.g. "2025") or "all" to backfill 2018–2025.',
+        default=_current_wnba_year(),
+        help='Season year (e.g. "2025") or "all" to backfill 2018–present.',
     )
     parser.add_argument(
         '--season-type',
@@ -223,14 +252,13 @@ def main():
     season_type = args.season_type
 
     for i, season in enumerate(seasons):
-        players = fetch_leaders(season, season_type)
+        players = fetch_players(season, season_type)
         if not players:
             print(f"⚠️  {season} {season_type}: no data returned, skipping.")
         else:
             n = upsert_players(players, season, season_type)
             print(f"✅ {season} {season_type}: {n} players upserted")
 
-        # Rate limit: sleep between seasons (skip after last)
         if i < len(seasons) - 1:
             time.sleep(1)
 
