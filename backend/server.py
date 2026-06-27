@@ -8821,8 +8821,9 @@ def get_player_profile(person_id):
         if is_wnba:
             # Primary: wnba_player_seasons (historical ingest, per-game averages)
             cur.execute("""
-                SELECT gp, min, pts, reb, ast, stl, blk, tov,
-                       fgm, fga, fg_pct, fg3m, fg3a, fg3_pct, ftm, fta, ft_pct, team
+                SELECT gp, min, pts, reb, ast, stl, blk, tov, pf,
+                       fgm, fga, fg_pct, fg3m, fg3a, fg3_pct, ftm, fta, ft_pct,
+                       plus_minus, team
                 FROM wnba_player_seasons
                 WHERE player_id = %s AND season = %s
                 ORDER BY CASE WHEN season_type = 'Regular Season' THEN 0 ELSE 1 END
@@ -8851,8 +8852,13 @@ def get_player_profile(person_id):
                 avg_row = cur.fetchone()
             season_avgs = dict(avg_row) if avg_row else None
             if season_avgs and (season_avgs.get("gp") or 0) > 0:
-                if team_abbr is None:
-                    team_abbr = season_avgs.get("team")
+                # Always use the team from the selected season, not the most recent
+                team_abbr = season_avgs.get("team") or team_abbr
+                # Compute TS% from per-game averages (pts / (2*(fga + 0.44*fta)))
+                _pts = season_avgs.get("pts") or 0
+                _fga = season_avgs.get("fga") or 0
+                _fta = season_avgs.get("fta") or 0
+                _ts  = round(_pts / (2 * (_fga + 0.44 * _fta)), 3) if (_fga + _fta) > 0 else None
                 avgs_out = {
                     "gp":        season_avgs.get("gp"),
                     "min":       _stat(season_avgs.get("min")),
@@ -8862,7 +8868,7 @@ def get_player_profile(person_id):
                     "stl":       _stat(season_avgs.get("stl")),
                     "blk":       _stat(season_avgs.get("blk")),
                     "tov":       _stat(season_avgs.get("tov")),
-                    "pf":        None,
+                    "pf":        _stat(season_avgs.get("pf")),
                     "fg3m":      _stat(season_avgs.get("fg3m")),
                     "fg3a":      _stat(season_avgs.get("fg3a")),
                     "ftm":       _stat(season_avgs.get("ftm")),
@@ -8870,9 +8876,9 @@ def get_player_profile(person_id):
                     "fgPct":     _pct(season_avgs.get("fg_pct")),
                     "fg3Pct":    _pct(season_avgs.get("fg3_pct")),
                     "ftPct":     _pct(season_avgs.get("ft_pct")),
-                    "tsPct":     None,
+                    "tsPct":     _ts,
                     "usgPct":    None,
-                    "plusMinus": None,
+                    "plusMinus": _stat(season_avgs.get("plus_minus")),
                 }
             else:
                 avgs_out = None
@@ -8913,8 +8919,8 @@ def get_player_profile(person_id):
                 avg_row = cur.fetchone()
             season_avgs = dict(avg_row) if avg_row else None
             if season_avgs and (season_avgs.get("gp") or 0) > 0:
-                if team_abbr is None:
-                    team_abbr = season_avgs.get("team_abbr")
+                # Always use the team from the selected season
+                team_abbr = season_avgs.get("team_abbr") or team_abbr
                 avgs_out = {
                     "gp":        season_avgs.get("gp"),
                     "min":       _stat(season_avgs.get("min")),

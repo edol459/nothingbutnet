@@ -91,10 +91,15 @@ def ensure_table(conn):
             oreb        REAL,
             dreb        REAL,
             eff         REAL,
+            pf          REAL,
+            plus_minus  REAL,
             updated_at  TIMESTAMP DEFAULT NOW(),
             PRIMARY KEY (player_id, season, season_type)
         )
     """)
+    # Add new columns to existing tables (safe on first run, idempotent)
+    cur.execute("ALTER TABLE wnba_player_seasons ADD COLUMN IF NOT EXISTS pf REAL")
+    cur.execute("ALTER TABLE wnba_player_seasons ADD COLUMN IF NOT EXISTS plus_minus REAL")
     conn.commit()
     cur.close()
 
@@ -177,12 +182,14 @@ def upsert_players(players: list[dict], season: str, season_type: str) -> int:
                     team, gp, min, pts, reb, ast, stl, blk, tov,
                     fgm, fga, fg_pct, fg3m, fg3a, fg3_pct,
                     ftm, fta, ft_pct, oreb, dreb, eff,
+                    pf, plus_minus,
                     updated_at
                 ) VALUES (
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
+                    %s, %s,
                     NOW()
                 )
                 ON CONFLICT (player_id, season, season_type) DO UPDATE SET
@@ -208,6 +215,8 @@ def upsert_players(players: list[dict], season: str, season_type: str) -> int:
                     oreb        = EXCLUDED.oreb,
                     dreb        = EXCLUDED.dreb,
                     eff         = EXCLUDED.eff,
+                    pf          = EXCLUDED.pf,
+                    plus_minus  = EXCLUDED.plus_minus,
                     updated_at  = NOW()
             """, (
                 p.get('PLAYER_ID'),   p.get('PLAYER_NAME'), season, season_type,
@@ -219,6 +228,7 @@ def upsert_players(players: list[dict], season: str, season_type: str) -> int:
                 p.get('FTM'),   p.get('FTA'),     p.get('FT_PCT'),
                 p.get('OREB'),  p.get('DREB'),
                 None,  # eff not available in leaguedashplayerstats
+                p.get('PF'),    p.get('PLUS_MINUS'),
             ))
             count += 1
         except Exception as e:
