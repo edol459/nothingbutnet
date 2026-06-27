@@ -8709,74 +8709,141 @@ _PLAYER_FOLLOWS_DDL = """
 @app.route("/api/players/<int:person_id>/profile")
 def get_player_profile(person_id):
     season  = request.args.get("season") or None
+    league  = request.args.get("league", "nba").lower()
+    is_wnba = league == "wnba"
     user    = current_user()
     user_id = user["id"] if user else None
+
+    def _pct(v): return round(float(v), 3) if v is not None else None
+    def _stat(v): return round(float(v), 1) if v is not None else None
+    def _int(v):  return int(round(float(v))) if v is not None else None
+
     try:
         conn = get_conn()
         cur  = conn.cursor()
-
         cur.execute(_PLAYER_FOLLOWS_DDL)
         conn.commit()
 
-        # Bio
-        cur.execute("""
-            SELECT player_id, player_name, position, position_group,
-                   height_inches, draft_year, draft_number, college
-            FROM players WHERE player_id = %s
-        """, (person_id,))
-        player_row = cur.fetchone()
-        if not player_row:
-            cur.close(); conn.close()
-            return jsonify({"error": "Player not found"}), 404
-        player_row = dict(player_row)
-
-        # Seasons list (most recent first) + derive current team from latest season
-        cur.execute("""
-            SELECT DISTINCT season, team_abbr
-            FROM player_seasons
-            WHERE player_id = %s
-            ORDER BY season DESC
-        """, (person_id,))
-        season_rows = [dict(r) for r in cur.fetchall()]
-        unique_seasons = [r["season"] for r in season_rows]
-        active_season  = season if season in unique_seasons else (unique_seasons[0] if unique_seasons else DEFAULT_SEASON)
-        team_abbr      = season_rows[0]["team_abbr"] if season_rows else None
-
-        # Season averages (prefer Regular Season over Playoffs for the chosen season)
-        cur.execute("""
-            SELECT gp, min_per_game AS min, pts, reb, ast,
-                   fgm, fga, fg_pct, fg3m, fg3a, fg3_pct, ftm, fta, ft_pct,
-                   ts_pct, usg_pct, plus_minus, team_abbr
-            FROM player_seasons
-            WHERE player_id = %s AND season = %s
-            ORDER BY CASE WHEN season_type = 'Regular Season' THEN 0 ELSE 1 END
-            LIMIT 1
-        """, (person_id, active_season))
-        avg_row = cur.fetchone()
-        season_avgs = dict(avg_row) if avg_row else None
-        if season_avgs and team_abbr is None:
-            team_abbr = season_avgs.get("team_abbr")
-
-        def _pct(v): return round(float(v), 3) if v is not None else None
-        def _stat(v): return round(float(v), 1) if v is not None else None
-        def _int(v):  return int(round(float(v))) if v is not None else None
-
-        avgs_out = None
-        if season_avgs:
-            avgs_out = {
-                "gp":     season_avgs.get("gp"),
-                "min":    _stat(season_avgs.get("min")),
-                "pts":    _stat(season_avgs.get("pts")),
-                "reb":    _stat(season_avgs.get("reb")),
-                "ast":    _stat(season_avgs.get("ast")),
-                "fgPct":  _pct(season_avgs.get("fg_pct")),
-                "fg3Pct": _pct(season_avgs.get("fg3_pct")),
-                "ftPct":  _pct(season_avgs.get("ft_pct")),
-                "tsPct":  _pct(season_avgs.get("ts_pct")),
-                "usgPct": _pct(season_avgs.get("usg_pct")),
+        # ── Bio + seasons ─────────────────────────────────────────
+        if is_wnba:
+            cur.execute("""
+                SELECT DISTINCT ON (player_id) player_id, player_name, team AS team_abbr, season
+                FROM wnba_player_seasons
+                WHERE player_id = %s
+                ORDER BY player_id, season DESC
+            """, (person_id,))
+            bio_row = cur.fetchone()
+            if not bio_row:
+                cur.close(); conn.close()
+                return jsonify({"error": "Player not found"}), 404
+            bio_row = dict(bio_row)
+            player_info = {
+                "personId": bio_row["player_id"],
+                "name":     bio_row["player_name"],
+                "position": None, "teamAbbr": bio_row.get("team_abbr"),
+                "heightInches": None, "draftYear": None, "draftNumber": None, "college": None,
             }
 
-        # All-time community rating summary
+            cur.execute("""
+                SELECT DISTINCT season FROM wnba_player_seasons
+                WHERE player_id = %s ORDER BY season DESC
+            """, (person_id,))
+            unique_seasons = [r["season"] for r in cur.fetchall()]
+            team_abbr = bio_row.get("team_abbr")
+
+        else:
+            cur.execute("""
+                SELECT player_id, player_name, position, position_group,
+                       height_inches, draft_year, draft_number, college
+                FROM players WHERE player_id = %s
+            """, (person_id,))
+            bio_row = cur.fetchone()
+            if not bio_row:
+                cur.close(); conn.close()
+                return jsonify({"error": "Player not found"}), 404
+            bio_row = dict(bio_row)
+            player_info = {
+                "personId":     bio_row["player_id"],
+                "name":         bio_row["player_name"],
+                "position":     bio_row.get("position"),
+                "teamAbbr":     None,
+                "heightInches": bio_row.get("height_inches"),
+                "draftYear":    bio_row.get("draft_year"),
+                "draftNumber":  bio_row.get("draft_number"),
+                "college":      bio_row.get("college"),
+            }
+
+            cur.execute("""
+                SELECT DISTINCT season, team_abbr FROM player_seasons
+                WHERE player_id = %s ORDER BY season DESC
+            """, (person_id,))
+            season_rows = [dict(r) for r in cur.fetchall()]
+            unique_seasons = [r["season"] for r in season_rows]
+            team_abbr = season_rows[0]["team_abbr"] if season_rows else None
+
+        active_season = season if season in unique_seasons else (unique_seasons[0] if unique_seasons else DEFAULT_SEASON)
+
+        # ── Season averages ───────────────────────────────────────
+        if is_wnba:
+            cur.execute("""
+                SELECT gp, min, pts, reb, ast,
+                       fgm, fga, fg_pct, fg3m, fg3a, fg3_pct, ftm, fta, ft_pct, team
+                FROM wnba_player_seasons
+                WHERE player_id = %s AND season = %s
+                ORDER BY CASE WHEN season_type = 'Regular Season' THEN 0 ELSE 1 END
+                LIMIT 1
+            """, (person_id, active_season))
+            avg_row = cur.fetchone()
+            season_avgs = dict(avg_row) if avg_row else None
+            if season_avgs:
+                if team_abbr is None:
+                    team_abbr = season_avgs.get("team")
+                avgs_out = {
+                    "gp":     season_avgs.get("gp"),
+                    "min":    _stat(season_avgs.get("min")),
+                    "pts":    _stat(season_avgs.get("pts")),
+                    "reb":    _stat(season_avgs.get("reb")),
+                    "ast":    _stat(season_avgs.get("ast")),
+                    "fgPct":  _pct(season_avgs.get("fg_pct")),
+                    "fg3Pct": _pct(season_avgs.get("fg3_pct")),
+                    "ftPct":  _pct(season_avgs.get("ft_pct")),
+                    "tsPct":  None, "usgPct": None,
+                }
+            else:
+                avgs_out = None
+        else:
+            cur.execute("""
+                SELECT gp, min_per_game AS min, pts, reb, ast,
+                       fgm, fga, fg_pct, fg3m, fg3a, fg3_pct, ftm, fta, ft_pct,
+                       ts_pct, usg_pct, team_abbr
+                FROM player_seasons
+                WHERE player_id = %s AND season = %s
+                ORDER BY CASE WHEN season_type = 'Regular Season' THEN 0 ELSE 1 END
+                LIMIT 1
+            """, (person_id, active_season))
+            avg_row = cur.fetchone()
+            season_avgs = dict(avg_row) if avg_row else None
+            if season_avgs:
+                if team_abbr is None:
+                    team_abbr = season_avgs.get("team_abbr")
+                avgs_out = {
+                    "gp":     season_avgs.get("gp"),
+                    "min":    _stat(season_avgs.get("min")),
+                    "pts":    _stat(season_avgs.get("pts")),
+                    "reb":    _stat(season_avgs.get("reb")),
+                    "ast":    _stat(season_avgs.get("ast")),
+                    "fgPct":  _pct(season_avgs.get("fg_pct")),
+                    "fg3Pct": _pct(season_avgs.get("fg3_pct")),
+                    "ftPct":  _pct(season_avgs.get("ft_pct")),
+                    "tsPct":  _pct(season_avgs.get("ts_pct")),
+                    "usgPct": _pct(season_avgs.get("usg_pct")),
+                }
+            else:
+                avgs_out = None
+
+        player_info["teamAbbr"] = team_abbr
+
+        # ── All-time community rating ──────────────────────────────
         cur.execute("""
             SELECT COUNT(*) AS cnt, COALESCE(AVG(rating::float), 0) AS avg_r
             FROM performance_reviews WHERE person_id = %s
@@ -8785,35 +8852,64 @@ def get_player_profile(person_id):
         at_count = int(at["cnt"])
         at_stars  = round(at["avg_r"] / 2, 2) if at_count > 0 else None
 
-        # Season community rating summary
-        cur.execute("""
-            SELECT COUNT(pr.id) AS cnt, COALESCE(AVG(pr.rating::float), 0) AS avg_r
-            FROM performance_reviews pr
-            JOIN player_gamelogs g ON g.game_id = pr.game_id AND g.player_id = pr.person_id
-            WHERE pr.person_id = %s AND g.season = %s
-        """, (person_id, active_season))
+        # ── Season community rating ────────────────────────────────
+        if is_wnba:
+            cur.execute("""
+                SELECT COUNT(pr.id) AS cnt, COALESCE(AVG(pr.rating::float), 0) AS avg_r
+                FROM performance_reviews pr
+                JOIN wnba_player_game_stats g ON g.game_id = pr.game_id AND g.player_id = pr.person_id
+                WHERE pr.person_id = %s AND g.season = %s
+            """, (person_id, active_season))
+        else:
+            cur.execute("""
+                SELECT COUNT(pr.id) AS cnt, COALESCE(AVG(pr.rating::float), 0) AS avg_r
+                FROM performance_reviews pr
+                JOIN player_gamelogs g ON g.game_id = pr.game_id AND g.player_id = pr.person_id
+                WHERE pr.person_id = %s AND g.season = %s
+            """, (person_id, active_season))
         sa = dict(cur.fetchone())
         sa_count = int(sa["cnt"])
         sa_stars  = round(sa["avg_r"] / 2, 2) if sa_count > 0 else None
 
-        # Rating trend: last 10 rated games this season
-        cur.execute("""
-            SELECT g.game_id, g.game_date, g.matchup, g.wl,
-                   g.pts, g.reb, g.ast, g.fg3m, g.min,
-                   COUNT(pr.id) AS rating_count,
-                   AVG(pr.rating::float) AS avg_r
-            FROM player_gamelogs g
-            JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
-            WHERE g.player_id = %s AND g.season = %s
-            GROUP BY g.game_id, g.game_date, g.matchup, g.wl,
-                     g.pts, g.reb, g.ast, g.fg3m, g.min
-            ORDER BY g.game_date DESC
-            LIMIT 10
-        """, (person_id, active_season))
+        # ── Rating trend (last 10 rated games this season) ────────
+        if is_wnba:
+            cur.execute("""
+                SELECT g.game_id, gm.game_date,
+                       CASE WHEN gm.home_team_abbr = g.team THEN g.team || ' vs. ' || gm.away_team_abbr
+                            ELSE g.team || ' @ ' || gm.home_team_abbr END AS matchup,
+                       CASE WHEN gm.home_team_abbr = g.team THEN
+                                CASE WHEN gm.home_score > gm.away_score THEN 'W' ELSE 'L' END
+                            ELSE
+                                CASE WHEN gm.away_score > gm.home_score THEN 'W' ELSE 'L' END
+                       END AS wl,
+                       g.pts, g.reb, g.ast,
+                       COUNT(pr.id) AS rating_count, AVG(pr.rating::float) AS avg_r
+                FROM wnba_player_game_stats g
+                JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
+                LEFT JOIN games gm ON gm.game_id = g.game_id
+                WHERE g.player_id = %s AND g.season = %s
+                GROUP BY g.game_id, gm.game_date, g.team, gm.home_team_abbr, gm.away_team_abbr,
+                         gm.home_score, gm.away_score, g.pts, g.reb, g.ast
+                ORDER BY gm.game_date DESC NULLS LAST
+                LIMIT 10
+            """, (person_id, active_season))
+        else:
+            cur.execute("""
+                SELECT g.game_id, g.game_date, g.matchup, g.wl,
+                       g.pts, g.reb, g.ast, g.fg3m, g.min,
+                       COUNT(pr.id) AS rating_count, AVG(pr.rating::float) AS avg_r
+                FROM player_gamelogs g
+                JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
+                WHERE g.player_id = %s AND g.season = %s
+                GROUP BY g.game_id, g.game_date, g.matchup, g.wl,
+                         g.pts, g.reb, g.ast, g.fg3m, g.min
+                ORDER BY g.game_date DESC
+                LIMIT 10
+            """, (person_id, active_season))
         trend = [
             {
                 "gameId":      r["game_id"],
-                "gameDate":    str(r["game_date"])[:10],
+                "gameDate":    str(r["game_date"])[:10] if r["game_date"] else None,
                 "matchup":     r["matchup"],
                 "wl":          r["wl"],
                 "avgStars":    round(r["avg_r"] / 2, 2),
@@ -8823,84 +8919,143 @@ def get_player_profile(person_id):
             for r in cur.fetchall()
         ]
 
-        # Best performance all-time (highest avg community stars, min 2 ratings)
-        cur.execute("""
-            SELECT g.game_id, g.game_date, g.matchup, g.season, g.wl,
-                   g.pts, g.reb, g.ast, g.fg3m,
-                   COUNT(pr.id) AS rating_count,
-                   AVG(pr.rating::float) AS avg_r
-            FROM player_gamelogs g
-            JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
-            WHERE g.player_id = %s
-            GROUP BY g.game_id, g.game_date, g.matchup, g.season, g.wl,
-                     g.pts, g.reb, g.ast, g.fg3m
-            HAVING COUNT(pr.id) >= 2
-            ORDER BY AVG(pr.rating::float) DESC, COUNT(pr.id) DESC
-            LIMIT 1
-        """, (person_id,))
+        # ── Best performance all-time (min 2 ratings) ─────────────
+        if is_wnba:
+            cur.execute("""
+                SELECT g.game_id, gm.game_date,
+                       CASE WHEN gm.home_team_abbr = g.team THEN g.team || ' vs. ' || gm.away_team_abbr
+                            ELSE g.team || ' @ ' || gm.home_team_abbr END AS matchup,
+                       g.season, g.pts, g.reb, g.ast,
+                       CASE WHEN gm.home_team_abbr = g.team THEN
+                                CASE WHEN gm.home_score > gm.away_score THEN 'W' ELSE 'L' END
+                            ELSE
+                                CASE WHEN gm.away_score > gm.home_score THEN 'W' ELSE 'L' END
+                       END AS wl,
+                       COUNT(pr.id) AS rating_count, AVG(pr.rating::float) AS avg_r
+                FROM wnba_player_game_stats g
+                JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
+                LEFT JOIN games gm ON gm.game_id = g.game_id
+                WHERE g.player_id = %s
+                GROUP BY g.game_id, gm.game_date, g.team, gm.home_team_abbr, gm.away_team_abbr,
+                         gm.home_score, gm.away_score, g.season, g.pts, g.reb, g.ast
+                HAVING COUNT(pr.id) >= 2
+                ORDER BY AVG(pr.rating::float) DESC, COUNT(pr.id) DESC
+                LIMIT 1
+            """, (person_id,))
+        else:
+            cur.execute("""
+                SELECT g.game_id, g.game_date, g.matchup, g.season, g.wl,
+                       g.pts, g.reb, g.ast, g.fg3m,
+                       COUNT(pr.id) AS rating_count, AVG(pr.rating::float) AS avg_r
+                FROM player_gamelogs g
+                JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
+                WHERE g.player_id = %s
+                GROUP BY g.game_id, g.game_date, g.matchup, g.season, g.wl,
+                         g.pts, g.reb, g.ast, g.fg3m
+                HAVING COUNT(pr.id) >= 2
+                ORDER BY AVG(pr.rating::float) DESC, COUNT(pr.id) DESC
+                LIMIT 1
+            """, (person_id,))
         best_row = cur.fetchone()
         best_perf = None
         if best_row:
             b = dict(best_row)
             best_perf = {
                 "gameId":      b["game_id"],
-                "gameDate":    str(b["game_date"])[:10],
-                "matchup":     b["matchup"],
-                "season":      b["season"],
-                "wl":          b["wl"],
+                "gameDate":    str(b["game_date"])[:10] if b["game_date"] else None,
+                "matchup":     b.get("matchup"),
+                "season":      b.get("season"),
+                "wl":          b.get("wl"),
                 "avgStars":    round(b["avg_r"] / 2, 2),
                 "ratingCount": int(b["rating_count"]),
                 "pts": _int(b["pts"]), "reb": _int(b["reb"]), "ast": _int(b["ast"]),
             }
 
-        # Recent performances this season (last 10 games, rated or not)
-        cur.execute("""
-            SELECT g.game_id, g.game_date, g.matchup, g.wl,
-                   g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga, g.min,
-                   COUNT(pr.id) AS rating_count,
-                   COALESCE(AVG(pr.rating::float), 0) AS avg_r
-            FROM player_gamelogs g
-            LEFT JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
-            WHERE g.player_id = %s AND g.season = %s
-            GROUP BY g.game_id, g.game_date, g.matchup, g.wl,
-                     g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga, g.min
-            ORDER BY g.game_date DESC
-            LIMIT 10
-        """, (person_id, active_season))
+        # ── Recent performances this season ───────────────────────
+        if is_wnba:
+            cur.execute("""
+                SELECT g.game_id, gm.game_date,
+                       CASE WHEN gm.home_team_abbr = g.team THEN g.team || ' vs. ' || gm.away_team_abbr
+                            ELSE g.team || ' @ ' || gm.home_team_abbr END AS matchup,
+                       CASE WHEN gm.home_team_abbr = g.team THEN
+                                CASE WHEN gm.home_score > gm.away_score THEN 'W' ELSE 'L' END
+                            ELSE
+                                CASE WHEN gm.away_score > gm.home_score THEN 'W' ELSE 'L' END
+                       END AS wl,
+                       g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga,
+                       COUNT(pr.id) AS rating_count,
+                       COALESCE(AVG(pr.rating::float), 0) AS avg_r
+                FROM wnba_player_game_stats g
+                LEFT JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
+                LEFT JOIN games gm ON gm.game_id = g.game_id
+                WHERE g.player_id = %s AND g.season = %s
+                GROUP BY g.game_id, gm.game_date, g.team, gm.home_team_abbr, gm.away_team_abbr,
+                         gm.home_score, gm.away_score, g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga
+                ORDER BY gm.game_date DESC NULLS LAST
+                LIMIT 10
+            """, (person_id, active_season))
+        else:
+            cur.execute("""
+                SELECT g.game_id, g.game_date, g.matchup, g.wl,
+                       g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga, g.min,
+                       COUNT(pr.id) AS rating_count,
+                       COALESCE(AVG(pr.rating::float), 0) AS avg_r
+                FROM player_gamelogs g
+                LEFT JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
+                WHERE g.player_id = %s AND g.season = %s
+                GROUP BY g.game_id, g.game_date, g.matchup, g.wl,
+                         g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga, g.min
+                ORDER BY g.game_date DESC
+                LIMIT 10
+            """, (person_id, active_season))
         rc = cur.fetchall()
         recent_perfs = [
             {
                 "gameId":      r["game_id"],
-                "gameDate":    str(r["game_date"])[:10],
+                "gameDate":    str(r["game_date"])[:10] if r["game_date"] else None,
                 "matchup":     r["matchup"],
-                "wl":          r["wl"],
+                "wl":          r.get("wl"),
                 "pts":  _int(r["pts"]),  "reb":  _int(r["reb"]),  "ast":  _int(r["ast"]),
-                "fg3m": _int(r["fg3m"]), "fgm":  _int(r["fgm"]),  "fga":  _int(r["fga"]),
-                "min":  _int(r["min"]),
+                "fg3m": _int(r.get("fg3m")), "fgm": _int(r.get("fgm")), "fga": _int(r.get("fga")),
+                "min":  _int(r.get("min")),
                 "ratingCount": int(r["rating_count"]),
                 "avgStars":    round(r["avg_r"] / 2, 2) if int(r["rating_count"]) > 0 else None,
             }
             for r in rc
         ]
 
-        # Recent community reviews (all-time, newest first)
-        cur.execute("""
-            SELECT pr.id, pr.game_id, pr.rating, pr.review_text, pr.created_at,
-                   u.id AS user_id, u.display_name, u.avatar_url,
-                   g.game_date, g.matchup
-            FROM performance_reviews pr
-            JOIN users u ON u.id = pr.user_id
-            LEFT JOIN player_gamelogs g ON g.game_id = pr.game_id AND g.player_id = pr.person_id
-            WHERE pr.person_id = %s
-            ORDER BY pr.created_at DESC
-            LIMIT 10
-        """, (person_id,))
+        # ── Recent community reviews ───────────────────────────────
+        if is_wnba:
+            cur.execute("""
+                SELECT pr.id, pr.game_id, pr.rating, pr.review_text, pr.created_at,
+                       u.id AS user_id, u.display_name, u.avatar_url,
+                       gm.game_date,
+                       CASE WHEN gm.home_team_abbr = g.team THEN g.team || ' vs. ' || gm.away_team_abbr
+                            ELSE g.team || ' @ ' || gm.home_team_abbr END AS matchup
+                FROM performance_reviews pr
+                JOIN users u ON u.id = pr.user_id
+                LEFT JOIN wnba_player_game_stats g ON g.game_id = pr.game_id AND g.player_id = pr.person_id
+                LEFT JOIN games gm ON gm.game_id = pr.game_id
+                WHERE pr.person_id = %s
+                ORDER BY pr.created_at DESC LIMIT 10
+            """, (person_id,))
+        else:
+            cur.execute("""
+                SELECT pr.id, pr.game_id, pr.rating, pr.review_text, pr.created_at,
+                       u.id AS user_id, u.display_name, u.avatar_url,
+                       g.game_date, g.matchup
+                FROM performance_reviews pr
+                JOIN users u ON u.id = pr.user_id
+                LEFT JOIN player_gamelogs g ON g.game_id = pr.game_id AND g.player_id = pr.person_id
+                WHERE pr.person_id = %s
+                ORDER BY pr.created_at DESC LIMIT 10
+            """, (person_id,))
         recent_reviews = [
             {
                 "id":          r["id"],
                 "gameId":      r["game_id"],
                 "gameDate":    str(r["game_date"])[:10] if r["game_date"] else None,
-                "matchup":     r["matchup"],
+                "matchup":     r.get("matchup"),
                 "userId":      r["user_id"],
                 "displayName": r["display_name"],
                 "avatarUrl":   r["avatar_url"] or "",
@@ -8912,29 +9067,18 @@ def get_player_profile(person_id):
             for r in cur.fetchall()
         ]
 
-        # Follow status
+        # ── Follow status ──────────────────────────────────────────
         cur.execute("SELECT COUNT(*) AS cnt FROM player_follows WHERE person_id = %s", (person_id,))
         follower_count = int(cur.fetchone()["cnt"])
         is_following = False
         if user_id:
-            cur.execute(
-                "SELECT 1 FROM player_follows WHERE user_id = %s AND person_id = %s",
-                (user_id, person_id)
-            )
+            cur.execute("SELECT 1 FROM player_follows WHERE user_id = %s AND person_id = %s",
+                        (user_id, person_id))
             is_following = cur.fetchone() is not None
 
         cur.close(); conn.close()
         return jsonify({
-            "player": {
-                "personId":     player_row["player_id"],
-                "name":         player_row["player_name"],
-                "position":     player_row.get("position"),
-                "teamAbbr":     team_abbr,
-                "heightInches": player_row.get("height_inches"),
-                "draftYear":    player_row.get("draft_year"),
-                "draftNumber":  player_row.get("draft_number"),
-                "college":      player_row.get("college"),
-            },
+            "player":           player_info,
             "seasons":          unique_seasons,
             "currentSeason":    active_season,
             "seasonAverages":   avgs_out,
