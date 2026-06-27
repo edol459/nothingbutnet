@@ -8821,7 +8821,7 @@ def get_player_profile(person_id):
         if is_wnba:
             # Primary: wnba_player_seasons (historical ingest, per-game averages)
             cur.execute("""
-                SELECT gp, min, pts, reb, ast,
+                SELECT gp, min, pts, reb, ast, stl, blk, tov,
                        fgm, fga, fg_pct, fg3m, fg3a, fg3_pct, ftm, fta, ft_pct, team
                 FROM wnba_player_seasons
                 WHERE player_id = %s AND season = %s
@@ -8830,12 +8830,16 @@ def get_player_profile(person_id):
             """, (person_id, active_season))
             avg_row = cur.fetchone()
             if not avg_row:
-                # Fallback: compute per-game averages from current-season game stats
+                # Fallback: compute from current-season CDN game stats
+                # wnba_player_game_stats has: pts, reb, ast, tov, fgm, fga, fg3m, fg3a
                 cur.execute("""
                     SELECT COUNT(DISTINCT game_id)                              AS gp,
                            AVG(pts::float)                                      AS pts,
                            AVG(reb::float)                                      AS reb,
                            AVG(ast::float)                                      AS ast,
+                           AVG(tov::float)                                      AS tov,
+                           AVG(fg3m::float)                                     AS fg3m,
+                           AVG(fg3a::float)                                     AS fg3a,
                            CASE WHEN SUM(fga) > 0
                                 THEN ROUND(SUM(fgm)::numeric / SUM(fga), 3) END AS fg_pct,
                            CASE WHEN SUM(fg3a) > 0
@@ -8850,24 +8854,34 @@ def get_player_profile(person_id):
                 if team_abbr is None:
                     team_abbr = season_avgs.get("team")
                 avgs_out = {
-                    "gp":     season_avgs.get("gp"),
-                    "min":    _stat(season_avgs.get("min")),
-                    "pts":    _stat(season_avgs.get("pts")),
-                    "reb":    _stat(season_avgs.get("reb")),
-                    "ast":    _stat(season_avgs.get("ast")),
-                    "fgPct":  _pct(season_avgs.get("fg_pct")),
-                    "fg3Pct": _pct(season_avgs.get("fg3_pct")),
-                    "ftPct":  _pct(season_avgs.get("ft_pct")),
-                    "tsPct":  None, "usgPct": None,
+                    "gp":        season_avgs.get("gp"),
+                    "min":       _stat(season_avgs.get("min")),
+                    "pts":       _stat(season_avgs.get("pts")),
+                    "reb":       _stat(season_avgs.get("reb")),
+                    "ast":       _stat(season_avgs.get("ast")),
+                    "stl":       _stat(season_avgs.get("stl")),
+                    "blk":       _stat(season_avgs.get("blk")),
+                    "tov":       _stat(season_avgs.get("tov")),
+                    "pf":        None,
+                    "fg3m":      _stat(season_avgs.get("fg3m")),
+                    "fg3a":      _stat(season_avgs.get("fg3a")),
+                    "ftm":       _stat(season_avgs.get("ftm")),
+                    "fta":       _stat(season_avgs.get("fta")),
+                    "fgPct":     _pct(season_avgs.get("fg_pct")),
+                    "fg3Pct":    _pct(season_avgs.get("fg3_pct")),
+                    "ftPct":     _pct(season_avgs.get("ft_pct")),
+                    "tsPct":     None,
+                    "usgPct":    None,
+                    "plusMinus": None,
                 }
             else:
                 avgs_out = None
         else:
             # Primary: player_seasons (ingested season averages)
             cur.execute("""
-                SELECT gp, min_per_game AS min, pts, reb, ast,
+                SELECT gp, min_per_game AS min, pts, reb, ast, stl, blk, tov, pf,
                        fgm, fga, fg_pct, fg3m, fg3a, fg3_pct, ftm, fta, ft_pct,
-                       ts_pct, usg_pct, team_abbr
+                       ts_pct, usg_pct, plus_minus, team_abbr
                 FROM player_seasons
                 WHERE player_id = %s AND season = %s
                 ORDER BY CASE WHEN season_type = 'Regular Season' THEN 0 ELSE 1 END
@@ -8875,19 +8889,22 @@ def get_player_profile(person_id):
             """, (person_id, active_season))
             avg_row = cur.fetchone()
             if not avg_row:
-                # Fallback: compute per-game averages from player_gamelogs (always current)
+                # Fallback: compute from player_gamelogs
+                # gamelogs has: pts, reb, ast, fg3m, fgm, fga, ftm, fta, ts_pct
+                # (no fg3a, stl, blk, tov, pf, plus_minus)
                 cur.execute("""
                     SELECT COUNT(DISTINCT game_id)                              AS gp,
                            AVG(pts::float)                                      AS pts,
                            AVG(reb::float)                                      AS reb,
                            AVG(ast::float)                                      AS ast,
                            AVG(min::float)                                      AS min,
+                           AVG(fg3m::float)                                     AS fg3m,
                            CASE WHEN SUM(fga) > 0
                                 THEN ROUND(SUM(fgm)::numeric / SUM(fga), 3) END AS fg_pct,
-                           CASE WHEN SUM(fg3a) > 0
-                                THEN ROUND(SUM(fg3m)::numeric / SUM(fg3a), 3) END AS fg3_pct,
                            CASE WHEN SUM(fta) > 0
                                 THEN ROUND(SUM(ftm)::numeric / SUM(fta), 3) END AS ft_pct,
+                           AVG(ftm::float)                                      AS ftm,
+                           AVG(fta::float)                                      AS fta,
                            AVG(ts_pct::float)                                   AS ts_pct,
                            SUBSTRING(MAX(matchup), 1, 3)                        AS team_abbr
                     FROM player_gamelogs
@@ -8899,16 +8916,25 @@ def get_player_profile(person_id):
                 if team_abbr is None:
                     team_abbr = season_avgs.get("team_abbr")
                 avgs_out = {
-                    "gp":     season_avgs.get("gp"),
-                    "min":    _stat(season_avgs.get("min")),
-                    "pts":    _stat(season_avgs.get("pts")),
-                    "reb":    _stat(season_avgs.get("reb")),
-                    "ast":    _stat(season_avgs.get("ast")),
-                    "fgPct":  _pct(season_avgs.get("fg_pct")),
-                    "fg3Pct": _pct(season_avgs.get("fg3_pct")),
-                    "ftPct":  _pct(season_avgs.get("ft_pct")),
-                    "tsPct":  _pct(season_avgs.get("ts_pct")),
-                    "usgPct": _pct(season_avgs.get("usg_pct")),
+                    "gp":        season_avgs.get("gp"),
+                    "min":       _stat(season_avgs.get("min")),
+                    "pts":       _stat(season_avgs.get("pts")),
+                    "reb":       _stat(season_avgs.get("reb")),
+                    "ast":       _stat(season_avgs.get("ast")),
+                    "stl":       _stat(season_avgs.get("stl")),
+                    "blk":       _stat(season_avgs.get("blk")),
+                    "tov":       _stat(season_avgs.get("tov")),
+                    "pf":        _stat(season_avgs.get("pf")),
+                    "fg3m":      _stat(season_avgs.get("fg3m")),
+                    "fg3a":      _stat(season_avgs.get("fg3a")),
+                    "ftm":       _stat(season_avgs.get("ftm")),
+                    "fta":       _stat(season_avgs.get("fta")),
+                    "fgPct":     _pct(season_avgs.get("fg_pct")),
+                    "fg3Pct":    _pct(season_avgs.get("fg3_pct")),
+                    "ftPct":     _pct(season_avgs.get("ft_pct")),
+                    "tsPct":     _pct(season_avgs.get("ts_pct")),
+                    "usgPct":    _pct(season_avgs.get("usg_pct")),
+                    "plusMinus": _stat(season_avgs.get("plus_minus")),
                 }
             else:
                 avgs_out = None
