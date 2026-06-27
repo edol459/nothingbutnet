@@ -8726,6 +8726,8 @@ def get_player_profile(person_id):
 
         # ── Bio + seasons ─────────────────────────────────────────
         if is_wnba:
+            # Try wnba_player_seasons first (historical); fall back to wnba_player_game_stats
+            # (current-season CDN ingest) for new/expansion players not yet in the history table.
             cur.execute("""
                 SELECT DISTINCT ON (player_id) player_id, player_name, team AS team_abbr, season
                 FROM wnba_player_seasons
@@ -8733,6 +8735,14 @@ def get_player_profile(person_id):
                 ORDER BY player_id, season DESC
             """, (person_id,))
             bio_row = cur.fetchone()
+            if not bio_row:
+                cur.execute("""
+                    SELECT DISTINCT ON (player_id) player_id, player_name, team AS team_abbr, season
+                    FROM wnba_player_game_stats
+                    WHERE player_id = %s AND player_name IS NOT NULL
+                    ORDER BY player_id, season DESC NULLS LAST
+                """, (person_id,))
+                bio_row = cur.fetchone()
             if not bio_row:
                 cur.close(); conn.close()
                 return jsonify({"error": "Player not found"}), 404
@@ -8744,10 +8754,15 @@ def get_player_profile(person_id):
                 "heightInches": None, "draftYear": None, "draftNumber": None, "college": None,
             }
 
+            # Union both tables so current-season (game_stats only) always appears in the list
             cur.execute("""
-                SELECT DISTINCT season FROM wnba_player_seasons
-                WHERE player_id = %s ORDER BY season DESC
-            """, (person_id,))
+                SELECT season FROM (
+                    SELECT DISTINCT season FROM wnba_player_seasons WHERE player_id = %s
+                    UNION
+                    SELECT DISTINCT season FROM wnba_player_game_stats
+                    WHERE player_id = %s AND season IS NOT NULL
+                ) s ORDER BY season DESC
+            """, (person_id, person_id))
             unique_seasons = [r["season"] for r in cur.fetchall()]
             team_abbr = bio_row.get("team_abbr")
 
@@ -8773,18 +8788,38 @@ def get_player_profile(person_id):
                 "college":      bio_row.get("college"),
             }
 
+            # UNION with gamelogs so current season always appears even if
+            # player_seasons hasn't been ingested yet for this season
             cur.execute("""
-                SELECT DISTINCT season, team_abbr FROM player_seasons
-                WHERE player_id = %s ORDER BY season DESC
+                SELECT season FROM (
+                    SELECT DISTINCT season FROM player_seasons WHERE player_id = %s
+                    UNION
+                    SELECT DISTINCT season FROM player_gamelogs
+                    WHERE player_id = %s AND season IS NOT NULL
+                ) s ORDER BY season DESC
+            """, (person_id, person_id))
+            unique_seasons = [r["season"] for r in cur.fetchall()]
+            # Get team_abbr from the most recent entry (prefer player_seasons, fall back to gamelogs)
+            cur.execute("""
+                SELECT team_abbr FROM player_seasons WHERE player_id = %s
+                ORDER BY season DESC LIMIT 1
             """, (person_id,))
-            season_rows = [dict(r) for r in cur.fetchall()]
-            unique_seasons = [r["season"] for r in season_rows]
-            team_abbr = season_rows[0]["team_abbr"] if season_rows else None
+            ta_row = cur.fetchone()
+            if not ta_row:
+                cur.execute("""
+                    SELECT SUBSTRING(matchup, 1, 3) AS team_abbr FROM player_gamelogs
+                    WHERE player_id = %s AND matchup IS NOT NULL ORDER BY game_date DESC LIMIT 1
+                """, (person_id,))
+                ta_row = cur.fetchone()
+            team_abbr = ta_row["team_abbr"] if ta_row else None
 
-        active_season = season if season in unique_seasons else (unique_seasons[0] if unique_seasons else DEFAULT_SEASON)
+        wnba_default = _get_wnba_season()
+        fallback_season = wnba_default if is_wnba else DEFAULT_SEASON
+        active_season = season if season in unique_seasons else (unique_seasons[0] if unique_seasons else fallback_season)
 
         # ── Season averages ───────────────────────────────────────
         if is_wnba:
+            # Primary: wnba_player_seasons (historical ingest, per-game averages)
             cur.execute("""
                 SELECT gp, min, pts, reb, ast,
                        fgm, fga, fg_pct, fg3m, fg3a, fg3_pct, ftm, fta, ft_pct, team
@@ -8794,8 +8829,24 @@ def get_player_profile(person_id):
                 LIMIT 1
             """, (person_id, active_season))
             avg_row = cur.fetchone()
+            if not avg_row:
+                # Fallback: compute per-game averages from current-season game stats
+                cur.execute("""
+                    SELECT COUNT(DISTINCT game_id)                              AS gp,
+                           AVG(pts::float)                                      AS pts,
+                           AVG(reb::float)                                      AS reb,
+                           AVG(ast::float)                                      AS ast,
+                           CASE WHEN SUM(fga) > 0
+                                THEN ROUND(SUM(fgm)::numeric / SUM(fga), 3) END AS fg_pct,
+                           CASE WHEN SUM(fg3a) > 0
+                                THEN ROUND(SUM(fg3m)::numeric / SUM(fg3a), 3) END AS fg3_pct,
+                           MAX(team)                                            AS team
+                    FROM wnba_player_game_stats
+                    WHERE player_id = %s AND season = %s
+                """, (person_id, active_season))
+                avg_row = cur.fetchone()
             season_avgs = dict(avg_row) if avg_row else None
-            if season_avgs:
+            if season_avgs and (season_avgs.get("gp") or 0) > 0:
                 if team_abbr is None:
                     team_abbr = season_avgs.get("team")
                 avgs_out = {
@@ -8812,6 +8863,7 @@ def get_player_profile(person_id):
             else:
                 avgs_out = None
         else:
+            # Primary: player_seasons (ingested season averages)
             cur.execute("""
                 SELECT gp, min_per_game AS min, pts, reb, ast,
                        fgm, fga, fg_pct, fg3m, fg3a, fg3_pct, ftm, fta, ft_pct,
@@ -8822,8 +8874,28 @@ def get_player_profile(person_id):
                 LIMIT 1
             """, (person_id, active_season))
             avg_row = cur.fetchone()
+            if not avg_row:
+                # Fallback: compute per-game averages from player_gamelogs (always current)
+                cur.execute("""
+                    SELECT COUNT(DISTINCT game_id)                              AS gp,
+                           AVG(pts::float)                                      AS pts,
+                           AVG(reb::float)                                      AS reb,
+                           AVG(ast::float)                                      AS ast,
+                           AVG(min::float)                                      AS min,
+                           CASE WHEN SUM(fga) > 0
+                                THEN ROUND(SUM(fgm)::numeric / SUM(fga), 3) END AS fg_pct,
+                           CASE WHEN SUM(fg3a) > 0
+                                THEN ROUND(SUM(fg3m)::numeric / SUM(fg3a), 3) END AS fg3_pct,
+                           CASE WHEN SUM(fta) > 0
+                                THEN ROUND(SUM(ftm)::numeric / SUM(fta), 3) END AS ft_pct,
+                           AVG(ts_pct::float)                                   AS ts_pct,
+                           SUBSTRING(MAX(matchup), 1, 3)                        AS team_abbr
+                    FROM player_gamelogs
+                    WHERE player_id = %s AND season = %s AND season_type = 'Regular Season'
+                """, (person_id, active_season))
+                avg_row = cur.fetchone()
             season_avgs = dict(avg_row) if avg_row else None
-            if season_avgs:
+            if season_avgs and (season_avgs.get("gp") or 0) > 0:
                 if team_abbr is None:
                     team_abbr = season_avgs.get("team_abbr")
                 avgs_out = {
