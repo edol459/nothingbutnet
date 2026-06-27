@@ -8692,5 +8692,310 @@ def guesswho_page():
     return app.send_static_file("guesswho.html")
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Player profile  GET /api/players/<person_id>/profile
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_PLAYER_FOLLOWS_DDL = """
+    CREATE TABLE IF NOT EXISTS player_follows (
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        person_id  INTEGER NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (user_id, person_id)
+    )
+"""
+
+
+@app.route("/api/players/<int:person_id>/profile")
+def get_player_profile(person_id):
+    season  = request.args.get("season") or None
+    user    = current_user()
+    user_id = user["id"] if user else None
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+
+        cur.execute(_PLAYER_FOLLOWS_DDL)
+        conn.commit()
+
+        # Bio
+        cur.execute("""
+            SELECT player_id, player_name, position, position_group,
+                   height_inches, draft_year, draft_number, college
+            FROM players WHERE player_id = %s
+        """, (person_id,))
+        player_row = cur.fetchone()
+        if not player_row:
+            cur.close(); conn.close()
+            return jsonify({"error": "Player not found"}), 404
+        player_row = dict(player_row)
+
+        # Seasons list (most recent first) + derive current team from latest season
+        cur.execute("""
+            SELECT DISTINCT season, team_abbr
+            FROM player_seasons
+            WHERE player_id = %s
+            ORDER BY season DESC
+        """, (person_id,))
+        season_rows = [dict(r) for r in cur.fetchall()]
+        unique_seasons = [r["season"] for r in season_rows]
+        active_season  = season if season in unique_seasons else (unique_seasons[0] if unique_seasons else DEFAULT_SEASON)
+        team_abbr      = season_rows[0]["team_abbr"] if season_rows else None
+
+        # Season averages (prefer Regular Season over Playoffs for the chosen season)
+        cur.execute("""
+            SELECT gp, min_per_game AS min, pts, reb, ast,
+                   fgm, fga, fg_pct, fg3m, fg3a, fg3_pct, ftm, fta, ft_pct,
+                   ts_pct, usg_pct, plus_minus, team_abbr
+            FROM player_seasons
+            WHERE player_id = %s AND season = %s
+            ORDER BY CASE WHEN season_type = 'Regular Season' THEN 0 ELSE 1 END
+            LIMIT 1
+        """, (person_id, active_season))
+        avg_row = cur.fetchone()
+        season_avgs = dict(avg_row) if avg_row else None
+        if season_avgs and team_abbr is None:
+            team_abbr = season_avgs.get("team_abbr")
+
+        def _pct(v): return round(float(v), 3) if v is not None else None
+        def _stat(v): return round(float(v), 1) if v is not None else None
+        def _int(v):  return int(round(float(v))) if v is not None else None
+
+        avgs_out = None
+        if season_avgs:
+            avgs_out = {
+                "gp":     season_avgs.get("gp"),
+                "min":    _stat(season_avgs.get("min")),
+                "pts":    _stat(season_avgs.get("pts")),
+                "reb":    _stat(season_avgs.get("reb")),
+                "ast":    _stat(season_avgs.get("ast")),
+                "fgPct":  _pct(season_avgs.get("fg_pct")),
+                "fg3Pct": _pct(season_avgs.get("fg3_pct")),
+                "ftPct":  _pct(season_avgs.get("ft_pct")),
+                "tsPct":  _pct(season_avgs.get("ts_pct")),
+                "usgPct": _pct(season_avgs.get("usg_pct")),
+            }
+
+        # All-time community rating summary
+        cur.execute("""
+            SELECT COUNT(*) AS cnt, COALESCE(AVG(rating::float), 0) AS avg_r
+            FROM performance_reviews WHERE person_id = %s
+        """, (person_id,))
+        at = dict(cur.fetchone())
+        at_count = int(at["cnt"])
+        at_stars  = round(at["avg_r"] / 2, 2) if at_count > 0 else None
+
+        # Season community rating summary
+        cur.execute("""
+            SELECT COUNT(pr.id) AS cnt, COALESCE(AVG(pr.rating::float), 0) AS avg_r
+            FROM performance_reviews pr
+            JOIN player_gamelogs g ON g.game_id = pr.game_id AND g.player_id = pr.person_id
+            WHERE pr.person_id = %s AND g.season = %s
+        """, (person_id, active_season))
+        sa = dict(cur.fetchone())
+        sa_count = int(sa["cnt"])
+        sa_stars  = round(sa["avg_r"] / 2, 2) if sa_count > 0 else None
+
+        # Rating trend: last 10 rated games this season
+        cur.execute("""
+            SELECT g.game_id, g.game_date, g.matchup, g.wl,
+                   g.pts, g.reb, g.ast, g.fg3m, g.min,
+                   COUNT(pr.id) AS rating_count,
+                   AVG(pr.rating::float) AS avg_r
+            FROM player_gamelogs g
+            JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
+            WHERE g.player_id = %s AND g.season = %s
+            GROUP BY g.game_id, g.game_date, g.matchup, g.wl,
+                     g.pts, g.reb, g.ast, g.fg3m, g.min
+            ORDER BY g.game_date DESC
+            LIMIT 10
+        """, (person_id, active_season))
+        trend = [
+            {
+                "gameId":      r["game_id"],
+                "gameDate":    str(r["game_date"])[:10],
+                "matchup":     r["matchup"],
+                "wl":          r["wl"],
+                "avgStars":    round(r["avg_r"] / 2, 2),
+                "ratingCount": int(r["rating_count"]),
+                "pts": _int(r["pts"]), "reb": _int(r["reb"]), "ast": _int(r["ast"]),
+            }
+            for r in cur.fetchall()
+        ]
+
+        # Best performance all-time (highest avg community stars, min 2 ratings)
+        cur.execute("""
+            SELECT g.game_id, g.game_date, g.matchup, g.season, g.wl,
+                   g.pts, g.reb, g.ast, g.fg3m,
+                   COUNT(pr.id) AS rating_count,
+                   AVG(pr.rating::float) AS avg_r
+            FROM player_gamelogs g
+            JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
+            WHERE g.player_id = %s
+            GROUP BY g.game_id, g.game_date, g.matchup, g.season, g.wl,
+                     g.pts, g.reb, g.ast, g.fg3m
+            HAVING COUNT(pr.id) >= 2
+            ORDER BY AVG(pr.rating::float) DESC, COUNT(pr.id) DESC
+            LIMIT 1
+        """, (person_id,))
+        best_row = cur.fetchone()
+        best_perf = None
+        if best_row:
+            b = dict(best_row)
+            best_perf = {
+                "gameId":      b["game_id"],
+                "gameDate":    str(b["game_date"])[:10],
+                "matchup":     b["matchup"],
+                "season":      b["season"],
+                "wl":          b["wl"],
+                "avgStars":    round(b["avg_r"] / 2, 2),
+                "ratingCount": int(b["rating_count"]),
+                "pts": _int(b["pts"]), "reb": _int(b["reb"]), "ast": _int(b["ast"]),
+            }
+
+        # Recent performances this season (last 10 games, rated or not)
+        cur.execute("""
+            SELECT g.game_id, g.game_date, g.matchup, g.wl,
+                   g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga, g.min,
+                   COUNT(pr.id) AS rating_count,
+                   COALESCE(AVG(pr.rating::float), 0) AS avg_r
+            FROM player_gamelogs g
+            LEFT JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
+            WHERE g.player_id = %s AND g.season = %s
+            GROUP BY g.game_id, g.game_date, g.matchup, g.wl,
+                     g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga, g.min
+            ORDER BY g.game_date DESC
+            LIMIT 10
+        """, (person_id, active_season))
+        rc = cur.fetchall()
+        recent_perfs = [
+            {
+                "gameId":      r["game_id"],
+                "gameDate":    str(r["game_date"])[:10],
+                "matchup":     r["matchup"],
+                "wl":          r["wl"],
+                "pts":  _int(r["pts"]),  "reb":  _int(r["reb"]),  "ast":  _int(r["ast"]),
+                "fg3m": _int(r["fg3m"]), "fgm":  _int(r["fgm"]),  "fga":  _int(r["fga"]),
+                "min":  _int(r["min"]),
+                "ratingCount": int(r["rating_count"]),
+                "avgStars":    round(r["avg_r"] / 2, 2) if int(r["rating_count"]) > 0 else None,
+            }
+            for r in rc
+        ]
+
+        # Recent community reviews (all-time, newest first)
+        cur.execute("""
+            SELECT pr.id, pr.game_id, pr.rating, pr.review_text, pr.created_at,
+                   u.id AS user_id, u.display_name, u.avatar_url,
+                   g.game_date, g.matchup
+            FROM performance_reviews pr
+            JOIN users u ON u.id = pr.user_id
+            LEFT JOIN player_gamelogs g ON g.game_id = pr.game_id AND g.player_id = pr.person_id
+            WHERE pr.person_id = %s
+            ORDER BY pr.created_at DESC
+            LIMIT 10
+        """, (person_id,))
+        recent_reviews = [
+            {
+                "id":          r["id"],
+                "gameId":      r["game_id"],
+                "gameDate":    str(r["game_date"])[:10] if r["game_date"] else None,
+                "matchup":     r["matchup"],
+                "userId":      r["user_id"],
+                "displayName": r["display_name"],
+                "avatarUrl":   r["avatar_url"] or "",
+                "rating":      r["rating"],
+                "stars":       round(r["rating"] / 2, 1),
+                "reviewText":  r["review_text"],
+                "createdAt":   str(r["created_at"]),
+            }
+            for r in cur.fetchall()
+        ]
+
+        # Follow status
+        cur.execute("SELECT COUNT(*) AS cnt FROM player_follows WHERE person_id = %s", (person_id,))
+        follower_count = int(cur.fetchone()["cnt"])
+        is_following = False
+        if user_id:
+            cur.execute(
+                "SELECT 1 FROM player_follows WHERE user_id = %s AND person_id = %s",
+                (user_id, person_id)
+            )
+            is_following = cur.fetchone() is not None
+
+        cur.close(); conn.close()
+        return jsonify({
+            "player": {
+                "personId":     player_row["player_id"],
+                "name":         player_row["player_name"],
+                "position":     player_row.get("position"),
+                "teamAbbr":     team_abbr,
+                "heightInches": player_row.get("height_inches"),
+                "draftYear":    player_row.get("draft_year"),
+                "draftNumber":  player_row.get("draft_number"),
+                "college":      player_row.get("college"),
+            },
+            "seasons":          unique_seasons,
+            "currentSeason":    active_season,
+            "seasonAverages":   avgs_out,
+            "ratingSummary": {
+                "allTimeAvgStars":    at_stars,
+                "allTimeReviewCount": at_count,
+                "seasonAvgStars":     sa_stars,
+                "seasonReviewCount":  sa_count,
+            },
+            "trend":              trend,
+            "bestPerformance":    best_perf,
+            "recentPerformances": recent_perfs,
+            "recentReviews":      recent_reviews,
+            "followerCount":      follower_count,
+            "isFollowing":        is_following,
+        })
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/players/<int:person_id>/follow", methods=["POST"])
+@login_required
+def follow_player(person_id):
+    user = current_user()
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute(_PLAYER_FOLLOWS_DDL)
+        cur.execute(
+            "INSERT INTO player_follows (user_id, person_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (user["id"], person_id)
+        )
+        conn.commit()
+        cur.execute("SELECT COUNT(*) AS cnt FROM player_follows WHERE person_id = %s", (person_id,))
+        count = int(cur.fetchone()["cnt"])
+        cur.close(); conn.close()
+        return jsonify({"isFollowing": True, "followerCount": count})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/players/<int:person_id>/follow", methods=["DELETE"])
+@login_required
+def unfollow_player(person_id):
+    user = current_user()
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute(
+            "DELETE FROM player_follows WHERE user_id = %s AND person_id = %s",
+            (user["id"], person_id)
+        )
+        conn.commit()
+        cur.execute("SELECT COUNT(*) AS cnt FROM player_follows WHERE person_id = %s", (person_id,))
+        count = int(cur.fetchone()["cnt"])
+        cur.close(); conn.close()
+        return jsonify({"isFollowing": False, "followerCount": count})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
