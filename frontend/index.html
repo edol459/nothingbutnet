@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ydkball</title>
 <meta name="description" content="NBA & WNBA scores, stats, and game reviews.">
 <meta property="og:site_name" content="ydkball">
@@ -263,10 +263,10 @@ nav {
   .recent-divider { border-left:none; padding-left:0; border-top:1px solid var(--rule); padding-top:24px; margin-top:24px; }
 }
 @media (max-width:640px) {
-  :root { --nav-h:100px; }
+  :root { --nav-h:88px; }
   nav { height:auto; padding:0 16px; flex-wrap:wrap; align-items:center; }
-  .nav-logo-link { padding:13px 0; }
-  .nav-right { padding:13px 0; }
+  .nav-logo-link { padding:8px 0; }
+  .nav-right { padding:8px 0; }
   .nav-links { position:static; transform:none; top:auto; left:auto; order:10; flex:0 0 100%; justify-content:space-evenly; overflow-x:auto; scrollbar-width:none; flex-wrap:nowrap; border-top:1px solid var(--rule); padding:7px 0 9px; gap:0; }
   .nav-links::-webkit-scrollbar { display:none; }
   .nav-link { white-space:nowrap; padding:5px 10px; }
@@ -280,9 +280,6 @@ nav {
   .install-btn { display:flex; }
 }
 
-/* safe-area: extend nav behind notch/status-bar */
-nav { padding-top: env(safe-area-inset-top,0px); }
-@media (min-width:641px){ nav { height:calc(var(--nav-h) + env(safe-area-inset-top,0px)); } }
 </style>
 </head>
 <body>
