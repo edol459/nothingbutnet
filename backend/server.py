@@ -4153,6 +4153,7 @@ def get_top_rated_games():
     season_type = request.args.get("season_type", "").strip()
     min_reviews = int(request.args.get("min_reviews", 1))
     limit       = min(int(request.args.get("limit", 25)), 100)
+    days        = request.args.get("days")
 
     all_seasons = season.lower() in ("all", "")
 
@@ -4163,6 +4164,8 @@ def get_top_rated_games():
         s_params  = [] if all_seasons else [season]
         st_filter = "AND season_type = %s" if season_type else ""
         st_params = [season_type] if season_type else []
+        d_filter  = "AND game_date >= CURRENT_DATE - INTERVAL '%s days'" if days else ""
+        d_params  = [int(days)] if days else []
         cur.execute(f"""
             SELECT *
             FROM games
@@ -4170,11 +4173,12 @@ def get_top_rated_games():
               AND league = %s
               {s_filter}
               {st_filter}
+              {d_filter}
               AND review_count >= %s
             ORDER BY (rating_sum::float / NULLIF(review_count, 0)) DESC NULLS LAST,
                      review_count DESC
             LIMIT %s
-        """, [league] + s_params + st_params + [min_reviews, limit])
+        """, [league] + s_params + st_params + d_params + [min_reviews, limit])
         games = [_format_game(dict(r)) for r in cur.fetchall()]
         cur.close(); conn.close()
         return jsonify({"games": games})
