@@ -236,6 +236,8 @@ nav {
 .install-step-text { font-size:14px; color:var(--ink2); line-height:1.5; padding-top:3px; }
 .install-step-text strong { color:var(--ink); }
 @media (max-width:640px) {
+  :root { --nav-h:100px; }
+  nav { height:auto; padding:0 16px; flex-wrap:wrap; align-items:center; }
   .nav-logo-link { padding:13px 0; }
   .nav-right { padding:13px 0; }
   .nav-links { position:static; transform:none; order:10; flex:0 0 100%; justify-content:space-evenly; overflow-x:auto; scrollbar-width:none; flex-wrap:nowrap; border-top:1px solid var(--rule); padding:7px 0 9px; gap:0; }
@@ -243,6 +245,10 @@ nav {
   .nav-link { white-space:nowrap; padding:5px 10px; }
   .install-btn { display:flex; }
 }
+
+/* safe-area: extend nav behind notch/status-bar */
+nav { padding-top: env(safe-area-inset-top,0px); }
+@media (min-width:641px){ nav { height:calc(var(--nav-h) + env(safe-area-inset-top,0px)); } }
 </style>
 </head>
 <body>
