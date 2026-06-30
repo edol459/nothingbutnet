@@ -506,9 +506,26 @@ def send_email_report(health, threshold=FAIL):
     msg.attach(MIMEText(health.render(), "plain", "utf-8"))
     msg.attach(MIMEText(health.render_html(), "html", "utf-8"))
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as s:
-        s.login(sender, app_pw)
-        s.sendmail(sender, [recipient], msg.as_string())
+    # Railway networking is IPv6-first but has no IPv6 route to smtp.gmail.com,
+    # so smtplib fails with "[Errno 101] Network is unreachable". Force IPv4 by
+    # filtering getaddrinfo for the duration of the send (scoped + restored, so
+    # importing this module elsewhere is unaffected). Hostname is preserved for
+    # TLS cert verification.
+    import socket as _socket
+    _orig_gai = _socket.getaddrinfo
+
+    def _ipv4_only(*args, **kwargs):
+        res = _orig_gai(*args, **kwargs)
+        v4 = [r for r in res if r[0] == _socket.AF_INET]
+        return v4 or res
+
+    _socket.getaddrinfo = _ipv4_only
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as s:
+            s.login(sender, app_pw)
+            s.sendmail(sender, [recipient], msg.as_string())
+    finally:
+        _socket.getaddrinfo = _orig_gai
     return True, f"emailed {recipient} (subject: {subject})"
 
 
