@@ -134,6 +134,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .btn-primary:hover { opacity: 0.85; color: #fff; }
 .btn-friends { background: var(--paper2); }
 .btn-unfriend:hover { border-color: var(--red); color: var(--red); }
+.btn-signout:hover { border-color: var(--red); color: var(--red); }
 .night-toggle-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .night-toggle-label { font-size: 13px; color: var(--ink3); font-family: var(--ff-sans); }
 .night-toggle { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
@@ -697,7 +698,6 @@ async function loadAuth() {
   if (ME) {
     slot.innerHTML = `
       <a href="/profile" style="text-decoration:none;cursor:pointer">${ME.avatar_url ? `<img class="nav-auth-avatar" src="${ME.avatar_url}" alt="">` : `<div class="nav-auth-avatar-initial">${ME.display_name.charAt(0).toUpperCase()}</div>`}</a>
-      <button class="nav-signout-btn" onclick="signOut()">Sign out</button>
     `;
   } else {
     slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login?next=${encodeURIComponent(window.location.pathname)}">Sign in</a>`;
@@ -759,6 +759,7 @@ function renderProfile() {
         </label>
         <span class="night-toggle-label">Night mode</span>
       </div>
+      <button class="btn btn-signout" onclick="signOut()">Sign out</button>
     `;
   } else if (ME) {
     const fs = PROFILE.friend_status;
@@ -1841,7 +1842,6 @@ async function uploadAvatar(dataUrl) {
     if (navSlot) {
       navSlot.innerHTML = `
         <a href="/profile" style="text-decoration:none;cursor:pointer"><img class="nav-auth-avatar" src="${dataUrl}" alt=""></a>
-        <button class="nav-signout-btn" onclick="signOut()">Sign out</button>
       `;
     }
     toast('Profile photo updated');

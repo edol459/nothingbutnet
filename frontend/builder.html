@@ -1526,8 +1526,7 @@ async function initNavAuth() {
     const user = data.user;
     if (user) {
       slot.innerHTML = `
-        <a href="/profile" style="text-decoration:none">${user.avatar_url ? `<img class="nav-auth-avatar" src="${user.avatar_url}" alt="">` : ''}</a>
-        <button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>`;
+        <a href="/profile" style="text-decoration:none">${user.avatar_url ? `<img class="nav-auth-avatar" src="${user.avatar_url}" alt="">` : ''}</a>`;
       if (typeof user.night_mode !== 'undefined') {
         const enabled = !!user.night_mode;
         localStorage.setItem('ydkball_night', enabled ? '1' : '0');

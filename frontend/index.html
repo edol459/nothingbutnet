@@ -43,7 +43,6 @@ html.night-mode {
 *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
 html { scroll-behavior:smooth; overflow-x:clip; }
 body {
-  position:relative;
   font-family:var(--ff-sans);
   background:var(--paper);
   color:var(--ink);
@@ -86,6 +85,7 @@ nav {
   border-bottom:1px solid var(--rule);
   display:flex; align-items:center;
   padding:0 24px; gap:22px; z-index:100;
+  will-change:transform;
 }
 .nav-logo-link { display:flex; align-items:center; gap:9px; text-decoration:none; flex-shrink:0; }
 .nav-logo-link img { height:28px; width:auto; }
@@ -979,7 +979,7 @@ async function initNavAuth() {
   try {
     const d = await (await fetch(`${API}/auth/me`)).json(); const u=d.user;
     if (u) {
-      slot.innerHTML = `<a href="/profile" style="text-decoration:none;cursor:pointer">${u.avatar_url?`<img class="nav-auth-avatar" src="${u.avatar_url}" alt="">`:''}</a><button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>`;
+      slot.innerHTML = `<a href="/profile" style="text-decoration:none;cursor:pointer">${u.avatar_url?`<img class="nav-auth-avatar" src="${u.avatar_url}" alt="">`:''}</a>`;
       if (typeof u.night_mode!=='undefined') {
         const en = !!u.night_mode;
         localStorage.setItem('ydkball_night', en?'1':'0');
@@ -1030,6 +1030,17 @@ loadPerformers();
 loadNews();
 loadReviews();
 initNavAuth();
+
+// ── Sync --nav-h to the real rendered nav height (prevents the nav from
+//    covering page content when it wraps to two rows on mobile) ──────────
+function syncNavHeight() {
+  const nav = document.querySelector('nav');
+  if (nav) document.documentElement.style.setProperty('--nav-h', nav.offsetHeight + 'px');
+}
+window.addEventListener('load', () => requestAnimationFrame(syncNavHeight));
+window.addEventListener('resize', syncNavHeight);
+window.addEventListener('orientationchange', () => setTimeout(syncNavHeight, 120));
+requestAnimationFrame(syncNavHeight);
 </script>
 </body>
 </html>

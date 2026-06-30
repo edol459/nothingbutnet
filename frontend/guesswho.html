@@ -485,8 +485,7 @@ async function initNavAuth(){
     const res = await fetch(API + '/auth/me', {credentials:'include'});
     const user = (await res.json()).user;
     if(user){
-      slot.innerHTML = `<a href="/profile" style="text-decoration:none">${user.avatar_url?`<img class="nav-auth-avatar" src="${user.avatar_url}" alt="">`:''}</a>
-        <button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>`;
+      slot.innerHTML = `<a href="/profile" style="text-decoration:none">${user.avatar_url?`<img class="nav-auth-avatar" src="${user.avatar_url}" alt="">`:''}</a>`;
       if(typeof user.night_mode!=='undefined'){ document.documentElement.classList.toggle('night-mode', !!user.night_mode); }
     } else {
       slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login?next=${encodeURIComponent(location.pathname)}">Sign in</a>`;

@@ -3374,7 +3374,6 @@ async function initNavAuth() {
     if (user) {
       slot.innerHTML = `
         <a href="/profile" style="text-decoration:none;cursor:pointer">${user.avatar_url ? `<img class="nav-auth-avatar" src="${user.avatar_url}" alt="">` : ''}</a>
-        <button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>
       `;
       // Sync night mode from server preference
       if (typeof user.night_mode !== 'undefined') {

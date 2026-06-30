@@ -664,7 +664,6 @@ async function loadAuth() {
     if (user) {
       slot.innerHTML = `
         <a href="/profile" style="text-decoration:none;cursor:pointer">${user.avatar_url ? `<img class="nav-auth-avatar" src="${user.avatar_url}" alt="">` : ''}</a>
-        <button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>
       `;
     } else {
       slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login?next=${encodeURIComponent(window.location.pathname)}">Sign in</a>`;

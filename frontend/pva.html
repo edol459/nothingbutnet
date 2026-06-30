@@ -934,7 +934,7 @@ async function loadAuth() {
   try {
     const d = await (await fetch('/auth/me')).json(); const u = d.user;
     if (u) {
-      slot.innerHTML = `<a href="/profile" style="text-decoration:none;cursor:pointer">${u.avatar_url?`<img class="nav-auth-avatar" src="${u.avatar_url}" alt="">`:''}</a><button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>`;
+      slot.innerHTML = `<a href="/profile" style="text-decoration:none;cursor:pointer">${u.avatar_url?`<img class="nav-auth-avatar" src="${u.avatar_url}" alt="">`:''}</a>`;
       if (typeof u.night_mode !== 'undefined') {
         const en = !!u.night_mode;
         localStorage.setItem('ydkball_night', en?'1':'0');
