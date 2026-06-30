@@ -48,7 +48,9 @@ CREATE INDEX IF NOT EXISTS idx_pipeline_runs_pipeline_started
 
 
 def _conn():
-    return psycopg2.connect(os.getenv("DATABASE_URL"), connect_timeout=15)
+    # Prefer internal DATABASE_URL; fall back to Railway's public proxy var.
+    url = os.getenv("DATABASE_URL") or os.getenv("DATABASE_PUBLIC_URL")
+    return psycopg2.connect(url, connect_timeout=15)
 
 
 def ensure_table(cur):

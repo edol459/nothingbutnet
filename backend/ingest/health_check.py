@@ -41,6 +41,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _db_url():
+    """Railway exposes DATABASE_URL (internal) and DATABASE_PUBLIC_URL (proxy).
+    Prefer the internal one; fall back to public so a service that only has the
+    public var (or an empty DATABASE_URL) still connects."""
+    return os.getenv("DATABASE_URL") or os.getenv("DATABASE_PUBLIC_URL")
+
+
 # ── Severity levels ───────────────────────────────────────────────────────────
 OK, WARN, FAIL, INFO = "OK", "WARN", "FAIL", "INFO"
 ICON = {OK: "✅", WARN: "🟡", FAIL: "🔴", INFO: "ℹ️"}
@@ -537,9 +545,10 @@ def main():
                     help="email only when status is at least this severe (default: fail)")
     args = ap.parse_args()
 
-    db_url = os.getenv("DATABASE_URL")
+    db_url = _db_url()
     if not db_url:
-        print("ERROR: DATABASE_URL not set (check .env)", file=sys.stderr)
+        print("ERROR: neither DATABASE_URL nor DATABASE_PUBLIC_URL is set "
+              "(check .env / Railway service variables)", file=sys.stderr)
         sys.exit(2)
 
     today = (datetime.strptime(args.date, "%Y-%m-%d").date()
