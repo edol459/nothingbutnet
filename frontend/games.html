@@ -26,7 +26,7 @@
   html.night-mode{ --card:#222228; }
   html{overflow-x:clip}
   body{font-family:var(--ff-sans); background:var(--paper); color:var(--ink); min-height:100vh;
-       -webkit-font-smoothing:antialiased; position:relative}
+       -webkit-font-smoothing:antialiased; position:relative; overflow-x:clip}
   body::before{content:''; position:fixed; inset:0; z-index:9999; pointer-events:none; opacity:.022;
     background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
 
@@ -60,7 +60,7 @@
   }
 
   /* ── page ────────────────────────────────────────────── */
-  .page{padding-top:calc(var(--nav-h) + env(safe-area-inset-top,0px))}
+  .page{padding-top:var(--nav-h)}
   .wrap{max-width:760px; margin:0 auto; padding:40px 20px 80px}
   .pagehead{margin-bottom:6px}
   .eyebrow{font-family:var(--ff-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--orange)}
@@ -166,10 +166,6 @@ nav {
 }
 
 
-/* ── Safe area (viewport-fit pages) ──────────────────────────── */
-nav { top: env(safe-area-inset-top, 0px); }
-nav::before { content:''; position:absolute; left:0; right:0;
-  height:env(safe-area-inset-top,0px); bottom:100%; background:var(--paper); z-index:-1; }
 </style>
 </head>
 <body>

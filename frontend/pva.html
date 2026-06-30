@@ -88,7 +88,7 @@ nav {
 .nav-auth { margin-left: auto; flex-shrink: 0; }
 
 /* ── Page layout ─────────────────────────────────────────────── */
-.page { padding-top: calc(var(--nav-h) + env(safe-area-inset-top,0px)); display: flex; flex-direction: column; min-height: 100vh; }
+.page { padding-top: var(--nav-h); display: flex; flex-direction: column; min-height: 100vh; }
 
 /* ── Hero ─────────────────────────────────────────────────────── */
 .hero {
@@ -316,6 +316,14 @@ nav {
 .nav-link.active { color:var(--ink); background:var(--paper3); }
 .nav-right { margin-left:auto; display:flex; align-items:center; gap:12px; flex-shrink:0; }
 #nav-live { display:none; align-items:center; gap:6px; font-family:var(--ff-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--red); }
+.nav-auth-avatar{width:28px; height:28px; border-radius:50%; object-fit:cover; border:1.5px solid var(--rule)}
+.nav-signin-btn{font-family:var(--ff-mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+                padding:5px 12px; background:var(--orange); color:#fff; border:none; border-radius:4px;
+                cursor:pointer; text-decoration:none}
+.nav-signin-btn:hover{opacity:.85}
+.nav-signout-btn{font-family:var(--ff-mono); font-size:10px; letter-spacing:.04em; color:var(--ink3);
+                 background:none; border:none; cursor:pointer; padding:4px 6px}
+.nav-signout-btn:hover{color:var(--ink)}
 .install-btn {
   display:none; align-items:center; gap:6px;
   font-family:var(--ff-mono); font-size:10px; letter-spacing:.07em; text-transform:uppercase;
@@ -356,10 +364,6 @@ nav {
 }
 
 
-/* ── Safe area (viewport-fit pages) ──────────────────────────── */
-nav { top: env(safe-area-inset-top, 0px); }
-nav::before { content:''; position:absolute; left:0; right:0;
-  height:env(safe-area-inset-top,0px); bottom:100%; background:var(--paper); z-index:-1; }
 </style>
 </head>
 <body>
@@ -926,16 +930,25 @@ window.addEventListener('resize', () => {
 
 // ─── Nav auth (mirrors other pages) ──────────────────────────────────────────
 async function loadAuth() {
+  const slot = document.getElementById('nav-auth-slot'); if (!slot) return;
   try {
-    const res  = await fetch('/auth/me');
-    const slot = document.getElementById('nav-auth-slot');
-    if (res.ok) {
-      const u = await res.json();
-      slot.innerHTML = `<a href="/profile/${u.id}" style="font-family:var(--ff-mono);font-size:11px;color:var(--ink3);text-decoration:none;letter-spacing:0.06em;">${u.display_name || u.email}</a>`;
+    const d = await (await fetch('/auth/me')).json(); const u = d.user;
+    if (u) {
+      slot.innerHTML = `<a href="/profile" style="text-decoration:none;cursor:pointer">${u.avatar_url?`<img class="nav-auth-avatar" src="${u.avatar_url}" alt="">`:''}</a><button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>`;
+      if (typeof u.night_mode !== 'undefined') {
+        const en = !!u.night_mode;
+        localStorage.setItem('ydkball_night', en?'1':'0');
+        document.documentElement.classList.toggle('night-mode', en);
+      }
     } else {
-      slot.innerHTML = `<a href="/auth/google/login" style="font-family:var(--ff-mono);font-size:11px;color:var(--ink3);text-decoration:none;letter-spacing:0.06em;text-transform:uppercase;">Sign in</a>`;
+      slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login?next=${encodeURIComponent(window.location.pathname)}">Sign in</a>`;
     }
-  } catch {}
+  } catch {
+    slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login">Sign in</a>`;
+  }
+}
+function navSignOut() {
+  window.location.href = '/auth/logout?next=' + encodeURIComponent(window.location.pathname);
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────

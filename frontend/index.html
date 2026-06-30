@@ -49,6 +49,7 @@ body {
   color:var(--ink);
   min-height:100vh;
   -webkit-font-smoothing:antialiased;
+  overflow-x:clip;
 }
 body::before {
   content:'';
@@ -104,6 +105,14 @@ nav {
 .nav-link.active { color:var(--ink); background:var(--paper3); }
 .nav-right { margin-left:auto; display:flex; align-items:center; gap:12px; flex-shrink:0; }
 #nav-live { display:none; align-items:center; gap:6px; font-family:var(--ff-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--red); }
+.nav-auth-avatar{width:28px; height:28px; border-radius:50%; object-fit:cover; border:1.5px solid var(--rule)}
+.nav-signin-btn{font-family:var(--ff-mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+                padding:5px 12px; background:var(--orange); color:#fff; border:none; border-radius:4px;
+                cursor:pointer; text-decoration:none}
+.nav-signin-btn:hover{opacity:.85}
+.nav-signout-btn{font-family:var(--ff-mono); font-size:10px; letter-spacing:.04em; color:var(--ink3);
+                 background:none; border:none; cursor:pointer; padding:4px 6px}
+.nav-signout-btn:hover{color:var(--ink)}
 
 /* ── Ticker ─────────────────────────────────────────────────── */
 #ticker {
@@ -970,19 +979,22 @@ async function initNavAuth() {
   try {
     const d = await (await fetch(`${API}/auth/me`)).json(); const u=d.user;
     if (u) {
-      slot.innerHTML = `<a href="/profile" style="text-decoration:none;display:flex;align-items:center;">${u.avatar_url?`<img src="${u.avatar_url}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:1.5px solid var(--rule);">`:''}</a>`;
+      slot.innerHTML = `<a href="/profile" style="text-decoration:none;cursor:pointer">${u.avatar_url?`<img class="nav-auth-avatar" src="${u.avatar_url}" alt="">`:''}</a><button class="nav-signout-btn" onclick="navSignOut()">Sign out</button>`;
       if (typeof u.night_mode!=='undefined') {
         const en = !!u.night_mode;
         localStorage.setItem('ydkball_night', en?'1':'0');
         document.documentElement.classList.toggle('night-mode', en);
       }
     } else {
-      slot.innerHTML = `<a href="/auth/google/login?next=${encodeURIComponent(location.pathname)}" style="font-family:var(--ff-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:6px 14px;background:var(--orange);color:#fff;border-radius:4px;text-decoration:none;white-space:nowrap;" onmouseenter="this.style.opacity='.85'" onmouseleave="this.style.opacity='1'">Sign in</a>`;
+      slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login?next=${encodeURIComponent(location.pathname)}">Sign in</a>`;
     }
   } catch(e) {
     const slot2 = document.getElementById('nav-auth-slot');
-    if (slot2) slot2.innerHTML = `<a href="/auth/google/login" style="font-family:var(--ff-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:6px 14px;background:var(--orange);color:#fff;border-radius:4px;text-decoration:none;">Sign in</a>`;
+    if (slot2) slot2.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login">Sign in</a>`;
   }
+}
+function navSignOut() {
+  window.location.href = '/auth/logout?next=' + encodeURIComponent(window.location.pathname);
 }
 
 // ── PWA install ────────────────────────────────────────────────

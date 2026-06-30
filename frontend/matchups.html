@@ -96,7 +96,7 @@ nav {
 .nav-signout-btn:hover { color: var(--ink); }
 
 /* ── Layout ──────────────────────────────────────────────────── */
-.app { padding-top: calc(var(--nav-h) + env(safe-area-inset-top,0px)); display: flex; flex-direction: column; min-height: 100vh; }
+.app { padding-top: var(--nav-h); display: flex; flex-direction: column; min-height: 100vh; }
 
 /* ── Controls bar ────────────────────────────────────────────── */
 .controls-bar {
@@ -382,10 +382,6 @@ nav {
 }
 
 
-/* ── Safe area (viewport-fit pages) ──────────────────────────── */
-nav { top: env(safe-area-inset-top, 0px); }
-nav::before { content:''; position:absolute; left:0; right:0;
-  height:env(safe-area-inset-top,0px); bottom:100%; background:var(--paper); z-index:-1; }
 </style>
 </head>
 <body>
