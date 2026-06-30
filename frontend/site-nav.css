@@ -1,0 +1,117 @@
+/* ============================================================
+   ydkball — canonical site header
+   One implementation shared across every page. Uses each page's
+   own CSS custom properties (--paper, --ink, --orange, fonts…).
+   ============================================================ */
+
+/* Blend any iOS overscroll / status-bar area with the header. */
+html { background: var(--paper); }
+
+.site-nav {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  /* Fill the notch / status-bar area with the header background
+     (requires viewport-fit=cover; resolves to 0 elsewhere). */
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.site-nav__bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 58px;
+  padding: 0 24px;
+}
+
+.site-nav__brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+.site-nav__brand img { height: 28px; width: auto; display: block; }
+.site-nav__word {
+  font-family: var(--ff-serif);
+  font-size: 21px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  line-height: 1;
+}
+.site-nav__word span { color: var(--orange); }
+
+.site-nav__links {
+  display: flex;
+  gap: 2px;
+  margin: 0 auto; /* center between brand and auth */
+}
+.site-nav__links a {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  text-decoration: none;
+  padding: 6px 13px;
+  border-radius: 4px;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
+}
+.site-nav__links a:hover { color: var(--ink); background: var(--paper2); }
+.site-nav__links a.active { color: var(--ink); background: var(--paper3); }
+
+.site-nav__auth {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 28px;
+}
+.site-nav__avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid var(--rule);
+  display: block;
+}
+.site-nav__avatar--initial {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--paper3); color: var(--ink2);
+  font-family: var(--ff-mono); font-size: 12px;
+}
+.site-nav__signin {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  background: var(--orange);
+  color: #fff;
+  border-radius: 4px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* ── Mobile: two rows (brand + avatar, then links full-width) ── */
+@media (max-width: 640px) {
+  .site-nav__bar {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 0 16px;
+    gap: 0;
+  }
+  .site-nav__brand { padding: 9px 0; }
+  .site-nav__auth { padding: 9px 0; margin-left: auto; }
+  .site-nav__links {
+    order: 10;
+    flex: 0 0 100%;
+    margin: 0;
+    justify-content: space-between;
+    border-top: 1px solid var(--rule);
+    padding: 5px 0;
+  }
+  .site-nav__links a { padding: 6px 6px; }
+}

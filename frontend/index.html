@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>ydkball</title>
 <meta name="description" content="NBA & WNBA scores, stats, and game reviews.">
 <meta property="og:site_name" content="ydkball">
@@ -289,6 +289,7 @@ nav {
 }
 
 </style>
+  <link rel="stylesheet" href="/site-nav.css">
 </head>
 <body>
 
@@ -303,28 +304,22 @@ nav {
 </div>
 
 <!-- nav -->
-<nav>
-  <a class="nav-logo-link" href="/">
-    <img src="/transparent.png" alt="">
-    <span class="nav-wordmark">ydk<span>ball</span></span>
-  </a>
-  <div class="nav-links">
-    <a class="nav-link active" href="/">Home</a>
-    <a class="nav-link" href="/reviews">Reviews</a>
-    <a class="nav-link" href="/games">Games</a>
-    <a class="nav-link" href="/stats">Stats</a>
+<!-- ── Site header (canonical) ── -->
+<header class="site-nav">
+  <div class="site-nav__bar">
+    <a class="site-nav__brand" href="/">
+      <img src="/transparent.png" alt="">
+      <span class="site-nav__word">ydk<span>ball</span></span>
+    </a>
+    <div class="site-nav__links" role="navigation" aria-label="Primary">
+      <a href="/">Home</a>
+      <a href="/reviews">Reviews</a>
+      <a href="/games">Games</a>
+      <a href="/stats">Stats</a>
+    </div>
+    <div class="site-nav__auth" id="nav-auth-slot"></div>
   </div>
-  <div class="nav-right">
-    <div id="nav-live"></div>
-    <button class="install-btn" id="install-btn" onclick="openInstallModal()">
-      <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M6.5 1v7M3.5 5.5l3 3 3-3"/><rect x="1" y="9" width="11" height="3" rx="1"/>
-      </svg>
-      Add to Home
-    </button>
-    <div id="nav-auth-slot"></div>
-  </div>
-</nav>
+</header>
 
 <!-- live ticker -->
 <div id="ticker">
@@ -998,7 +993,7 @@ function navSignOut() {
 const isIOS        = /iphone|ipad|ipod/i.test(navigator.userAgent);
 const isAndroid    = /android/i.test(navigator.userAgent);
 const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
-if ((isIOS||isAndroid) && !isStandalone) document.getElementById('install-btn').style.display='flex';
+if ((isIOS||isAndroid) && !isStandalone) { const ib=document.getElementById('install-btn'); if(ib) ib.style.display='flex'; }
 
 function openInstallModal() {
   document.getElementById('install-steps').innerHTML = isIOS
@@ -1026,7 +1021,7 @@ loadScoreboard();
 loadPerformers();
 loadNews();
 loadReviews();
-initNavAuth();
+/* initNavAuth(); — replaced by /site-nav.js */
 
 // ── Sync --nav-h to the real rendered nav height (prevents the nav from
 //    covering page content when it wraps to two rows on mobile) ──────────
@@ -1039,5 +1034,6 @@ window.addEventListener('resize', syncNavHeight);
 window.addEventListener('orientationchange', () => setTimeout(syncNavHeight, 120));
 requestAnimationFrame(syncNavHeight);
 </script>
+  <script src="/site-nav.js"></script>
 </body>
 </html>

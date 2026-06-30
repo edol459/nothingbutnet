@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Game Preview – ydkball</title>
 <meta name="description" content="NBA game preview with team stats and head-to-head history.">
 <meta property="og:site_name" content="ydkball">
@@ -115,7 +115,7 @@ nav {
 
 /* ── Page ────────────────────────────────────────────────────── */
 .page {
-  padding-top: var(--nav-h);
+  padding-top: 0;
   max-width: 760px;
   margin: 0 auto;
   padding-left: 20px;
@@ -511,31 +511,26 @@ nav {
 }
 
 </style>
+  <link rel="stylesheet" href="/site-nav.css">
 </head>
 <body>
 
-    <nav>
-    <a class="nav-logo-link" href="/">
+    <!-- ── Site header (canonical) ── -->
+<header class="site-nav">
+  <div class="site-nav__bar">
+    <a class="site-nav__brand" href="/">
       <img src="/transparent.png" alt="">
-      <span class="nav-wordmark">ydk<span>ball</span></span>
+      <span class="site-nav__word">ydk<span>ball</span></span>
     </a>
-    <div class="nav-links">
-      <a class="nav-link" href="/">Home</a>
-      <a class="nav-link" href="/reviews">Reviews</a>
-      <a class="nav-link" href="/games">Games</a>
-      <a class="nav-link" href="/stats">Stats</a>
+    <div class="site-nav__links" role="navigation" aria-label="Primary">
+      <a href="/">Home</a>
+      <a href="/reviews">Reviews</a>
+      <a href="/games">Games</a>
+      <a href="/stats">Stats</a>
     </div>
-    <div class="nav-right">
-      <div id="nav-live"></div>
-      <button class="install-btn" id="install-btn" onclick="openInstallModal()">
-        <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M6.5 1v7M3.5 5.5l3 3 3-3"/><rect x="1" y="9" width="11" height="3" rx="1"/>
-        </svg>
-        Add to Home
-      </button>
-      <div id="nav-auth-slot"></div>
-    </div>
-  </nav>
+    <div class="site-nav__auth" id="nav-auth-slot"></div>
+  </div>
+</header>
 
 <div class="page">
 
@@ -803,8 +798,9 @@ async function initNavAuth() {
 function navSignOut() {
   window.location.href = '/auth/logout?next=' + encodeURIComponent(window.location.pathname);
 }
-initNavAuth();
+/* initNavAuth(); — replaced by /site-nav.js */
 
 </script>
+  <script src="/site-nav.js"></script>
 </body>
 </html>
