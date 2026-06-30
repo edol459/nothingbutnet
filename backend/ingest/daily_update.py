@@ -22,6 +22,7 @@ import subprocess
 from datetime import datetime
 from dotenv import load_dotenv
 import psycopg2
+import pipeline_status
 
 load_dotenv()
 
@@ -124,16 +125,27 @@ def main():
         ),
     ]
 
+    run_id = pipeline_status.start_run(pipeline_status.CLOUD_DAILY)
     failed_steps = []
-    for script_name, label, args in steps:
-        path = script_name if os.path.isabs(script_name) else os.path.join(base, script_name)
-        if not os.path.exists(path):
-            print(f"\n⚠️  Skipping '{label}' — {script_name} not found")
-            continue
-        if not run(path, label, args):
-            failed_steps.append(label)
-            # All failures are non-fatal — log and continue
-            print(f"   ⚠️  Continuing despite failure…")
+    step_results = []
+    try:
+        for script_name, label, args in steps:
+            path = script_name if os.path.isabs(script_name) else os.path.join(base, script_name)
+            if not os.path.exists(path):
+                print(f"\n⚠️  Skipping '{label}' — {script_name} not found")
+                step_results.append({"label": label, "ok": None, "skipped": True})
+                continue
+            ok = run(path, label, args)
+            step_results.append({"label": label, "ok": ok, "skipped": False})
+            if not ok:
+                failed_steps.append(label)
+                # All failures are non-fatal — log and continue
+                print(f"   ⚠️  Continuing despite failure…")
+        status = "success" if not failed_steps else "partial"
+        pipeline_status.finish_run(run_id, status, step_results, failed_steps)
+    except Exception as e:
+        pipeline_status.finish_run(run_id, "failed", step_results, failed_steps, str(e))
+        raise
 
     print(f"\n{'='*60}")
     if failed_steps:

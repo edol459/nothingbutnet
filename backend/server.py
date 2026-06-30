@@ -4852,6 +4852,114 @@ def revenuecat_webhook():
     return jsonify({"ok": True})
 
 
+# ── Admin: founder insights dashboard ─────────────────────────
+import sys as _sys_admin
+_sys_admin.path.insert(0, os.path.join(os.path.dirname(__file__), "ingest"))
+
+
+def _admin_health_panel() -> dict:
+    """Run the data health engine (read-only) and shape it for the dashboard."""
+    import health_check  # noqa: E402  — from backend/ingest
+    # The engine uses positional rows, so give it a plain (non-RealDict) connection.
+    hconn = psycopg2.connect(DATABASE_URL, connect_timeout=10)
+    try:
+        h = health_check.collect(hconn, write_snapshot=False)
+    finally:
+        hconn.close()
+    ov = h.overall()
+    sections = []
+    for r in h.results:
+        if not sections or sections[-1]["name"] != r["section"]:
+            if not any(s["name"] == r["section"] for s in sections):
+                sections.append({"name": r["section"], "checks": []})
+        for s in sections:
+            if s["name"] == r["section"]:
+                s["checks"].append({"status": r["status"], "name": r["name"],
+                                    "detail": r["detail"]})
+                break
+    todos = [{"status": r["status"], "section": r["section"], "name": r["name"],
+              "detail": r["detail"]}
+             for r in h.results if r["status"] in ("FAIL", "WARN")]
+    todos.sort(key=lambda r: 0 if r["status"] == "FAIL" else 1)
+    return {"overall": ov, "todos": todos, "sections": sections,
+            "n_fail": sum(r["status"] == "FAIL" for r in h.results),
+            "n_warn": sum(r["status"] == "WARN" for r in h.results)}
+
+
+@app.route("/api/admin/dashboard")
+@_admin_required
+def admin_dashboard():
+    from datetime import datetime as _dt
+    conn = get_conn()
+    cur = conn.cursor()
+
+    # ── Growth ──────────────────────────────────────────────
+    cur.execute("SELECT COUNT(*) AS n FROM users")
+    total_users = cur.fetchone()["n"]
+    cur.execute("""SELECT
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 day')  AS d1,
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days') AS d7,
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')AS d30
+        FROM users""")
+    g = cur.fetchone()
+    cur.execute("""SELECT created_at::date AS d, COUNT(*) AS n
+        FROM users WHERE created_at >= NOW() - INTERVAL '14 days'
+        GROUP BY 1 ORDER BY 1""")
+    signups_daily = [{"date": str(r["d"]), "count": r["n"]} for r in cur.fetchall()]
+
+    # ── Engagement (xp_events + game results) ───────────────
+    cur.execute("""SELECT
+        COUNT(DISTINCT user_id) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')  AS active_7d,
+        COUNT(DISTINCT user_id) FILTER (WHERE created_at >= NOW() - INTERVAL '1 day')   AS active_1d,
+        COUNT(*) FILTER (WHERE event_type='app_open' AND created_at >= NOW() - INTERVAL '7 days') AS opens_7d
+        FROM xp_events""")
+    e = cur.fetchone()
+    cur.execute("""SELECT event_type, COUNT(*) AS n FROM xp_events
+        WHERE created_at >= NOW() - INTERVAL '30 days'
+        GROUP BY 1 ORDER BY 2 DESC""")
+    events_30d = [{"type": r["event_type"], "count": r["n"]} for r in cur.fetchall()]
+
+    def _safe_count(sql):
+        try:
+            cur.execute(sql)
+            return cur.fetchone()["n"]
+        except Exception:
+            conn.rollback()
+            return None
+
+    hol_7d = _safe_count("SELECT COUNT(*) AS n FROM survival_results WHERE created_at >= NOW() - INTERVAL '7 days'")
+    gw_7d  = _safe_count("SELECT COUNT(*) AS n FROM poeltl_results  WHERE created_at >= NOW() - INTERVAL '7 days'")
+    rev_7d = _safe_count("SELECT COUNT(*) AS n FROM game_reviews    WHERE created_at >= NOW() - INTERVAL '7 days'")
+
+    # ── Revenue (current snapshot from is_pro; history needs event logging) ──
+    cur.execute("SELECT COUNT(*) AS n FROM users WHERE is_pro = TRUE")
+    pro_users = cur.fetchone()["n"]
+    price = float(os.getenv("PRO_PRICE_USD", "4.99"))
+
+    return jsonify({
+        "generated_at": _dt.now().isoformat(timespec="seconds"),
+        "health": _admin_health_panel(),
+        "growth": {
+            "total_users": total_users,
+            "new_today": g["d1"], "new_7d": g["d7"], "new_30d": g["d30"],
+            "signups_daily": signups_daily,
+        },
+        "engagement": {
+            "active_1d": e["active_1d"], "active_7d": e["active_7d"],
+            "app_opens_7d": e["opens_7d"],
+            "hol_plays_7d": hol_7d, "guesswho_plays_7d": gw_7d, "reviews_7d": rev_7d,
+            "events_30d": events_30d,
+        },
+        "revenue": {
+            "pro_users": pro_users,
+            "price_usd": price,
+            "est_mrr": round(pro_users * price, 2),
+            "note": "Estimated from current Pro count × PRO_PRICE_USD. "
+                    "Add revenue-event logging for true MRR/churn history.",
+        },
+    })
+
+
 # ── Game Lists ────────────────────────────────────────────────
 
 def _list_is_owner(list_id: int, user_id: int, cur) -> bool:

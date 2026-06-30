@@ -22,7 +22,9 @@ import psycopg2.extras
 from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ingest"))
 import survival_api as sa  # noqa: E402
+import pipeline_status      # noqa: E402  — from backend/ingest
 
 load_dotenv()
 
@@ -48,18 +50,34 @@ def main():
         today = datetime.datetime.now(ZoneInfo("America/New_York")).date()   # daily = ET day
         dates = [(today + datetime.timedelta(days=d)).isoformat() for d in range(args.days)]
 
-    for d in dates:
-        if not args.force:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1 FROM survival_daily WHERE date = %s", (d,))
-                if cur.fetchone():
-                    print(f"  {d}  already generated — skipping (use --force to regenerate)")
-                    continue
-        t = datetime.datetime.now()
-        run = sa.ensure_daily(conn, d, force=args.force, fresh=args.fresh)
-        secs = (datetime.datetime.now() - t).total_seconds()
-        verb = "regenerated" if args.force else "generated"
-        print(f"  {d}  {verb} {len(run)} questions in {secs:.0f}s")
+    run_id = pipeline_status.start_run(pipeline_status.PUZZLE_GEN)
+    step_results = []
+    failed = []
+    try:
+        for d in dates:
+            if not args.force:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1 FROM survival_daily WHERE date = %s", (d,))
+                    if cur.fetchone():
+                        print(f"  {d}  already generated — skipping (use --force to regenerate)")
+                        step_results.append({"label": d, "ok": None, "skipped": True})
+                        continue
+            t = datetime.datetime.now()
+            try:
+                run = sa.ensure_daily(conn, d, force=args.force, fresh=args.fresh)
+                secs = (datetime.datetime.now() - t).total_seconds()
+                verb = "regenerated" if args.force else "generated"
+                print(f"  {d}  {verb} {len(run)} questions in {secs:.0f}s")
+                step_results.append({"label": d, "ok": True, "skipped": False})
+            except Exception as e:
+                print(f"  {d}  FAILED: {e}")
+                step_results.append({"label": d, "ok": False, "skipped": False})
+                failed.append(d)
+        status = "success" if not failed else "partial"
+        pipeline_status.finish_run(run_id, status, step_results, failed)
+    except Exception as e:
+        pipeline_status.finish_run(run_id, "failed", step_results, failed, str(e))
+        raise
 
     conn.close()
 
