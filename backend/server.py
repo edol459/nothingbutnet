@@ -4796,6 +4796,59 @@ def admin_page():
 
 
 # ── RevenueCat webhook ────────────────────────────────────────
+def _log_revenue_event(event: dict):
+    """Best-effort append of a RevenueCat event to revenue_events.
+
+    Never raises — revenue history must not jeopardise the webhook's 200 to
+    RevenueCat (a non-200 makes RevenueCat retry/alert). Captures every event
+    type (including anonymous / unconcerned ones) so MRR/churn history accrues.
+    Idempotent on the RevenueCat event id.
+    """
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        try:
+            uid = int(event.get("app_user_id"))
+        except (ValueError, TypeError):
+            uid = None
+        ts_ms = event.get("event_timestamp_ms") or event.get("purchased_at_ms")
+        event_at = _dt.fromtimestamp(ts_ms / 1000, tz=_tz.utc) if ts_ms else None
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS revenue_events (
+                id           SERIAL PRIMARY KEY,
+                event_id     TEXT UNIQUE,
+                event_type   TEXT NOT NULL,
+                app_user_id  TEXT,
+                user_id      INTEGER,
+                product_id   TEXT,
+                store        TEXT,
+                environment  TEXT,
+                period_type  TEXT,
+                price        REAL,
+                currency     TEXT,
+                event_at     TIMESTAMPTZ,
+                payload      JSONB,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
+            )""")
+        cur.execute("""
+            INSERT INTO revenue_events
+                (event_id, event_type, app_user_id, user_id, product_id, store,
+                 environment, period_type, price, currency, event_at, payload)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (event_id) DO NOTHING""",
+            (event.get("id"), event.get("type", ""),
+             str(event.get("app_user_id") or ""), uid,
+             event.get("product_id"), event.get("store"),
+             event.get("environment"), event.get("period_type"),
+             event.get("price"), event.get("currency"), event_at,
+             json.dumps(event)))
+        conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        print(f"[webhook] revenue_events log failed (non-fatal): {e}", flush=True)
+
+
 @app.route("/api/webhooks/revenuecat", methods=["POST"])
 def revenuecat_webhook():
     """
@@ -4813,6 +4866,9 @@ def revenuecat_webhook():
     app_user_id  = event.get("app_user_id", "")
 
     print(f"[webhook] revenuecat event_type={event_type!r} app_user_id={app_user_id!r}", flush=True)
+
+    # Log every event for revenue history (best-effort; before any early return)
+    _log_revenue_event(event)
 
     # app_user_id is the string we passed to Purchases.logIn — our user's numeric ID
     try:
@@ -4931,10 +4987,16 @@ def admin_dashboard():
     gw_7d  = _safe_count("SELECT COUNT(*) AS n FROM poeltl_results  WHERE created_at >= NOW() - INTERVAL '7 days'")
     rev_7d = _safe_count("SELECT COUNT(*) AS n FROM game_reviews    WHERE created_at >= NOW() - INTERVAL '7 days'")
 
-    # ── Revenue (current snapshot from is_pro; history needs event logging) ──
+    # ── Revenue (current snapshot from is_pro + history from revenue_events) ──
     cur.execute("SELECT COUNT(*) AS n FROM users WHERE is_pro = TRUE")
     pro_users = cur.fetchone()["n"]
     price = float(os.getenv("PRO_PRICE_USD", "4.99"))
+
+    new_subs_7d  = _safe_count("SELECT COUNT(*) AS n FROM revenue_events WHERE event_type='INITIAL_PURCHASE' AND event_at >= NOW() - INTERVAL '7 days'")
+    new_subs_30d = _safe_count("SELECT COUNT(*) AS n FROM revenue_events WHERE event_type='INITIAL_PURCHASE' AND event_at >= NOW() - INTERVAL '30 days'")
+    churn_30d    = _safe_count("SELECT COUNT(*) AS n FROM revenue_events WHERE event_type IN ('CANCELLATION','EXPIRATION') AND event_at >= NOW() - INTERVAL '30 days'")
+    revenue_30d  = _safe_count("SELECT COALESCE(SUM(price),0) AS n FROM revenue_events WHERE event_type IN ('INITIAL_PURCHASE','RENEWAL','PRODUCT_CHANGE') AND event_at >= NOW() - INTERVAL '30 days'")
+    has_history  = (_safe_count("SELECT COUNT(*) AS n FROM revenue_events") or 0) > 0
 
     return jsonify({
         "generated_at": _dt.now().isoformat(timespec="seconds"),
@@ -4954,8 +5016,14 @@ def admin_dashboard():
             "pro_users": pro_users,
             "price_usd": price,
             "est_mrr": round(pro_users * price, 2),
-            "note": "Estimated from current Pro count × PRO_PRICE_USD. "
-                    "Add revenue-event logging for true MRR/churn history.",
+            "has_history": has_history,
+            "new_subs_7d": new_subs_7d,
+            "new_subs_30d": new_subs_30d,
+            "churn_30d": churn_30d,
+            "revenue_30d": round(revenue_30d, 2) if revenue_30d is not None else None,
+            "note": ("Live from RevenueCat events." if has_history else
+                     "MRR estimated from Pro count × PRO_PRICE_USD. "
+                     "Real MRR/churn history accrues from now as RevenueCat events arrive."),
         },
     })
 

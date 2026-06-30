@@ -358,6 +358,17 @@ async function renderInsights() {
       <div class="section-label">To-Do / Needs Attention</div>
       <div class="panel" id="ins-todos"></div>
 
+      <div class="section-label">Revenue</div>
+      <div class="grid">
+        ${kpi('Est. MRR', `$${nfmt(rev.est_mrr)}`, `${nfmt(rev.pro_users)} Pro × $${rev.price_usd}`)}
+        ${kpi('New Subs (30d)', rev.has_history ? nfmt(rev.new_subs_30d) : '—',
+              rev.has_history ? `${nfmt(rev.new_subs_7d)} in last 7d` : 'awaiting events')}
+        ${kpi('Churn (30d)', rev.has_history ? nfmt(rev.churn_30d) : '—', 'cancellations + expirations')}
+        ${kpi('Revenue (30d)', (rev.has_history && rev.revenue_30d!=null) ? `$${nfmt(rev.revenue_30d)}` : '—',
+              rev.has_history ? 'purchase + renewal events' : 'awaiting events')}
+      </div>
+      <div class="sub" style="color:var(--ink3);margin:-16px 0 4px">${rev.note}</div>
+
       <div class="section-label">Growth & Engagement</div>
       <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
         <div class="panel" id="ins-signups"></div>
