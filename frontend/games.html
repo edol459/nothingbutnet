@@ -24,16 +24,15 @@
     --nav-h: 58px; font-size:15px;
   }
   html.night-mode{ --card:#222228; }
-  html{overflow-x:clip}
+  html{overflow-x:clip; background:var(--paper)}
   body{font-family:var(--ff-sans); background:var(--paper); color:var(--ink); min-height:100vh;
        -webkit-font-smoothing:antialiased; overflow-x:clip}
   body::before{content:''; position:fixed; inset:0; z-index:9999; pointer-events:none; opacity:.022;
     background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
 
   /* ── nav (shared site nav) ───────────────────────────── */
-  nav{position:fixed; top:0; left:0; right:0; height:var(--nav-h); background:var(--paper);
-      border-bottom:1px solid var(--rule); display:flex; align-items:center; padding:0 24px; gap:24px; z-index:100;
-      will-change:transform}
+  nav{position:sticky; top:0; height:var(--nav-h); background:var(--paper);
+      border-bottom:1px solid var(--rule); display:flex; align-items:center; padding:0 24px; gap:24px; z-index:100}
   .nav-wordmark{font-family:var(--ff-serif); font-size:20px; color:var(--ink); letter-spacing:-.01em;
                 text-decoration:none; flex-shrink:0; display:flex; align-items:center}
   .nav-logo{height:26px; width:auto; margin-right:8px}
@@ -61,7 +60,7 @@
   }
 
   /* ── page ────────────────────────────────────────────── */
-  .page{padding-top:var(--nav-h)}
+  .page{padding-top:0}
   .wrap{max-width:760px; margin:0 auto; padding:40px 20px 80px}
   .pagehead{margin-bottom:6px}
   .eyebrow{font-family:var(--ff-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--orange)}
@@ -103,12 +102,11 @@
 
 /* ── Nav (updated) ──────────────────────────────────────────── */
 nav {
-  position:fixed; top:0; left:0; right:0;
+  position:sticky; top:0;
   height:var(--nav-h); background:var(--paper);
   border-bottom:1px solid var(--rule);
   display:flex; align-items:center;
   padding:0 24px; gap:22px; z-index:100;
-  will-change:transform;
 }
 .nav-logo-link { display:flex; align-items:center; gap:9px; text-decoration:none; flex-shrink:0; }
 .nav-logo-link img { height:28px; width:auto; }

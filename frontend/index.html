@@ -41,7 +41,7 @@ html.night-mode {
   color-scheme:dark;
 }
 *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
-html { scroll-behavior:smooth; overflow-x:clip; }
+html { scroll-behavior:smooth; overflow-x:clip; background:var(--paper); }
 body {
   font-family:var(--ff-sans);
   background:var(--paper);
@@ -80,12 +80,11 @@ html[data-introseen] #intro { display:none !important; }
 
 /* ── Nav ────────────────────────────────────────────────────── */
 nav {
-  position:fixed; top:0; left:0; right:0;
+  position:sticky; top:0;
   height:var(--nav-h); background:var(--paper);
   border-bottom:1px solid var(--rule);
   display:flex; align-items:center;
   padding:0 24px; gap:22px; z-index:100;
-  will-change:transform;
 }
 .nav-logo-link { display:flex; align-items:center; gap:9px; text-decoration:none; flex-shrink:0; }
 .nav-logo-link img { height:28px; width:auto; }
@@ -116,13 +115,13 @@ nav {
 
 /* ── Ticker ─────────────────────────────────────────────────── */
 #ticker {
-  display:none; position:fixed; top:var(--nav-h); left:0; right:0; z-index:99;
+  display:none; position:sticky; top:var(--nav-h); z-index:99;
   height:34px; background:var(--paper); overflow:hidden;
   border-bottom:1px solid var(--rule); align-items:center;
 }
 
 /* ── Page ───────────────────────────────────────────────────── */
-#page { padding-top:var(--nav-h); position:relative; z-index:1; }
+#page { position:relative; z-index:1; }
 
 /* ── Scoreboard ─────────────────────────────────────────────── */
 .scoreboard-section { padding:18px 32px 0; border-bottom:1px solid var(--rule); }
@@ -797,7 +796,6 @@ function renderTicker() {
   const games = _games.filter(g => g.gameStatus!==1);
   if (!games.length) {
     bar.style.display = 'none';
-    document.getElementById('page').style.paddingTop = 'var(--nav-h)';
     return;
   }
   const liveN = games.filter(g=>g.gameStatus===2).length;
@@ -817,7 +815,6 @@ function renderTicker() {
   const seq = games.map(item).join('');
   track.innerHTML = seq + seq;
   bar.style.display = 'flex';
-  document.getElementById('page').style.paddingTop = 'calc(var(--nav-h) + 34px)';
   bar.addEventListener('mouseenter', () => track.style.animationPlayState='paused');
   bar.addEventListener('mouseleave', () => track.style.animationPlayState='running');
 }
