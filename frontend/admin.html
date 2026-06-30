@@ -2,290 +2,220 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
 <title>Admin — ydkball</title>
 <link rel="icon" type="image/png" href="/logo.png">
-<link rel="apple-touch-icon" href="/logo.png">
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="apple-touch-icon" href="/logo-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --ink:    #0c0c0d;
-  --ink2:   #2a2a2e;
-  --ink3:   #6b6b78;
-  --ink4:   #a8a8b3;
-  --paper:  #F5F0E8;
-  --paper2: #eeecea;
-  --paper3: #e5e2dc;
-  --rule:   #d8d5cf;
-  --orange: #e8530a;
-  --red:    #c0392b;
-  --green:  #00C030;
-  --ff-serif: 'DM Serif Display', Georgia, serif;
-  --ff-sans:  'Instrument Sans', sans-serif;
-  --ff-mono:  'DM Mono', monospace;
-  --nav-h: 56px;
+  --ink:#0c0c0d; --ink2:#2a2a2e; --ink3:#6b6b78; --ink4:#a8a8b3;
+  --paper:#F5F0E8; --paper2:#eeecea; --paper3:#e5e2dc; --bg-card:#FDFAF4;
+  --rule:#d8d5cf; --orange:#e8530a; --orange-lt:#fff0ea; --gold:#C9922A;
+  --green:#1a7a4a; --star:#00C030; --red:#c0392b;
+  --ff-serif:'DM Serif Display',Georgia,serif;
+  --ff-sans:'Instrument Sans',system-ui,sans-serif;
+  --ff-mono:'DM Mono','Courier New',monospace;
+  --nav-h:58px;
+  font-size:15px;
 }
+html.night-mode {
+  --paper:#18181b; --paper2:#222228; --paper3:#2c2c34; --bg-card:#222228;
+  --rule:#3a3a46; --ink:#ededf0; --ink2:#c0c0cc; --ink3:#8080a0; --ink4:#4a4a68;
+  --orange-lt:#2a1508; --green:#22c55e; --star:#22c55e; --red:#f87171;
+  color-scheme:dark;
+}
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+html { background:var(--paper); overflow-x:clip; }
 body {
-  font-family: var(--ff-sans);
-  background: var(--paper);
-  color: var(--ink);
-  min-height: 100vh;
-  -webkit-font-smoothing: antialiased;
+  font-family:var(--ff-sans); background:var(--paper); color:var(--ink);
+  min-height:100vh; -webkit-font-smoothing:antialiased;
 }
-nav {
-  position: fixed; top: 0; left: 0; right: 0;
-  height: var(--nav-h);
-  background: var(--paper);
-  border-bottom: 1px solid var(--rule);
-  display: flex; align-items: center;
-  padding: 0 24px; gap: 20px; z-index: 100;
-}
-.nav-wordmark {
-  font-family: var(--ff-serif); font-size: 20px;
-  color: var(--ink); letter-spacing: -0.01em;
-  text-decoration: none; flex-shrink: 0;
-}
-.nav-wordmark em { font-style: italic; color: var(--orange); }
-.nav-badge {
-  font-family: var(--ff-mono); font-size: 10px;
-  letter-spacing: 0.08em; text-transform: uppercase;
-  background: var(--red); color: #fff;
-  padding: 2px 8px; border-radius: 3px;
-}
-.nav-back {
-  font-family: var(--ff-mono); font-size: 11px;
-  letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--ink3); text-decoration: none;
-  margin-left: auto;
-  transition: color 0.15s;
-}
-.nav-back:hover { color: var(--ink); }
-
-.page {
-  padding-top: calc(var(--nav-h) + 32px);
-  max-width: 1000px;
-  margin: 0 auto;
-  padding-left: 24px; padding-right: 24px;
-  padding-bottom: 80px;
+body::before {
+  content:''; position:fixed; inset:0; z-index:9999; pointer-events:none; opacity:.022;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* ── Header ── */
-.page-header { margin-bottom: 28px; }
-.page-title {
-  font-family: var(--ff-serif);
-  font-size: 2rem; letter-spacing: -0.02em;
-  color: var(--ink); margin-bottom: 4px;
-}
-.page-sub { font-size: 13px; color: var(--ink3); }
+/* ── Page ── */
+.page { max-width:1040px; margin:0 auto; padding:26px 24px 96px; }
 
-/* ── Stats row ── */
-.stats-row {
-  display: flex; gap: 16px; margin-bottom: 28px; flex-wrap: wrap;
+/* ── Admin toolbar (tabs) — sits under the canonical site header ── */
+.admin-bar {
+  display:flex; align-items:center; gap:14px; margin-bottom:24px;
+  padding-bottom:16px; border-bottom:1px solid var(--rule); flex-wrap:wrap;
 }
-.stat-chip {
-  background: #fff; border: 1px solid var(--rule);
-  border-radius: 6px; padding: 12px 18px;
-  display: flex; flex-direction: column; gap: 2px;
-  min-width: 120px;
+.admin-bar .tag {
+  font-family:var(--ff-mono); font-size:10px; letter-spacing:.08em;
+  text-transform:uppercase; color:#fff; background:var(--orange);
+  padding:3px 9px; border-radius:4px;
 }
-.stat-chip-val {
-  font-family: var(--ff-serif); font-size: 1.6rem;
-  color: var(--ink); line-height: 1;
+.seg { display:flex; gap:3px; background:var(--paper3); padding:3px; border-radius:8px; }
+.seg button {
+  font-family:var(--ff-mono); font-size:11px; letter-spacing:.05em;
+  text-transform:uppercase; color:var(--ink3); background:none; border:none;
+  padding:6px 14px; border-radius:6px; cursor:pointer; transition:all .15s;
 }
-.stat-chip-lbl {
-  font-family: var(--ff-mono); font-size: 10px;
-  letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--ink3);
-}
+.seg button:hover { color:var(--ink); }
+.seg button.active { color:var(--ink); background:var(--bg-card); box-shadow:0 1px 2px rgba(0,0,0,.06); }
+.admin-bar .asof { margin-left:auto; font-family:var(--ff-mono); font-size:11px; color:var(--ink3); }
 
-/* ── Search ── */
-.search-row {
-  display: flex; gap: 10px; margin-bottom: 20px; align-items: center;
-}
-.search-input {
-  flex: 1; font-family: var(--ff-sans); font-size: 13px;
-  padding: 8px 12px; background: #fff;
-  border: 1px solid var(--rule); border-radius: 4px;
-  outline: none; color: var(--ink);
-  transition: border-color 0.15s;
-}
-.search-input:focus { border-color: var(--orange); }
-.search-input::placeholder { color: var(--ink4); }
-.btn-search {
-  font-family: var(--ff-mono); font-size: 11px;
-  letter-spacing: 0.05em; text-transform: uppercase;
-  padding: 8px 16px; background: var(--orange); color: #fff;
-  border: none; border-radius: 4px; cursor: pointer;
-  transition: opacity 0.15s;
-}
-.btn-search:hover { opacity: 0.85; }
+/* ── Page header ── */
+.page-header { margin-bottom:24px; }
+.page-title { font-family:var(--ff-serif); font-size:2rem; letter-spacing:-.02em; color:var(--ink); }
+.page-sub { font-size:13px; color:var(--ink3); margin-top:2px; }
 
-/* ── Table ── */
-.review-table { width: 100%; border-collapse: collapse; }
-.review-table th {
-  font-family: var(--ff-mono); font-size: 10px;
-  letter-spacing: 0.07em; text-transform: uppercase;
-  color: var(--ink3); text-align: left;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--rule);
-  white-space: nowrap;
-}
-.review-table td {
-  padding: 12px 10px;
-  border-bottom: 1px solid var(--paper3);
-  vertical-align: top;
-  font-size: 13px;
-  color: var(--ink2);
-}
-.review-table tr:hover td { background: #fff; }
-
-.td-game {
-  font-family: var(--ff-mono); font-size: 11px;
-  white-space: nowrap;
-}
-.td-user { font-weight: 500; color: var(--ink); }
-.td-email { font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); }
-.td-stars { color: var(--green); font-size: 12px; white-space: nowrap; }
-.td-text {
-  max-width: 320px; font-size: 12px; color: var(--ink2);
-  line-height: 1.45;
-}
-.td-text.empty { color: var(--ink4); font-style: italic; }
-.td-date { font-family: var(--ff-mono); font-size: 10px; color: var(--ink3); white-space: nowrap; }
-.btn-delete {
-  font-family: var(--ff-mono); font-size: 10px;
-  letter-spacing: 0.04em; text-transform: uppercase;
-  padding: 4px 10px; background: none;
-  border: 1px solid #e0b0b0; border-radius: 3px;
-  color: var(--red); cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  white-space: nowrap;
-}
-.btn-delete:hover { background: var(--red); color: #fff; border-color: var(--red); }
-
-.table-state {
-  font-family: var(--ff-mono); font-size: 12px;
-  color: var(--ink3); padding: 32px 0; text-align: center;
-}
-.btn-more {
-  display: block; width: 100%; margin-top: 16px;
-  padding: 10px; font-family: var(--ff-mono); font-size: 11px;
-  letter-spacing: 0.05em; text-transform: uppercase;
-  color: var(--ink3); background: none;
-  border: 1px solid var(--rule); border-radius: 4px;
-  cursor: pointer; transition: border-color 0.15s, color 0.15s;
-}
-.btn-more:hover { border-color: var(--orange); color: var(--orange); }
-
-/* ── Access denied ── */
-.denied {
-  display: flex; flex-direction: column; align-items: center;
-  justify-content: center; min-height: 50vh; gap: 12px;
-  text-align: center;
-}
-.denied h2 { font-family: var(--ff-serif); font-size: 1.8rem; }
-.denied p { font-size: 14px; color: var(--ink3); }
-
-/* ── Toast ── */
-.toast {
-  position: fixed; bottom: 24px; right: 24px;
-  background: var(--ink); color: #fff;
-  font-size: 13px; padding: 9px 16px;
-  border-radius: 4px; z-index: 999;
-  font-family: var(--ff-sans);
-  animation: toastIn 0.2s ease;
-}
-@keyframes toastIn {
-  from { opacity:0; transform:translateY(6px); }
-  to   { opacity:1; transform:translateY(0); }
-}
-
-/* ── Tabs ── */
-.nav-tabs { display: flex; gap: 4px; margin-left: 16px; }
-.nav-tab {
-  font-family: var(--ff-mono); font-size: 11px;
-  letter-spacing: 0.05em; text-transform: uppercase;
-  color: var(--ink3); text-decoration: none;
-  padding: 6px 12px; border-radius: 4px; cursor: pointer;
-  background: none; border: none; transition: color .15s, background .15s;
-}
-.nav-tab:hover { color: var(--ink); }
-.nav-tab.active { color: var(--orange); background: var(--paper3); }
-
-/* ── Insights ── */
-.banner {
-  border-radius: 6px; padding: 12px 16px; margin-bottom: 24px;
-  font-size: 14px; font-weight: 500; border: 1px solid;
-}
-.banner.OK   { background:#eafaef; border-color:#a8e0ba; color:#1a7a36; }
-.banner.WARN { background:#fdf6e3; border-color:#e8d59a; color:#9a7508; }
-.banner.FAIL { background:#fdecea; border-color:#f0b8b0; color:var(--red); }
-
+/* ── Cards / panels ── */
 .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:28px; }
-.panel { background:#fff; border:1px solid var(--rule); border-radius:8px; padding:18px; }
+.panel { background:var(--bg-card); border:1px solid var(--rule); border-radius:10px; padding:18px; }
 .panel h3 {
-  font-family: var(--ff-mono); font-size:10px; letter-spacing:.07em;
+  font-family:var(--ff-mono); font-size:10px; letter-spacing:.07em;
   text-transform:uppercase; color:var(--ink3); margin-bottom:10px; font-weight:500;
 }
 .big { font-family:var(--ff-serif); font-size:2rem; line-height:1; color:var(--ink); }
-.panel .sub { font-size:12px; color:var(--ink3); margin-top:6px; }
+.panel .sub, .sub { font-size:12px; color:var(--ink3); margin-top:6px; }
+.kpi[title] { cursor:help; }
+
+/* ── Status banner + pills (night-safe via rgba + tokens) ── */
+.banner {
+  border-radius:8px; padding:13px 16px; margin-bottom:24px;
+  font-size:14px; font-weight:500; border:1px solid transparent;
+}
+.banner.OK   { background:rgba(26,122,74,.12);  color:var(--green); border-color:rgba(26,122,74,.3); }
+.banner.WARN { background:rgba(201,146,42,.14); color:var(--gold);  border-color:rgba(201,146,42,.35); }
+.banner.FAIL { background:rgba(192,57,43,.12);  color:var(--red);   border-color:rgba(192,57,43,.3); }
 
 .pill {
-  display:inline-block; padding:2px 8px; border-radius:3px;
+  display:inline-block; padding:2px 8px; border-radius:4px;
   font-family:var(--ff-mono); font-size:9px; font-weight:500;
-  letter-spacing:.05em; text-transform:uppercase;
+  letter-spacing:.05em; text-transform:uppercase; white-space:nowrap;
 }
-.pill.OK{background:#eafaef;color:#1a7a36} .pill.WARN{background:#fdf6e3;color:#9a7508}
-.pill.FAIL{background:#fdecea;color:var(--red)} .pill.INFO{background:var(--paper3);color:var(--ink3)}
+.pill.OK   { background:rgba(26,122,74,.14);  color:var(--green); }
+.pill.WARN { background:rgba(201,146,42,.16); color:var(--gold); }
+.pill.FAIL { background:rgba(192,57,43,.14);  color:var(--red); }
+.pill.INFO { background:var(--paper3); color:var(--ink3); }
+
+.section-label {
+  font-family:var(--ff-mono); font-size:10px; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--ink3); margin:26px 0 12px;
+}
 
 .todo-item { display:flex; gap:10px; padding:10px 0; border-bottom:1px solid var(--paper3); }
 .todo-item:last-child { border-bottom:none; }
 .todo-item .tname { font-weight:600; font-size:13px; color:var(--ink); }
 .todo-item .tdetail { font-size:12px; color:var(--ink3); margin-top:2px; }
 
-.spark { display:flex; align-items:flex-end; gap:3px; height:44px; margin-top:10px; }
+/* ── Sparkline + bars ── */
+.spark { display:flex; align-items:flex-end; gap:3px; height:46px; margin-top:10px; }
 .spark span { flex:1; background:var(--orange); border-radius:2px 2px 0 0; min-height:2px; opacity:.85; }
-.bar { display:flex; align-items:center; gap:8px; margin:6px 0; font-size:12px; }
-.bar .blabel { width:120px; color:var(--ink3); text-transform:capitalize; }
-.bar .btrack { flex:1; height:7px; background:var(--paper3); border-radius:4px; overflow:hidden; }
-.bar .bfill { height:100%; background:var(--orange); }
-.bar .bval { width:48px; text-align:right; font-family:var(--ff-mono); }
-.section-label {
-  font-family:var(--ff-mono); font-size:10px; letter-spacing:.07em;
-  text-transform:uppercase; color:var(--ink3); margin:24px 0 12px;
-}
+.bar { display:flex; align-items:center; gap:10px; margin:7px 0; font-size:12px; }
+.bar .blabel { width:120px; color:var(--ink2); text-transform:capitalize; flex-shrink:0; }
+.bar .btrack { flex:1; height:8px; background:var(--paper3); border-radius:5px; overflow:hidden; }
+.bar .bfill  { display:block; height:100%; background:var(--orange); border-radius:5px; min-width:2px; }
+.bar .bval   { width:52px; text-align:right; font-family:var(--ff-mono); color:var(--ink2); flex-shrink:0; }
+
 .checkrow { display:flex; gap:8px; align-items:baseline; padding:7px 0; font-size:13px; border-bottom:1px solid var(--paper3); }
 .checkrow:last-child { border-bottom:none; }
 
-/* ── Mobile ──────────────────────────────────────────────────── */
-@media (max-width: 640px) {
-  nav { padding: 0 16px; gap: 10px; flex-wrap: wrap; }
-  .page { padding-left: 16px; padding-right: 16px; }
-  .page-title { font-size: 1.5rem; }
-  .nav-tabs { margin-left: 0; }
+/* ── Moderation table ── */
+.stats-row { display:flex; gap:14px; margin-bottom:24px; flex-wrap:wrap; }
+.stat-chip { background:var(--bg-card); border:1px solid var(--rule); border-radius:8px;
+  padding:12px 18px; display:flex; flex-direction:column; gap:3px; min-width:120px; }
+.stat-chip-val { font-family:var(--ff-serif); font-size:1.6rem; color:var(--ink); line-height:1; }
+.stat-chip-lbl { font-family:var(--ff-mono); font-size:10px; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--ink3); }
+.search-row { display:flex; gap:10px; margin-bottom:20px; }
+.search-input { flex:1; font-family:var(--ff-sans); font-size:13px; padding:9px 12px;
+  background:var(--bg-card); border:1px solid var(--rule); border-radius:6px;
+  outline:none; color:var(--ink); transition:border-color .15s; }
+.search-input:focus { border-color:var(--orange); }
+.search-input::placeholder { color:var(--ink4); }
+.btn-search { font-family:var(--ff-mono); font-size:11px; letter-spacing:.05em;
+  text-transform:uppercase; padding:9px 16px; background:var(--orange); color:#fff;
+  border:none; border-radius:6px; cursor:pointer; transition:opacity .15s; }
+.btn-search:hover { opacity:.85; }
+.review-table { width:100%; border-collapse:collapse; }
+.review-table th { font-family:var(--ff-mono); font-size:10px; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--ink3); text-align:left; padding:8px 10px;
+  border-bottom:1px solid var(--rule); white-space:nowrap; }
+.review-table td { padding:12px 10px; border-bottom:1px solid var(--paper3);
+  vertical-align:top; font-size:13px; color:var(--ink2); }
+.review-table tr:hover td { background:var(--bg-card); }
+.td-game { font-family:var(--ff-mono); font-size:11px; white-space:nowrap; }
+.td-user { font-weight:500; color:var(--ink); }
+.td-email { font-family:var(--ff-mono); font-size:10px; color:var(--ink3); }
+.td-stars { color:var(--star); font-size:12px; white-space:nowrap; }
+.td-text { max-width:320px; font-size:12px; color:var(--ink2); line-height:1.45; }
+.td-text.empty { color:var(--ink4); font-style:italic; }
+.td-date { font-family:var(--ff-mono); font-size:10px; color:var(--ink3); white-space:nowrap; }
+.btn-delete { font-family:var(--ff-mono); font-size:10px; letter-spacing:.04em;
+  text-transform:uppercase; padding:4px 10px; background:none;
+  border:1px solid rgba(192,57,43,.4); border-radius:4px; color:var(--red);
+  cursor:pointer; transition:all .15s; white-space:nowrap; }
+.btn-delete:hover { background:var(--red); color:#fff; border-color:var(--red); }
+.table-state { font-family:var(--ff-mono); font-size:12px; color:var(--ink3);
+  padding:32px 0; text-align:center; }
+.btn-more { display:block; width:100%; margin-top:16px; padding:10px;
+  font-family:var(--ff-mono); font-size:11px; letter-spacing:.05em;
+  text-transform:uppercase; color:var(--ink3); background:none;
+  border:1px solid var(--rule); border-radius:6px; cursor:pointer; transition:all .15s; }
+.btn-more:hover { border-color:var(--orange); color:var(--orange); }
+
+/* ── Access denied + toast ── */
+.denied { display:flex; flex-direction:column; align-items:center; justify-content:center;
+  min-height:50vh; gap:12px; text-align:center; }
+.denied h2 { font-family:var(--ff-serif); font-size:1.8rem; }
+.denied p { font-size:14px; color:var(--ink3); }
+.toast { position:fixed; bottom:24px; right:24px; background:var(--ink); color:var(--paper);
+  font-size:13px; padding:9px 16px; border-radius:6px; z-index:9999;
+  font-family:var(--ff-sans); animation:toastIn .2s ease; }
+@keyframes toastIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+
+@media (max-width:640px) {
+  .page { padding:20px 16px 80px; }
+  .page-title { font-size:1.5rem; }
+  .admin-bar .asof { margin-left:0; width:100%; }
 }
 </style>
+<link rel="stylesheet" href="/site-nav.css">
 </head>
 <body>
 
-<nav>
-  <a class="nav-wordmark" href="/"><em>n</em>othingbutnet</a>
-  <span class="nav-badge">Admin</span>
-  <div class="nav-tabs" id="nav-tabs" style="display:none">
-    <button class="nav-tab active" data-tab="insights" onclick="showTab('insights')">Insights</button>
-    <button class="nav-tab" data-tab="moderation" onclick="showTab('moderation')">Moderation</button>
+<!-- ── Site header (canonical) ── -->
+<header class="site-nav">
+  <div class="site-nav__bar">
+    <a class="site-nav__brand" href="/">
+      <img src="/transparent.png" alt="">
+      <span class="site-nav__word">ydk<span>ball</span></span>
+    </a>
+    <div class="site-nav__links" role="navigation" aria-label="Primary">
+      <a href="/">Home</a>
+      <a href="/reviews">Reviews</a>
+      <a href="/games">Games</a>
+      <a href="/stats">Stats</a>
+    </div>
+    <div class="site-nav__auth" id="nav-auth-slot"></div>
   </div>
-  <a class="nav-back" href="/">← Back to site</a>
-</nav>
+</header>
 
-<div class="page" id="page">
-  <div class="table-state">Checking access…</div>
+<div class="page">
+  <div class="admin-bar" id="admin-bar" style="display:none">
+    <span class="tag">Admin</span>
+    <div class="seg" id="nav-tabs">
+      <button class="nav-tab active" data-tab="insights" onclick="showTab('insights')">Insights</button>
+      <button class="nav-tab" data-tab="moderation" onclick="showTab('moderation')">Moderation</button>
+    </div>
+    <span class="asof" id="asof"></span>
+  </div>
+  <div id="page">
+    <div class="table-state">Checking access…</div>
+  </div>
 </div>
 
 <script>
-const API = '';
-
 // ── Utils ─────────────────────────────────────────────────────
 function fmtDate(str) {
   if (!str) return '';
@@ -303,13 +233,11 @@ function toast(msg) {
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 2600);
 }
+const el = (h) => { const t=document.createElement('template'); t.innerHTML=h.trim(); return t.content.firstChild; };
+const nfmt = (x) => (x==null ? '—' : Number(x).toLocaleString());
 
 // ── State ─────────────────────────────────────────────────────
-let offset = 0;
-let total  = 0;
-let query  = '';
-let loading = false;
-let insightsTimer = null;
+let offset = 0, total = 0, query = '', loading = false, insightsTimer = null;
 
 // ── Tab router ────────────────────────────────────────────────
 function showTab(tab) {
@@ -320,13 +248,16 @@ function showTab(tab) {
     renderInsights();
     insightsTimer = setInterval(renderInsights, 60000);  // live refresh
   } else {
+    document.getElementById('asof').textContent = '';
     renderPage();
   }
 }
 
 // ── Insights dashboard ────────────────────────────────────────
-const el = (h) => { const t=document.createElement('template'); t.innerHTML=h.trim(); return t.content.firstChild; };
-const nfmt = (x) => (x==null ? '—' : Number(x).toLocaleString());
+function kpi(title, val, sub, hint) {
+  const t = hint ? ` title="${hint.replace(/"/g,'&quot;')}"` : '';
+  return `<div class="panel kpi"${t}><h3>${title}</h3><div class="big">${val}</div><div class="sub">${sub}</div></div>`;
+}
 
 async function renderInsights() {
   const page = document.getElementById('page');
@@ -335,6 +266,7 @@ async function renderInsights() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const d = await res.json();
     const h = d.health, g = d.growth, e = d.engagement, rev = d.revenue;
+    document.getElementById('asof').textContent = 'live · ' + d.generated_at;
 
     const headline = { OK:'All systems healthy — data is fresh and complete.',
       WARN:`Mostly healthy — ${h.n_warn} item(s) to watch.`,
@@ -343,16 +275,20 @@ async function renderInsights() {
     page.innerHTML = `
       <div class="page-header">
         <h1 class="page-title">Insights</h1>
-        <p class="page-sub">Live as of ${d.generated_at} · auto-refreshes each minute</p>
+        <p class="page-sub">Auto-refreshes every minute</p>
       </div>
       <div class="banner ${h.overall}">${headline}</div>
 
       <div class="grid">
-        ${kpi('Total Users', nfmt(g.total_users), `+${nfmt(g.new_today)} today · +${nfmt(g.new_7d)} / 7d`)}
-        ${kpi('Active (7d)', nfmt(e.active_7d), `${nfmt(e.active_1d)} active today`)}
-        ${kpi('Pro Subscribers', nfmt(rev.pro_users), `~$${nfmt(rev.est_mrr)}/mo est. MRR`)}
-        ${kpi('Game Plays (7d)', nfmt((e.hol_plays_7d||0)+(e.guesswho_plays_7d||0)),
-              `HoL ${nfmt(e.hol_plays_7d)} · GuessWho ${nfmt(e.guesswho_plays_7d)}`)}
+        ${kpi('Total Users', nfmt(g.total_users), `+${nfmt(g.new_today)} today · +${nfmt(g.new_7d)} / 7d`,
+              'Registered accounts (rows in the users table).')}
+        ${kpi('Active Users · 7d', nfmt(e.active_7d), `${nfmt(e.active_1d)} active today`,
+              'Distinct signed-in accounts with at least one tracked action (app open, game play, review, like) in the window. Rolling 7 days / 24 hours, not calendar days.')}
+        ${kpi('Pro Subscribers', nfmt(rev.pro_users), `~$${nfmt(rev.est_mrr)}/mo est. MRR`,
+              'Users with is_pro = true (active RevenueCat subscription).')}
+        ${kpi('Game Plays · 7d', nfmt((e.hol_plays_7d||0)+(e.guesswho_plays_7d||0)),
+              `HoL ${nfmt(e.hol_plays_7d)} · GuessWho ${nfmt(e.guesswho_plays_7d)}`,
+              'Completed daily-game results recorded in the last 7 days.')}
       </div>
 
       <div class="section-label">To-Do / Needs Attention</div>
@@ -361,16 +297,16 @@ async function renderInsights() {
       <div class="section-label">Revenue</div>
       <div class="grid">
         ${kpi('Est. MRR', `$${nfmt(rev.est_mrr)}`, `${nfmt(rev.pro_users)} Pro × $${rev.price_usd}`)}
-        ${kpi('New Subs (30d)', rev.has_history ? nfmt(rev.new_subs_30d) : '—',
+        ${kpi('New Subs · 30d', rev.has_history ? nfmt(rev.new_subs_30d) : '—',
               rev.has_history ? `${nfmt(rev.new_subs_7d)} in last 7d` : 'awaiting events')}
-        ${kpi('Churn (30d)', rev.has_history ? nfmt(rev.churn_30d) : '—', 'cancellations + expirations')}
-        ${kpi('Revenue (30d)', (rev.has_history && rev.revenue_30d!=null) ? `$${nfmt(rev.revenue_30d)}` : '—',
+        ${kpi('Churn · 30d', rev.has_history ? nfmt(rev.churn_30d) : '—', 'cancellations + expirations')}
+        ${kpi('Revenue · 30d', (rev.has_history && rev.revenue_30d!=null) ? `$${nfmt(rev.revenue_30d)}` : '—',
               rev.has_history ? 'purchase + renewal events' : 'awaiting events')}
       </div>
-      <div class="sub" style="color:var(--ink3);margin:-16px 0 4px">${rev.note}</div>
+      <div class="sub" style="margin:-16px 0 4px">${rev.note}</div>
 
       <div class="section-label">Growth & Engagement</div>
-      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
         <div class="panel" id="ins-signups"></div>
         <div class="panel" id="ins-events"></div>
       </div>
@@ -381,7 +317,7 @@ async function renderInsights() {
 
     // to-dos
     const todo = document.getElementById('ins-todos');
-    if (!h.todos.length) todo.appendChild(el('<div class="sub" style="color:var(--ink3)">Nothing — everything passed ✨</div>'));
+    if (!h.todos.length) todo.appendChild(el('<div class="sub">Nothing — everything passed ✨</div>'));
     h.todos.forEach(t => todo.appendChild(el(
       `<div class="todo-item"><span class="pill ${t.status}">${t.status}</span>
         <div><div class="tname">${t.section}: ${t.name}</div>
@@ -402,7 +338,7 @@ async function renderInsights() {
     const emax = Math.max(1, ...e.events_30d.map(x=>x.count));
     e.events_30d.slice(0,7).forEach(x => ev.appendChild(el(
       `<div class="bar"><span class="blabel">${x.type.replace(/_/g,' ')}</span>
-        <span class="btrack"><span class="bfill" style="width:${Math.round(100*x.count/emax)}%"></span></span>
+        <span class="btrack"><span class="bfill" style="width:${Math.max(2, Math.round(100*x.count/emax))}%"></span></span>
         <span class="bval">${nfmt(x.count)}</span></div>`)));
     if (!e.events_30d.length) ev.appendChild(el('<div class="sub">No events in window.</div>'));
 
@@ -420,58 +356,35 @@ async function renderInsights() {
   }
 }
 
-function kpi(title, val, sub) {
-  return `<div class="panel"><h3>${title}</h3><div class="big">${val}</div><div class="sub">${sub}</div></div>`;
-}
-
-// ── Render admin UI ───────────────────────────────────────────
-function renderPage(stats) {
+// ── Moderation ────────────────────────────────────────────────
+function renderPage() {
   document.getElementById('page').innerHTML = `
     <div class="page-header">
       <h1 class="page-title">Review Moderation</h1>
       <p class="page-sub">Delete reviews that violate community guidelines. Actions are immediate and irreversible.</p>
     </div>
-
     <div class="stats-row">
-      <div class="stat-chip">
-        <div class="stat-chip-val" id="stat-total">—</div>
-        <div class="stat-chip-lbl">Total Reviews</div>
-      </div>
-      <div class="stat-chip">
-        <div class="stat-chip-val" id="stat-shown">—</div>
-        <div class="stat-chip-lbl">Shown</div>
-      </div>
+      <div class="stat-chip"><div class="stat-chip-val" id="stat-total">—</div><div class="stat-chip-lbl">Total Reviews</div></div>
+      <div class="stat-chip"><div class="stat-chip-val" id="stat-shown">—</div><div class="stat-chip-lbl">Shown</div></div>
     </div>
-
     <div class="search-row">
       <input class="search-input" id="search-input" type="text"
-        placeholder="Search by reviewer name or review text…"
-        value="${query}">
+        placeholder="Search by reviewer name or review text…" value="${query}">
       <button class="btn-search" onclick="doSearch()">Search</button>
     </div>
-
     <table class="review-table">
-      <thead>
-        <tr>
-          <th>Game</th>
-          <th>Reviewer</th>
-          <th>Rating</th>
-          <th>Review</th>
-          <th>Date</th>
-          <th></th>
-        </tr>
-      </thead>
+      <thead><tr>
+        <th>Game</th><th>Reviewer</th><th>Rating</th><th>Review</th><th>Date</th><th></th>
+      </tr></thead>
       <tbody id="review-tbody">
         <tr><td colspan="6"><div class="table-state">Loading…</div></td></tr>
       </tbody>
     </table>
     <button class="btn-more" id="btn-more" style="display:none" onclick="loadMore()">Load more</button>
   `;
-
   document.getElementById('search-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') doSearch();
   });
-
   loadReviews(true);
 }
 
@@ -479,25 +392,20 @@ async function loadReviews(reset = false) {
   if (loading) return;
   loading = true;
   if (reset) { offset = 0; }
-
   const params = new URLSearchParams({ limit: 50, offset, ...(query ? { q: query } : {}) });
   try {
     const res  = await fetch(`/api/admin/reviews?${params}`);
     const data = await res.json();
     total = data.total || 0;
     const reviews = data.reviews || [];
-
     document.getElementById('stat-total').textContent = total;
-
     const tbody = document.getElementById('review-tbody');
     if (reset) tbody.innerHTML = '';
-
     if (reviews.length === 0 && reset) {
       tbody.innerHTML = `<tr><td colspan="6"><div class="table-state">No reviews found.</div></td></tr>`;
     } else {
       reviews.forEach(r => tbody.insertAdjacentHTML('beforeend', reviewRow(r)));
     }
-
     offset += reviews.length;
     document.getElementById('stat-shown').textContent = offset;
     document.getElementById('btn-more').style.display = data.has_more ? 'block' : 'none';
@@ -517,27 +425,16 @@ function reviewRow(r) {
       <div style="color:var(--ink3)">${r.away_score}–${r.home_score}</div>
       <div style="color:var(--ink4)">${r.game_date}</div>
     </td>
-    <td>
-      <div class="td-user">${r.display_name}</div>
-      <div class="td-email">${r.email}</div>
-    </td>
+    <td><div class="td-user">${r.display_name}</div><div class="td-email">${r.email}</div></td>
     <td class="td-stars">${starsText(r.rating)}</td>
     <td class="td-text">${text}</td>
     <td class="td-date">${fmtDate(r.created_at)}</td>
-    <td>
-      <button class="btn-delete" onclick="deleteReview(${r.id}, '${r.display_name.replace(/'/g,"\\'")}')">Delete</button>
-    </td>
+    <td><button class="btn-delete" onclick="deleteReview(${r.id}, '${r.display_name.replace(/'/g,"\\'")}')">Delete</button></td>
   </tr>`;
 }
 
-function doSearch() {
-  query = document.getElementById('search-input').value.trim();
-  loadReviews(true);
-}
-
-function loadMore() {
-  loadReviews(false);
-}
+function doSearch() { query = document.getElementById('search-input').value.trim(); loadReviews(true); }
+function loadMore() { loadReviews(false); }
 
 async function deleteReview(id, name) {
   if (!confirm(`Delete review #${id} by ${name}?\n\nThis cannot be undone.`)) return;
@@ -550,11 +447,10 @@ async function deleteReview(id, name) {
       row.style.transition = 'opacity 0.3s';
       setTimeout(() => row.remove(), 300);
     }
-    total--;
-    offset--;
+    total--; offset--;
     document.getElementById('stat-total').textContent = total;
     document.getElementById('stat-shown').textContent = offset;
-    toast(`Review deleted.`);
+    toast('Review deleted.');
   } catch(e) {
     toast('Error: ' + e.message);
   }
@@ -574,12 +470,13 @@ async function deleteReview(id, name) {
         </div>`;
       return;
     }
-    document.getElementById('nav-tabs').style.display = 'flex';
+    document.getElementById('admin-bar').style.display = 'flex';
     showTab('insights');
   } catch(e) {
     document.getElementById('page').innerHTML = `<div class="denied"><h2>Error</h2><p>${e.message}</p></div>`;
   }
 })();
 </script>
+<script src="/site-nav.js"></script>
 </body>
 </html>
