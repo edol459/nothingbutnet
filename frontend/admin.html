@@ -201,11 +201,69 @@ nav {
   to   { opacity:1; transform:translateY(0); }
 }
 
+/* ── Tabs ── */
+.nav-tabs { display: flex; gap: 4px; margin-left: 16px; }
+.nav-tab {
+  font-family: var(--ff-mono); font-size: 11px;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--ink3); text-decoration: none;
+  padding: 6px 12px; border-radius: 4px; cursor: pointer;
+  background: none; border: none; transition: color .15s, background .15s;
+}
+.nav-tab:hover { color: var(--ink); }
+.nav-tab.active { color: var(--orange); background: var(--paper3); }
+
+/* ── Insights ── */
+.banner {
+  border-radius: 6px; padding: 12px 16px; margin-bottom: 24px;
+  font-size: 14px; font-weight: 500; border: 1px solid;
+}
+.banner.OK   { background:#eafaef; border-color:#a8e0ba; color:#1a7a36; }
+.banner.WARN { background:#fdf6e3; border-color:#e8d59a; color:#9a7508; }
+.banner.FAIL { background:#fdecea; border-color:#f0b8b0; color:var(--red); }
+
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:28px; }
+.panel { background:#fff; border:1px solid var(--rule); border-radius:8px; padding:18px; }
+.panel h3 {
+  font-family: var(--ff-mono); font-size:10px; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--ink3); margin-bottom:10px; font-weight:500;
+}
+.big { font-family:var(--ff-serif); font-size:2rem; line-height:1; color:var(--ink); }
+.panel .sub { font-size:12px; color:var(--ink3); margin-top:6px; }
+
+.pill {
+  display:inline-block; padding:2px 8px; border-radius:3px;
+  font-family:var(--ff-mono); font-size:9px; font-weight:500;
+  letter-spacing:.05em; text-transform:uppercase;
+}
+.pill.OK{background:#eafaef;color:#1a7a36} .pill.WARN{background:#fdf6e3;color:#9a7508}
+.pill.FAIL{background:#fdecea;color:var(--red)} .pill.INFO{background:var(--paper3);color:var(--ink3)}
+
+.todo-item { display:flex; gap:10px; padding:10px 0; border-bottom:1px solid var(--paper3); }
+.todo-item:last-child { border-bottom:none; }
+.todo-item .tname { font-weight:600; font-size:13px; color:var(--ink); }
+.todo-item .tdetail { font-size:12px; color:var(--ink3); margin-top:2px; }
+
+.spark { display:flex; align-items:flex-end; gap:3px; height:44px; margin-top:10px; }
+.spark span { flex:1; background:var(--orange); border-radius:2px 2px 0 0; min-height:2px; opacity:.85; }
+.bar { display:flex; align-items:center; gap:8px; margin:6px 0; font-size:12px; }
+.bar .blabel { width:120px; color:var(--ink3); text-transform:capitalize; }
+.bar .btrack { flex:1; height:7px; background:var(--paper3); border-radius:4px; overflow:hidden; }
+.bar .bfill { height:100%; background:var(--orange); }
+.bar .bval { width:48px; text-align:right; font-family:var(--ff-mono); }
+.section-label {
+  font-family:var(--ff-mono); font-size:10px; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--ink3); margin:24px 0 12px;
+}
+.checkrow { display:flex; gap:8px; align-items:baseline; padding:7px 0; font-size:13px; border-bottom:1px solid var(--paper3); }
+.checkrow:last-child { border-bottom:none; }
+
 /* ── Mobile ──────────────────────────────────────────────────── */
 @media (max-width: 640px) {
-  nav { padding: 0 16px; gap: 10px; }
+  nav { padding: 0 16px; gap: 10px; flex-wrap: wrap; }
   .page { padding-left: 16px; padding-right: 16px; }
   .page-title { font-size: 1.5rem; }
+  .nav-tabs { margin-left: 0; }
 }
 </style>
 </head>
@@ -214,6 +272,10 @@ nav {
 <nav>
   <a class="nav-wordmark" href="/"><em>n</em>othingbutnet</a>
   <span class="nav-badge">Admin</span>
+  <div class="nav-tabs" id="nav-tabs" style="display:none">
+    <button class="nav-tab active" data-tab="insights" onclick="showTab('insights')">Insights</button>
+    <button class="nav-tab" data-tab="moderation" onclick="showTab('moderation')">Moderation</button>
+  </div>
   <a class="nav-back" href="/">← Back to site</a>
 </nav>
 
@@ -247,6 +309,120 @@ let offset = 0;
 let total  = 0;
 let query  = '';
 let loading = false;
+let insightsTimer = null;
+
+// ── Tab router ────────────────────────────────────────────────
+function showTab(tab) {
+  document.querySelectorAll('.nav-tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === tab));
+  if (insightsTimer) { clearInterval(insightsTimer); insightsTimer = null; }
+  if (tab === 'insights') {
+    renderInsights();
+    insightsTimer = setInterval(renderInsights, 60000);  // live refresh
+  } else {
+    renderPage();
+  }
+}
+
+// ── Insights dashboard ────────────────────────────────────────
+const el = (h) => { const t=document.createElement('template'); t.innerHTML=h.trim(); return t.content.firstChild; };
+const nfmt = (x) => (x==null ? '—' : Number(x).toLocaleString());
+
+async function renderInsights() {
+  const page = document.getElementById('page');
+  try {
+    const res = await fetch('/api/admin/dashboard', { credentials:'include' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const d = await res.json();
+    const h = d.health, g = d.growth, e = d.engagement, rev = d.revenue;
+
+    const headline = { OK:'All systems healthy — data is fresh and complete.',
+      WARN:`Mostly healthy — ${h.n_warn} item(s) to watch.`,
+      FAIL:`Attention needed — ${h.n_fail} failure(s), ${h.n_warn} warning(s).` }[h.overall];
+
+    page.innerHTML = `
+      <div class="page-header">
+        <h1 class="page-title">Insights</h1>
+        <p class="page-sub">Live as of ${d.generated_at} · auto-refreshes each minute</p>
+      </div>
+      <div class="banner ${h.overall}">${headline}</div>
+
+      <div class="grid">
+        ${kpi('Total Users', nfmt(g.total_users), `+${nfmt(g.new_today)} today · +${nfmt(g.new_7d)} / 7d`)}
+        ${kpi('Active (7d)', nfmt(e.active_7d), `${nfmt(e.active_1d)} active today`)}
+        ${kpi('Pro Subscribers', nfmt(rev.pro_users), `~$${nfmt(rev.est_mrr)}/mo est. MRR`)}
+        ${kpi('Game Plays (7d)', nfmt((e.hol_plays_7d||0)+(e.guesswho_plays_7d||0)),
+              `HoL ${nfmt(e.hol_plays_7d)} · GuessWho ${nfmt(e.guesswho_plays_7d)}`)}
+      </div>
+
+      <div class="section-label">To-Do / Needs Attention</div>
+      <div class="panel" id="ins-todos"></div>
+
+      <div class="section-label">Revenue</div>
+      <div class="grid">
+        ${kpi('Est. MRR', `$${nfmt(rev.est_mrr)}`, `${nfmt(rev.pro_users)} Pro × $${rev.price_usd}`)}
+        ${kpi('New Subs (30d)', rev.has_history ? nfmt(rev.new_subs_30d) : '—',
+              rev.has_history ? `${nfmt(rev.new_subs_7d)} in last 7d` : 'awaiting events')}
+        ${kpi('Churn (30d)', rev.has_history ? nfmt(rev.churn_30d) : '—', 'cancellations + expirations')}
+        ${kpi('Revenue (30d)', (rev.has_history && rev.revenue_30d!=null) ? `$${nfmt(rev.revenue_30d)}` : '—',
+              rev.has_history ? 'purchase + renewal events' : 'awaiting events')}
+      </div>
+      <div class="sub" style="color:var(--ink3);margin:-16px 0 4px">${rev.note}</div>
+
+      <div class="section-label">Growth & Engagement</div>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+        <div class="panel" id="ins-signups"></div>
+        <div class="panel" id="ins-events"></div>
+      </div>
+
+      <div class="section-label">Data Health — Full Checks</div>
+      <div id="ins-health"></div>
+    `;
+
+    // to-dos
+    const todo = document.getElementById('ins-todos');
+    if (!h.todos.length) todo.appendChild(el('<div class="sub" style="color:var(--ink3)">Nothing — everything passed ✨</div>'));
+    h.todos.forEach(t => todo.appendChild(el(
+      `<div class="todo-item"><span class="pill ${t.status}">${t.status}</span>
+        <div><div class="tname">${t.section}: ${t.name}</div>
+        <div class="tdetail">${t.detail}</div></div></div>`)));
+
+    // signups sparkline
+    const sp = document.getElementById('ins-signups');
+    sp.appendChild(el('<h3>Signups · last 14 days</h3>'));
+    const max = Math.max(1, ...g.signups_daily.map(x=>x.count));
+    sp.appendChild(el('<div class="spark">' +
+      (g.signups_daily.map(x=>`<span style="height:${Math.round(100*x.count/max)}%" title="${x.date}: ${x.count}"></span>`).join('') || '<span></span>') +
+      '</div>'));
+    sp.appendChild(el(`<div class="sub">+${nfmt(g.new_30d)} in last 30 days</div>`));
+
+    // events breakdown
+    const ev = document.getElementById('ins-events');
+    ev.appendChild(el('<h3>Events · last 30 days</h3>'));
+    const emax = Math.max(1, ...e.events_30d.map(x=>x.count));
+    e.events_30d.slice(0,7).forEach(x => ev.appendChild(el(
+      `<div class="bar"><span class="blabel">${x.type.replace(/_/g,' ')}</span>
+        <span class="btrack"><span class="bfill" style="width:${Math.round(100*x.count/emax)}%"></span></span>
+        <span class="bval">${nfmt(x.count)}</span></div>`)));
+    if (!e.events_30d.length) ev.appendChild(el('<div class="sub">No events in window.</div>'));
+
+    // full health checks
+    const hc = document.getElementById('ins-health');
+    h.sections.forEach(s => {
+      const card = el(`<div class="panel" style="margin-bottom:14px"><h3>${s.name}</h3></div>`);
+      s.checks.forEach(c => card.appendChild(el(
+        `<div class="checkrow"><span class="pill ${c.status}">${c.status}</span>
+          <span><b>${c.name}</b> — <span style="color:var(--ink3)">${c.detail}</span></span></div>`)));
+      hc.appendChild(card);
+    });
+  } catch(err) {
+    page.innerHTML = `<div class="banner FAIL">Failed to load insights: ${err.message}</div>`;
+  }
+}
+
+function kpi(title, val, sub) {
+  return `<div class="panel"><h3>${title}</h3><div class="big">${val}</div><div class="sub">${sub}</div></div>`;
+}
 
 // ── Render admin UI ───────────────────────────────────────────
 function renderPage(stats) {
@@ -398,7 +574,8 @@ async function deleteReview(id, name) {
         </div>`;
       return;
     }
-    renderPage();
+    document.getElementById('nav-tabs').style.display = 'flex';
+    showTab('insights');
   } catch(e) {
     document.getElementById('page').innerHTML = `<div class="denied"><h2>Error</h2><p>${e.message}</p></div>`;
   }

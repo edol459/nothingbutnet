@@ -4796,6 +4796,59 @@ def admin_page():
 
 
 # ── RevenueCat webhook ────────────────────────────────────────
+def _log_revenue_event(event: dict):
+    """Best-effort append of a RevenueCat event to revenue_events.
+
+    Never raises — revenue history must not jeopardise the webhook's 200 to
+    RevenueCat (a non-200 makes RevenueCat retry/alert). Captures every event
+    type (including anonymous / unconcerned ones) so MRR/churn history accrues.
+    Idempotent on the RevenueCat event id.
+    """
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        try:
+            uid = int(event.get("app_user_id"))
+        except (ValueError, TypeError):
+            uid = None
+        ts_ms = event.get("event_timestamp_ms") or event.get("purchased_at_ms")
+        event_at = _dt.fromtimestamp(ts_ms / 1000, tz=_tz.utc) if ts_ms else None
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS revenue_events (
+                id           SERIAL PRIMARY KEY,
+                event_id     TEXT UNIQUE,
+                event_type   TEXT NOT NULL,
+                app_user_id  TEXT,
+                user_id      INTEGER,
+                product_id   TEXT,
+                store        TEXT,
+                environment  TEXT,
+                period_type  TEXT,
+                price        REAL,
+                currency     TEXT,
+                event_at     TIMESTAMPTZ,
+                payload      JSONB,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
+            )""")
+        cur.execute("""
+            INSERT INTO revenue_events
+                (event_id, event_type, app_user_id, user_id, product_id, store,
+                 environment, period_type, price, currency, event_at, payload)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (event_id) DO NOTHING""",
+            (event.get("id"), event.get("type", ""),
+             str(event.get("app_user_id") or ""), uid,
+             event.get("product_id"), event.get("store"),
+             event.get("environment"), event.get("period_type"),
+             event.get("price"), event.get("currency"), event_at,
+             json.dumps(event)))
+        conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        print(f"[webhook] revenue_events log failed (non-fatal): {e}", flush=True)
+
+
 @app.route("/api/webhooks/revenuecat", methods=["POST"])
 def revenuecat_webhook():
     """
@@ -4813,6 +4866,9 @@ def revenuecat_webhook():
     app_user_id  = event.get("app_user_id", "")
 
     print(f"[webhook] revenuecat event_type={event_type!r} app_user_id={app_user_id!r}", flush=True)
+
+    # Log every event for revenue history (best-effort; before any early return)
+    _log_revenue_event(event)
 
     # app_user_id is the string we passed to Purchases.logIn — our user's numeric ID
     try:
@@ -4850,6 +4906,126 @@ def revenuecat_webhook():
         return jsonify({"error": "db"}), 500
 
     return jsonify({"ok": True})
+
+
+# ── Admin: founder insights dashboard ─────────────────────────
+import sys as _sys_admin
+_sys_admin.path.insert(0, os.path.join(os.path.dirname(__file__), "ingest"))
+
+
+def _admin_health_panel() -> dict:
+    """Run the data health engine (read-only) and shape it for the dashboard."""
+    import health_check  # noqa: E402  — from backend/ingest
+    # The engine uses positional rows, so give it a plain (non-RealDict) connection.
+    hconn = psycopg2.connect(DATABASE_URL, connect_timeout=10)
+    try:
+        h = health_check.collect(hconn, write_snapshot=False)
+    finally:
+        hconn.close()
+    ov = h.overall()
+    sections = []
+    for r in h.results:
+        if not sections or sections[-1]["name"] != r["section"]:
+            if not any(s["name"] == r["section"] for s in sections):
+                sections.append({"name": r["section"], "checks": []})
+        for s in sections:
+            if s["name"] == r["section"]:
+                s["checks"].append({"status": r["status"], "name": r["name"],
+                                    "detail": r["detail"]})
+                break
+    todos = [{"status": r["status"], "section": r["section"], "name": r["name"],
+              "detail": r["detail"]}
+             for r in h.results if r["status"] in ("FAIL", "WARN")]
+    todos.sort(key=lambda r: 0 if r["status"] == "FAIL" else 1)
+    return {"overall": ov, "todos": todos, "sections": sections,
+            "n_fail": sum(r["status"] == "FAIL" for r in h.results),
+            "n_warn": sum(r["status"] == "WARN" for r in h.results)}
+
+
+@app.route("/api/admin/dashboard")
+@_admin_required
+def admin_dashboard():
+    from datetime import datetime as _dt
+    conn = get_conn()
+    cur = conn.cursor()
+
+    # ── Growth ──────────────────────────────────────────────
+    cur.execute("SELECT COUNT(*) AS n FROM users")
+    total_users = cur.fetchone()["n"]
+    cur.execute("""SELECT
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 day')  AS d1,
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days') AS d7,
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')AS d30
+        FROM users""")
+    g = cur.fetchone()
+    cur.execute("""SELECT created_at::date AS d, COUNT(*) AS n
+        FROM users WHERE created_at >= NOW() - INTERVAL '14 days'
+        GROUP BY 1 ORDER BY 1""")
+    signups_daily = [{"date": str(r["d"]), "count": r["n"]} for r in cur.fetchall()]
+
+    # ── Engagement (xp_events + game results) ───────────────
+    cur.execute("""SELECT
+        COUNT(DISTINCT user_id) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')  AS active_7d,
+        COUNT(DISTINCT user_id) FILTER (WHERE created_at >= NOW() - INTERVAL '1 day')   AS active_1d,
+        COUNT(*) FILTER (WHERE event_type='app_open' AND created_at >= NOW() - INTERVAL '7 days') AS opens_7d
+        FROM xp_events""")
+    e = cur.fetchone()
+    cur.execute("""SELECT event_type, COUNT(*) AS n FROM xp_events
+        WHERE created_at >= NOW() - INTERVAL '30 days'
+        GROUP BY 1 ORDER BY 2 DESC""")
+    events_30d = [{"type": r["event_type"], "count": r["n"]} for r in cur.fetchall()]
+
+    def _safe_count(sql):
+        try:
+            cur.execute(sql)
+            return cur.fetchone()["n"]
+        except Exception:
+            conn.rollback()
+            return None
+
+    hol_7d = _safe_count("SELECT COUNT(*) AS n FROM survival_results WHERE created_at >= NOW() - INTERVAL '7 days'")
+    gw_7d  = _safe_count("SELECT COUNT(*) AS n FROM poeltl_results  WHERE created_at >= NOW() - INTERVAL '7 days'")
+    rev_7d = _safe_count("SELECT COUNT(*) AS n FROM game_reviews    WHERE created_at >= NOW() - INTERVAL '7 days'")
+
+    # ── Revenue (current snapshot from is_pro + history from revenue_events) ──
+    cur.execute("SELECT COUNT(*) AS n FROM users WHERE is_pro = TRUE")
+    pro_users = cur.fetchone()["n"]
+    price = float(os.getenv("PRO_PRICE_USD", "4.99"))
+
+    new_subs_7d  = _safe_count("SELECT COUNT(*) AS n FROM revenue_events WHERE event_type='INITIAL_PURCHASE' AND event_at >= NOW() - INTERVAL '7 days'")
+    new_subs_30d = _safe_count("SELECT COUNT(*) AS n FROM revenue_events WHERE event_type='INITIAL_PURCHASE' AND event_at >= NOW() - INTERVAL '30 days'")
+    churn_30d    = _safe_count("SELECT COUNT(*) AS n FROM revenue_events WHERE event_type IN ('CANCELLATION','EXPIRATION') AND event_at >= NOW() - INTERVAL '30 days'")
+    revenue_30d  = _safe_count("SELECT COALESCE(SUM(price),0) AS n FROM revenue_events WHERE event_type IN ('INITIAL_PURCHASE','RENEWAL','PRODUCT_CHANGE') AND event_at >= NOW() - INTERVAL '30 days'")
+    has_history  = (_safe_count("SELECT COUNT(*) AS n FROM revenue_events") or 0) > 0
+
+    return jsonify({
+        "generated_at": _dt.now().isoformat(timespec="seconds"),
+        "health": _admin_health_panel(),
+        "growth": {
+            "total_users": total_users,
+            "new_today": g["d1"], "new_7d": g["d7"], "new_30d": g["d30"],
+            "signups_daily": signups_daily,
+        },
+        "engagement": {
+            "active_1d": e["active_1d"], "active_7d": e["active_7d"],
+            "app_opens_7d": e["opens_7d"],
+            "hol_plays_7d": hol_7d, "guesswho_plays_7d": gw_7d, "reviews_7d": rev_7d,
+            "events_30d": events_30d,
+        },
+        "revenue": {
+            "pro_users": pro_users,
+            "price_usd": price,
+            "est_mrr": round(pro_users * price, 2),
+            "has_history": has_history,
+            "new_subs_7d": new_subs_7d,
+            "new_subs_30d": new_subs_30d,
+            "churn_30d": churn_30d,
+            "revenue_30d": round(revenue_30d, 2) if revenue_30d is not None else None,
+            "note": ("Live from RevenueCat events." if has_history else
+                     "MRR estimated from Pro count × PRO_PRICE_USD. "
+                     "Real MRR/churn history accrues from now as RevenueCat events arrive."),
+        },
+    })
 
 
 # ── Game Lists ────────────────────────────────────────────────
