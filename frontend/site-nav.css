@@ -13,9 +13,6 @@ html { background: var(--paper); }
   z-index: 1000;
   background: var(--paper);
   border-bottom: 1px solid var(--rule);
-  /* Fill the notch / status-bar area with the header background
-     (requires viewport-fit=cover; resolves to 0 elsewhere). */
-  padding-top: env(safe-area-inset-top, 0px);
 }
 
 .site-nav__bar {
