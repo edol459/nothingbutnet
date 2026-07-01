@@ -17,58 +17,84 @@
   --ff-serif:'DM Serif Display',Georgia,serif;--ff-sans:'Instrument Sans',system-ui,sans-serif;
   --ff-mono:'DM Mono','Courier New',monospace;--nav-h:58px;font-size:15px;}
 html.night-mode{--paper:#18181b;--paper2:#222228;--paper3:#2c2c34;--bg-card:#222228;
-  --rule:#3a3a46;--ink:#ededf0;--ink2:#c0c0cc;--ink3:#8080a0;--ink4:#4a4a68;
+  --rule:#3a3a46;--ink:#ededf0;--ink2:#c0c0cc;--ink3:#8080a0;--ink4:#565668;
   --green:#22c55e;--red:#f87171;color-scheme:dark;}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 html{background:var(--paper);}
 body{font-family:var(--ff-sans);background:var(--paper);color:var(--ink);min-height:100vh;-webkit-font-smoothing:antialiased;}
-.wrap{max-width:760px;margin:0 auto;padding:26px 20px 96px;}
-h1{font-family:var(--ff-serif);font-size:2rem;letter-spacing:-.02em;margin-bottom:4px;}
-h2{font-family:var(--ff-serif);font-size:1.5rem;margin:0;}
-.sub{font-size:13px;color:var(--ink3);}
-.section-label{font-family:var(--ff-mono);font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);margin:26px 0 12px;}
-.card{background:var(--bg-card);border:1px solid var(--rule);border-radius:10px;padding:16px;}
-.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
-input,select,textarea{font-family:var(--ff-sans);font-size:14px;padding:9px 12px;background:var(--bg-card);
-  border:1px solid var(--rule);border-radius:8px;color:var(--ink);outline:none;width:100%;}
-input:focus,select:focus,textarea:focus{border-color:var(--orange);}
-label.chk{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--ink2);cursor:pointer;white-space:nowrap;}
-.btn{font-family:var(--ff-mono);font-size:12px;letter-spacing:.04em;text-transform:uppercase;padding:9px 14px;
-  border-radius:8px;cursor:pointer;border:1px solid var(--rule);background:var(--bg-card);color:var(--ink);transition:all .15s;white-space:nowrap;text-decoration:none;display:inline-block;}
-.btn:hover{border-color:var(--orange);color:var(--orange);}
+.grain{position:fixed;inset:0;pointer-events:none;z-index:50;opacity:.028;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+.wrap{max-width:720px;margin:0 auto;padding:30px 20px 96px;}
+h1{font-family:var(--ff-serif);font-size:2rem;letter-spacing:-.02em;margin-bottom:2px;}
+.sub{font-size:14px;color:var(--ink3);}
+.eyebrow{font-family:var(--ff-mono);font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--orange);margin-bottom:12px;}
+.section-label{font-family:var(--ff-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);margin:0 0 8px;}
+.card{background:var(--bg-card);border:1px solid var(--rule);border-radius:16px;padding:32px 36px 28px;box-shadow:0 14px 44px rgba(0,0,0,.06);}
+.b-title{width:100%;font-family:var(--ff-serif);font-size:32px;line-height:1.1;letter-spacing:-.015em;color:var(--ink);border:none;background:transparent;outline:none;padding:0 0 8px;border-bottom:2px solid transparent;}
+.b-title:focus{border-bottom:2px solid var(--orange);}
+.b-title::placeholder{color:var(--ink4);}
+.seg{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.pill{font-family:var(--ff-mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;padding:8px 14px;border-radius:6px;cursor:pointer;background:transparent;color:var(--ink3);border:1px solid var(--rule);display:inline-flex;align-items:center;gap:7px;transition:all .12s;}
+.pill:hover{color:var(--ink);}
+.pill.active{background:var(--ink);color:var(--bg-card);border-color:var(--ink);}
+.pill.on{background:var(--orange);color:#fff;border-color:var(--orange);}
+textarea,.txt{width:100%;font-family:var(--ff-sans);font-size:14.5px;line-height:1.5;color:var(--ink2);background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:12px 14px;outline:none;resize:vertical;min-height:60px;}
+textarea:focus{border-color:var(--orange);}
+.hr{height:1px;background:var(--rule);margin:22px 0;}
+.searchwrap{position:relative;}
+.searchwrap svg.mag{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--ink4);}
+input.search{width:100%;font-family:var(--ff-sans);font-size:14.5px;color:var(--ink);background:var(--bg-card);border:1px solid var(--rule);border-radius:6px;padding:12px 14px 12px 40px;outline:none;}
+input.search:focus{border-color:var(--orange);}
+select{font-family:var(--ff-sans);font-size:13px;padding:9px 10px;background:var(--bg-card);border:1px solid var(--rule);border-radius:6px;color:var(--ink);outline:none;}
+select:focus{border-color:var(--orange);}
+.results{border:1px solid var(--rule);border-radius:8px;overflow:hidden;margin-top:8px;background:var(--bg-card);}
+.res{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:10px 14px;background:transparent;border:none;border-bottom:1px solid var(--paper3);cursor:pointer;}
+.res:last-child{border-bottom:none;}
+.res:hover{background:var(--paper);}
+.res .grow{flex:1;min-width:0;}
+.res b{font-size:15px;font-weight:600;color:var(--ink);}
+.res .muted{font-family:var(--ff-mono);font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink3);}
+.res .add{font-family:var(--ff-mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--orange);white-space:nowrap;}
+.av{width:38px;height:38px;border-radius:50%;object-fit:cover;background:var(--paper3);flex-shrink:0;}
+.lg{width:32px;height:32px;object-fit:contain;flex-shrink:0;}
+.thumb{width:40px;height:40px;object-fit:contain;border-radius:6px;background:var(--paper3);flex-shrink:0;}
+.duo{display:inline-flex;align-items:center;flex-shrink:0;}
+.duo .lg:last-child{margin-left:-8px;}
+.items{list-style:none;border-top:1px solid var(--rule);margin-top:4px;}
+.it{display:flex;align-items:center;gap:12px;padding:11px 2px;border-bottom:1px solid var(--paper3);}
+.it .grip{color:var(--ink4);flex-shrink:0;}
+.it .rnk{font-family:var(--ff-mono);font-size:14px;color:var(--orange);width:22px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums;}
+.it .rnk.off{color:var(--ink4);}
+.it .grow{flex:1;min-width:0;}
+.it .nm{font-size:15.5px;font-weight:600;color:var(--ink);line-height:1.2;}
+.it .mt{font-family:var(--ff-mono);font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink3);margin-top:1px;}
+.iconbtn{display:flex;padding:5px;background:transparent;border:none;cursor:pointer;color:var(--ink3);}
+.iconbtn:hover{color:var(--ink);}
+.iconbtn:disabled{color:var(--rule);cursor:default;}
+.iconbtn.rm:hover{color:var(--red);}
+.btn{font-family:var(--ff-mono);font-size:12px;letter-spacing:.05em;text-transform:uppercase;padding:11px 20px;border-radius:8px;cursor:pointer;border:1px solid var(--rule);background:var(--bg-card);color:var(--ink);transition:all .15s;text-decoration:none;display:inline-block;}
+.btn:hover{border-color:var(--orange);}
 .btn.primary{background:var(--orange);color:#fff;border-color:var(--orange);}
-.btn.primary:hover{opacity:.9;color:#fff;}
-.btn.sm{padding:5px 9px;font-size:10px;}
+.btn.primary:hover{opacity:.9;}
+.btn.sm{padding:7px 12px;font-size:11px;}
 .btn.danger{color:var(--red);border-color:rgba(192,57,43,.4);}
 .btn.danger:hover{background:var(--red);color:#fff;}
-.list-card{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--rule);border-radius:10px;background:var(--bg-card);margin-bottom:10px;}
+.list-card{display:flex;align-items:center;gap:12px;padding:14px 16px;border:1px solid var(--rule);border-radius:12px;background:var(--bg-card);margin-bottom:10px;}
 .list-card .grow{flex:1;min-width:0;}
 .list-card .t{font-weight:600;font-size:16px;}
 .list-card .m{font-family:var(--ff-mono);font-size:11px;color:var(--ink3);margin-top:3px;}
-.pill{display:inline-block;padding:2px 7px;border-radius:4px;font-family:var(--ff-mono);font-size:9px;text-transform:uppercase;background:var(--paper3);color:var(--ink3);}
-.pill.pub{background:rgba(26,122,74,.14);color:var(--green);}
-.item{display:flex;align-items:center;gap:12px;padding:11px 4px;border-bottom:1px solid var(--paper3);}
-.item .rank{font-family:var(--ff-serif);color:var(--orange);min-width:28px;text-align:center;font-size:1.2rem;}
-.item .grow{flex:1;min-width:0;}
-.item .name{font-weight:600;font-size:15px;}
-.item .s{font-family:var(--ff-mono);font-size:11px;color:var(--ink3);}
-.thumb{width:40px;height:40px;object-fit:contain;border-radius:6px;background:var(--paper3);flex-shrink:0;}
-.av{width:38px;height:38px;border-radius:50%;object-fit:cover;background:var(--paper3);flex-shrink:0;}
-.lg{width:32px;height:32px;object-fit:contain;flex-shrink:0;}
-.duo{display:inline-flex;align-items:center;flex-shrink:0;}
-.duo .lg:last-child{margin-left:-8px;}
-.res{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--paper3);font-size:14px;}
-.res .grow{flex:1;min-width:0;}
+.badge{display:inline-block;padding:2px 7px;border-radius:4px;font-family:var(--ff-mono);font-size:9px;text-transform:uppercase;background:var(--paper3);color:var(--ink3);}
+.badge.pub{background:rgba(26,122,74,.14);color:var(--green);}
 .muted{color:var(--ink3);font-size:13px;}
 .state{text-align:center;padding:56px 0;color:var(--ink3);font-family:var(--ff-mono);font-size:13px;}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);font-size:13px;padding:9px 16px;border-radius:8px;z-index:999;}
-.stack{display:flex;flex-direction:column;gap:10px;}
-@media(max-width:640px){.wrap{padding:20px 16px 80px;}h1{font-size:1.6rem;}}
+.stack{display:flex;flex-direction:column;gap:14px;}
+@media(max-width:640px){.wrap{padding:20px 14px 80px;}.card{padding:24px 20px 22px;}.b-title{font-size:26px;}}
 </style>
 <link rel="stylesheet" href="/site-nav.css">
 <script src="/nba-assets.js"></script>
 </head>
 <body>
+<div class="grain"></div>
 <header class="site-nav">
   <div class="site-nav__bar">
     <a class="site-nav__brand" href="/"><img src="/transparent.png" alt=""><span class="site-nav__word">ydk<span>ball</span></span></a>
@@ -86,6 +112,12 @@ const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2000);}
 async function api(url,opts){const r=await fetch(url,Object.assign({credentials:'include',headers:{'Content-Type':'application/json'}},opts||{}));if(!r.ok){let e='HTTP '+r.status;try{e=(await r.json()).error||e;}catch(_){}throw new Error(e);}return r.json();}
+const SVG={grip:'<svg class="grip" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>',
+  up:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>',
+  down:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
+  x:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+  mag:'<svg class="mag" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>',
+  check:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'};
 
 function imgLogo(abbr,league){const u=window.ydkTeamLogo&&ydkTeamLogo(abbr,league);return u?`<img class="lg" src="${u}" onerror="this.style.visibility='hidden'" alt="">`:'<span class="lg"></span>';}
 function imgHead(pid,league){const u=window.ydkHeadshot&&ydkHeadshot(pid,league);return u?`<img class="av" src="${u}" onerror="this.style.visibility='hidden'" alt="">`:'<span class="av"></span>';}
@@ -93,7 +125,6 @@ function imgGame(it){const lg=it.league||'nba';return `<span class="duo">${imgLo
 
 const TYPES={games:'Games',players:'Players',player_seasons:'Player Seasons',teams:'Teams',team_seasons:'Team Seasons',jerseys:'Jerseys'};
 
-// Per-type behavior: where items live, their id field, display, remove + reorder endpoints, and the add UI.
 const CFG={
   games:{items:l=>l.games||[], idField:'gameId', add:addGamesUI, img:it=>imgGame(it),
     name:it=>`${it.awayTeamAbbr||'?'} @ ${it.homeTeamAbbr||'?'}`,
@@ -124,6 +155,7 @@ const CFG={
 };
 
 let ME=null;
+const NEW={type:'players', ranked:true, public:true};
 
 async function boot(){
   try{ const d=await (await fetch('/auth/me',{credentials:'include'})).json(); ME=d&&d.user; }catch(e){}
@@ -136,18 +168,26 @@ async function renderIndex(){
   const root=$('#root');
   root.innerHTML=`
     <h1>My Lists</h1>
-    <p class="sub">Rank games, players, teams, seasons & jerseys — then share them anywhere.</p>
-    <div class="section-label">New list</div>
-    <div class="card"><div class="stack">
-      <input id="nl-title" placeholder="List title (e.g. Top 10 games this season)" maxlength="100">
-      <div class="row">
-        <select id="nl-type" style="max-width:200px">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
-        <label class="chk"><input type="checkbox" id="nl-ranked" style="width:auto"> Ranked</label>
-        <button class="btn primary" id="nl-create">Create list</button>
+    <p class="sub" style="margin-bottom:22px">Rank games, players, teams, seasons & jerseys — then share the card.</p>
+    <div class="card" style="margin-bottom:30px">
+      <div class="eyebrow">Create a list</div>
+      <input id="nl-title" class="b-title" placeholder="Name your list…" maxlength="100">
+      <div class="seg" style="margin:18px 0 14px" id="nl-types">
+        ${Object.entries(TYPES).map(([k,v])=>`<button class="pill ${k===NEW.type?'active':''}" data-t="${k}">${v}</button>`).join('')}
       </div>
-    </div></div>
+      <div class="seg" style="margin-bottom:20px">
+        <button class="pill ${NEW.ranked?'on':''}" id="nl-ranked">${NEW.ranked?SVG.check:''}Ranked</button>
+        <button class="pill" id="nl-public">${NEW.public?'Public':'Private'}</button>
+      </div>
+      <button class="btn primary" id="nl-create">Create list</button>
+    </div>
     <div class="section-label">Your lists</div>
     <div id="mylists"><div class="state">Loading…</div></div>`;
+  $('#nl-types').querySelectorAll('[data-t]').forEach(b=>b.addEventListener('click',()=>{
+    NEW.type=b.dataset.t; $('#nl-types').querySelectorAll('.pill').forEach(x=>x.classList.toggle('active',x.dataset.t===NEW.type));
+  }));
+  $('#nl-ranked').addEventListener('click',e=>{NEW.ranked=!NEW.ranked;e.currentTarget.classList.toggle('on',NEW.ranked);e.currentTarget.innerHTML=(NEW.ranked?SVG.check:'')+'Ranked';});
+  $('#nl-public').addEventListener('click',e=>{NEW.public=!NEW.public;e.currentTarget.textContent=NEW.public?'Public':'Private';});
   $('#nl-create').addEventListener('click',createList);
   try{
     const {lists}=await api('/api/me/lists');
@@ -155,10 +195,8 @@ async function renderIndex(){
     if(!lists.length){ box.innerHTML='<div class="muted">No lists yet — create one above.</div>'; return; }
     box.innerHTML=lists.map(l=>`
       <div class="list-card">
-        <div class="grow">
-          <div class="t">${esc(l.title)}</div>
-          <div class="m">${TYPES[l.listType]||l.listType}${l.isRanked?' · ranked':''} · <span class="pill ${l.isPublic?'pub':''}">${l.isPublic?'public':'private'}</span></div>
-        </div>
+        <div class="grow"><div class="t">${esc(l.title)}</div>
+          <div class="m">${TYPES[l.listType]||l.listType}${l.isRanked?' · ranked':''} · <span class="badge ${l.isPublic?'pub':''}">${l.isPublic?'public':'private'}</span></div></div>
         <button class="btn sm" data-manage="${l.id}">Manage</button>
         <a class="btn sm" href="/list/${l.id}" target="_blank">View</a>
       </div>`).join('');
@@ -170,8 +208,7 @@ async function createList(){
   const title=$('#nl-title').value.trim();
   if(!title){ toast('Enter a title'); return; }
   try{
-    const {list}=await api('/api/me/lists',{method:'POST',body:JSON.stringify({
-      title, listType:$('#nl-type').value, isRanked:$('#nl-ranked').checked })});
+    const {list}=await api('/api/me/lists',{method:'POST',body:JSON.stringify({title, listType:NEW.type, isRanked:NEW.ranked, isPublic:NEW.public})});
     renderDetail(list.id);
   }catch(e){ toast(e.message); }
 }
@@ -187,19 +224,22 @@ async function renderDetail(id){
   const items=cfg.items(list);
 
   root.innerHTML=`
-    <a class="btn sm" id="back">← My Lists</a>
-    <div class="row" style="margin:16px 0 4px"><h2>${esc(list.title)}</h2></div>
-    <div class="m sub">${TYPES[type]||type}${list.isRanked?' · ranked':''} · ${items.length} item${items.length===1?'':'s'}</div>
-    <div class="row" style="margin:14px 0 4px">
-      <button class="btn" id="share">Share</button>
-      <a class="btn" href="/list/${id}" target="_blank">View public page</a>
-      <button class="btn" id="edit">Edit</button>
-      <button class="btn danger" id="del">Delete</button>
-    </div>
-    <div class="section-label">Add ${TYPES[type]||type}</div>
-    <div class="card" id="addbox"></div>
-    <div class="section-label">Items</div>
-    <div id="items"></div>`;
+    <a class="btn sm" id="back" style="margin-bottom:16px">← My Lists</a>
+    <div class="card">
+      <div class="eyebrow">${TYPES[type]||type}${list.isRanked?' · ranked':''} · <span style="color:var(--ink4)">${list.isPublic?'public':'private'}</span></div>
+      <div style="font-family:var(--ff-serif);font-size:30px;letter-spacing:-.015em;line-height:1.1;margin-bottom:16px">${esc(list.title)}</div>
+      <div class="seg" style="margin-bottom:20px">
+        <button class="btn sm" id="share">Share</button>
+        <a class="btn sm" href="/list/${id}" target="_blank">View page</a>
+        <button class="btn sm" id="edit">Edit details</button>
+        <button class="btn sm danger" id="del">Delete</button>
+      </div>
+      <div class="section-label">Add ${TYPES[type]||type}</div>
+      <div id="addbox"></div>
+      <div class="hr"></div>
+      <div class="section-label">${items.length} item${items.length===1?'':'s'}${list.isRanked?' · drag order with the arrows':''}</div>
+      <div id="items"></div>
+    </div>`;
 
   $('#back').addEventListener('click',renderIndex);
   $('#share').addEventListener('click',async()=>{const u=location.origin+'/list/'+id;
@@ -216,16 +256,16 @@ async function renderDetail(id){
 function renderItems(list,items,cfg){
   const box=$('#items'); const ranked=list.isRanked;
   if(!items.length){ box.innerHTML='<div class="muted">No items yet — add some above.</div>'; return; }
-  box.innerHTML=items.map((it,i)=>{
-    const key=it[cfg.idField]; const sub=cfg.sub(it);
-    const img=cfg.img?cfg.img(it):'';
-    return `<div class="item">
-      ${ranked?`<span class="rank">${i+1}</span>`:'<span class="rank" style="color:var(--rule)">•</span>'}
+  box.innerHTML=`<ul class="items">`+items.map((it,i)=>{
+    const key=it[cfg.idField]; const sub=cfg.sub(it); const img=cfg.img?cfg.img(it):'';
+    return `<li class="it">
+      ${SVG.grip}
+      ${ranked?`<span class="rnk">${i+1}</span>`:'<span class="rnk off">•</span>'}
       ${img}
-      <div class="grow"><div class="name">${esc(cfg.name(it))}</div>${sub?`<div class="s">${esc(sub)}</div>`:''}</div>
-      ${ranked?`<button class="btn sm" data-up="${esc(key)}" ${i===0?'disabled':''}>↑</button><button class="btn sm" data-down="${esc(key)}" ${i===items.length-1?'disabled':''}>↓</button>`:''}
-      <button class="btn sm danger" data-rm="${esc(key)}">✕</button>
-    </div>`;}).join('');
+      <div class="grow"><div class="nm">${esc(cfg.name(it))}</div>${sub?`<div class="mt">${esc(sub)}</div>`:''}</div>
+      ${ranked?`<button class="iconbtn" data-up="${esc(key)}" ${i===0?'disabled':''}>${SVG.up}</button><button class="iconbtn" data-down="${esc(key)}" ${i===items.length-1?'disabled':''}>${SVG.down}</button>`:''}
+      <button class="iconbtn rm" data-rm="${esc(key)}">${SVG.x}</button>
+    </li>`;}).join('')+`</ul>`;
   box.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>removeItem(list,cfg,b.dataset.rm)));
   box.querySelectorAll('[data-up]').forEach(b=>b.addEventListener('click',()=>move(list,items,cfg,b.dataset.up,-1)));
   box.querySelectorAll('[data-down]').forEach(b=>b.addEventListener('click',()=>move(list,items,cfg,b.dataset.down,1)));
@@ -241,25 +281,24 @@ async function move(list,items,cfg,key,dir){
   try{ await cfg.reorder(list.id, arr.map(x=>x[cfg.idField])); renderDetail(list.id); }catch(e){ toast(e.message); }
 }
 
-// ---- generic search-add helper for players/teams/jerseys ----
+// ---- generic search-add (players/teams/jerseys) ----
 function searchAdd(list, cfg, opts){
-  // opts: {placeholder, league (bool), search(q,league)->[results], row(r)->html, add(r,league)->promise, immediate}
-  const lg = opts.league ? `<select id="lg" style="max-width:110px"><option value="nba">NBA</option><option value="wnba">WNBA</option></select>` : '';
+  const lg = opts.league ? `<select id="lg" style="max-width:100px"><option value="nba">NBA</option><option value="wnba">WNBA</option></select>` : '';
   $('#addbox').innerHTML=`<div class="stack">
-    <div class="row"><input id="q" placeholder="${opts.placeholder}" style="flex:1">${lg}</div>
+    <div class="seg" style="gap:8px">${lg}<div class="searchwrap" style="flex:1">${SVG.mag}<input id="q" class="search" placeholder="${opts.placeholder}"></div></div>
     <div id="res"></div></div>`;
   let t;
   async function run(){
     const q=$('#q').value.trim(); const res=$('#res'); const league=opts.league?$('#lg').value:'nba';
     if(opts.minLen && q.length<opts.minLen){ res.innerHTML=''; return; }
-    res.innerHTML='<div class="muted">Searching…</div>';
+    res.innerHTML='<div class="muted" style="padding:8px 2px">Searching…</div>';
     try{
       const results=await opts.search(q,league);
-      res.innerHTML = results.length ? results.map((r,i)=>`<div class="res">${opts.row(r,league)}<button class="btn sm primary" data-i="${i}">Add</button></div>`).join('') : '<div class="muted">No matches.</div>';
+      res.innerHTML = results.length ? `<div class="results">`+results.map((r,i)=>`<button class="res" data-i="${i}">${opts.row(r,league)}<span class="add">+ Add</span></button>`).join('')+`</div>` : '<div class="muted" style="padding:8px 2px">No matches.</div>';
       res.querySelectorAll('[data-i]').forEach(b=>b.addEventListener('click',async()=>{
         try{ await opts.add(results[b.dataset.i],league); toast('Added'); renderDetail(list.id); }catch(e){ toast(e.message); }
       }));
-    }catch(e){ res.innerHTML=`<div class="muted">${esc(e.message)}</div>`; }
+    }catch(e){ res.innerHTML=`<div class="muted" style="padding:8px 2px">${esc(e.message)}</div>`; }
   }
   $('#q').addEventListener('input',()=>{clearTimeout(t);t=setTimeout(run,250);});
   if(opts.league) $('#lg').addEventListener('change',run);
@@ -273,7 +312,6 @@ function addPlayersUI(list){
     row:(p,lg)=>`${imgHead(p.playerId,lg)}<div class="grow"><b>${esc(p.playerName)}</b> <span class="muted">${esc([p.team,type==='player_seasons'?p.season:null].filter(Boolean).join(' · '))}</span></div>`,
     add:(p,lg)=>api(`/api/lists/${list.id}/players`,{method:'POST',body:JSON.stringify({playerId:p.playerId,playerName:p.playerName,team:p.team,season:p.season,league:lg})}) });
 }
-
 function addTeamsUI(list){
   const type=list.listType;
   searchAdd(list,CFG[type],{ placeholder:'Search teams…', league:true, minLen:0, immediate:true,
@@ -281,26 +319,23 @@ function addTeamsUI(list){
     row:(tm,lg)=>`${imgLogo(tm.teamAbbr,lg)}<div class="grow"><b>${esc(tm.teamName)}</b> <span class="muted">${esc([tm.teamAbbr,type==='team_seasons'?tm.season:null,(type==='team_seasons'&&tm.wins!=null)?`${tm.wins}–${tm.losses}`:null].filter(Boolean).join(' · '))}</span></div>`,
     add:(tm,lg)=>api(`/api/lists/${list.id}/teams`,{method:'POST',body:JSON.stringify({teamAbbr:tm.teamAbbr,teamName:tm.teamName,season:type==='team_seasons'?tm.season:tm.latestSeason,wins:tm.wins,losses:tm.losses,league:lg})}) });
 }
-
 function addJerseysUI(list){
   searchAdd(list,CFG.jerseys,{ placeholder:'Search jerseys (team or name)…', league:true, minLen:2,
     search:async(q,lg)=>(await api(`/api/jerseys/search?q=${encodeURIComponent(q)}&league=${lg}`)).jerseys,
     row:j=>`<img class="thumb" src="${esc(j.imageUrl)}" alt=""><div class="grow"><b>${esc(j.label)}</b> <span class="muted">${esc([j.teamName,j.yearRange].filter(Boolean).join(' · '))}</span></div>`,
-    add:(j)=>api(`/api/lists/${list.id}/jerseys`,{method:'POST',body:JSON.stringify({jerseyId:j.id,label:j.label,imageUrl:j.imageUrl})}) });
+    add:j=>api(`/api/lists/${list.id}/jerseys`,{method:'POST',body:JSON.stringify({jerseyId:j.id,label:j.label,imageUrl:j.imageUrl})}) });
 }
 
-// ---- add games (browse by filters, like iOS) ----
+// ---- add games (browse by filters) ----
 async function addGamesUI(list){
   $('#addbox').innerHTML=`<div class="stack">
-    <div class="row">
-      <select id="glg" style="max-width:96px"><option value="nba">NBA</option><option value="wnba">WNBA</option></select>
+    <div class="seg">
+      <select id="glg" style="max-width:92px"><option value="nba">NBA</option><option value="wnba">WNBA</option></select>
       <select id="gseason" style="flex:1;min-width:110px"><option value="">All seasons</option></select>
       <select id="gteam" style="flex:1;min-width:110px"><option value="">All teams</option></select>
-      <select id="gsort" style="max-width:150px">
-        <option value="date">Newest</option><option value="date_asc">Oldest</option>
-        <option value="rating">Top rated</option><option value="reviews">Most reviewed</option></select>
+      <select id="gsort" style="max-width:140px"><option value="date">Newest</option><option value="date_asc">Oldest</option><option value="rating">Top rated</option><option value="reviews">Most reviewed</option></select>
     </div>
-    <div id="gres"><div class="muted">Loading games…</div></div></div>`;
+    <div id="gres"><div class="muted" style="padding:8px 2px">Loading games…</div></div></div>`;
   const lg=$('#glg'),seasonSel=$('#gseason'),teamSel=$('#gteam'),sortSel=$('#gsort');
   async function loadFilters(){
     const league=lg.value; let seasons=[],teams=[];
@@ -311,7 +346,7 @@ async function addGamesUI(list){
     teamSel.innerHTML='<option value="">All teams</option>'+teams.map(t=>`<option value="${esc(t.teamAbbr)}">${esc(t.teamName)}</option>`).join('');
   }
   async function run(){
-    const res=$('#gres'); res.innerHTML='<div class="muted">Loading…</div>';
+    const res=$('#gres'); res.innerHTML='<div class="muted" style="padding:8px 2px">Loading…</div>';
     const league=lg.value; const p=new URLSearchParams({league,limit:'50'});
     let sort=sortSel.value,dir='desc'; if(sort==='date_asc'){sort='date';dir='asc';}
     p.set('sort',sort); p.set('dir',dir);
@@ -319,14 +354,11 @@ async function addGamesUI(list){
     if(teamSel.value)p.set('team',teamSel.value);
     try{
       const {games}=await api('/api/games?'+p.toString());
-      res.innerHTML=games.length?games.map(g=>`<div class="res">
-        <span class="duo">${imgLogo(g.away_team_abbr,league)}${imgLogo(g.home_team_abbr,league)}</span>
-        <div class="grow"><b>${esc(g.away_team_abbr)} @ ${esc(g.home_team_abbr)}</b> <span class="muted">${esc(g.game_date)}${g.away_score!=null?` · ${g.away_score}–${g.home_score}`:''}</span></div>
-        <button class="btn sm primary" data-g="${esc(g.game_id)}">Add</button></div>`).join('') : '<div class="muted">No games found.</div>';
+      res.innerHTML=games.length?`<div class="results">`+games.map(g=>`<button class="res" data-g="${esc(g.game_id)}"><span class="duo">${imgLogo(g.away_team_abbr,league)}${imgLogo(g.home_team_abbr,league)}</span><div class="grow"><b>${esc(g.away_team_abbr)} @ ${esc(g.home_team_abbr)}</b> <span class="muted">${esc(g.game_date)}${g.away_score!=null?` · ${g.away_score}–${g.home_score}`:''}</span></div><span class="add">+ Add</span></button>`).join('')+`</div>` : '<div class="muted" style="padding:8px 2px">No games found.</div>';
       res.querySelectorAll('[data-g]').forEach(b=>b.addEventListener('click',async()=>{
         try{await api(`/api/lists/${list.id}/games`,{method:'POST',body:JSON.stringify({gameId:b.dataset.g})});toast('Added');renderDetail(list.id);}catch(e){toast(e.message);}
       }));
-    }catch(e){ res.innerHTML=`<div class="muted">${esc(e.message)}</div>`; }
+    }catch(e){ res.innerHTML=`<div class="muted" style="padding:8px 2px">${esc(e.message)}</div>`; }
   }
   lg.addEventListener('change',async()=>{await loadFilters();run();});
   [seasonSel,teamSel,sortSel].forEach(el=>el.addEventListener('change',run));
@@ -336,21 +368,21 @@ async function addGamesUI(list){
 // ---- edit meta ----
 function editMeta(list){
   const box=$('#items');
-  box.innerHTML=`<div class="card"><div class="stack">
-    <input id="e-title" value="${esc(list.title)}" maxlength="100">
+  box.innerHTML=`<div class="stack">
+    <input id="e-title" class="txt" value="${esc(list.title)}" maxlength="100" style="font-weight:600">
     <textarea id="e-desc" rows="2" placeholder="Description (optional)">${esc(list.description||'')}</textarea>
-    <div class="row">
-      <label class="chk"><input type="checkbox" id="e-pub" ${list.isPublic?'checked':''} style="width:auto"> Public</label>
-      <label class="chk"><input type="checkbox" id="e-rank" ${list.isRanked?'checked':''} style="width:auto"> Ranked</label>
-      <button class="btn primary" id="e-save">Save</button>
-      <button class="btn" id="e-cancel">Cancel</button>
-    </div></div></div>`;
-  box.scrollIntoView({behavior:'smooth'});
+    <div class="seg">
+      <button class="pill ${list.isRanked?'on':''}" id="e-rank">${list.isRanked?SVG.check:''}Ranked</button>
+      <button class="pill" id="e-pub">${list.isPublic?'Public':'Private'}</button>
+      <button class="btn sm primary" id="e-save">Save</button>
+      <button class="btn sm" id="e-cancel">Cancel</button>
+    </div></div>`;
+  let rk=list.isRanked, pb=list.isPublic;
+  $('#e-rank').addEventListener('click',e=>{rk=!rk;e.currentTarget.classList.toggle('on',rk);e.currentTarget.innerHTML=(rk?SVG.check:'')+'Ranked';});
+  $('#e-pub').addEventListener('click',e=>{pb=!pb;e.currentTarget.textContent=pb?'Public':'Private';});
   $('#e-cancel').addEventListener('click',()=>renderDetail(list.id));
   $('#e-save').addEventListener('click',async()=>{
-    try{ await api('/api/lists/'+list.id,{method:'PATCH',body:JSON.stringify({
-      title:$('#e-title').value.trim(), description:$('#e-desc').value.trim(),
-      isPublic:$('#e-pub').checked, isRanked:$('#e-rank').checked })});
+    try{ await api('/api/lists/'+list.id,{method:'PATCH',body:JSON.stringify({title:$('#e-title').value.trim(),description:$('#e-desc').value.trim(),isPublic:pb,isRanked:rk})});
       toast('Saved'); renderDetail(list.id);
     }catch(e){ toast(e.message); }
   });
