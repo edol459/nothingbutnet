@@ -52,11 +52,11 @@ label.chk{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:va
 .item .grow{flex:1;min-width:0;}
 .item .name{font-weight:600;font-size:15px;}
 .item .s{font-family:var(--ff-mono);font-size:11px;color:var(--ink3);}
+.thumb{width:40px;height:40px;object-fit:contain;border-radius:6px;background:var(--paper3);flex-shrink:0;}
 .res{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--paper3);font-size:14px;}
 .res .grow{flex:1;min-width:0;}
 .muted{color:var(--ink3);font-size:13px;}
 .state{text-align:center;padding:56px 0;color:var(--ink3);font-family:var(--ff-mono);font-size:13px;}
-.hide{display:none;}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);font-size:13px;padding:9px 16px;border-radius:8px;z-index:999;}
 .stack{display:flex;flex-direction:column;gap:10px;}
 @media(max-width:640px){.wrap{padding:20px 16px 80px;}h1{font-size:1.6rem;}}
@@ -81,7 +81,37 @@ const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2000);}
 async function api(url,opts){const r=await fetch(url,Object.assign({credentials:'include',headers:{'Content-Type':'application/json'}},opts||{}));if(!r.ok){let e='HTTP '+r.status;try{e=(await r.json()).error||e;}catch(_){}throw new Error(e);}return r.json();}
-const TYPES={games:'Games',players:'Players',player_seasons:'Player Seasons'};
+
+const TYPES={games:'Games',players:'Players',player_seasons:'Player Seasons',teams:'Teams',team_seasons:'Team Seasons',jerseys:'Jerseys'};
+
+// Per-type behavior: where items live, their id field, display, remove + reorder endpoints, and the add UI.
+const CFG={
+  games:{items:l=>l.games||[], idField:'gameId', add:addGamesUI,
+    name:it=>`${it.awayTeamAbbr||'?'} @ ${it.homeTeamAbbr||'?'}`,
+    sub:it=>[it.gameDate,(it.awayScore!=null&&it.homeScore!=null)?`${it.awayScore}–${it.homeScore}`:''].filter(Boolean).join(' · '),
+    rm:(lid,k)=>`/api/lists/${lid}/games/${k}`,
+    reorder:(lid,ids)=>api(`/api/lists/${lid}/games/reorder`,{method:'PATCH',body:JSON.stringify({gameIds:ids})})},
+  players:{items:l=>l.playerItems||[], idField:'id', add:addPlayersUI,
+    name:it=>it.playerName, sub:it=>it.team||'',
+    rm:(lid,k)=>`/api/lists/${lid}/players/${k}`,
+    reorder:(lid,ids)=>api(`/api/lists/${lid}/players/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})})},
+  player_seasons:{items:l=>l.playerItems||[], idField:'id', add:addPlayersUI,
+    name:it=>it.playerName, sub:it=>[it.team,it.season].filter(Boolean).join(' · '),
+    rm:(lid,k)=>`/api/lists/${lid}/players/${k}`,
+    reorder:(lid,ids)=>api(`/api/lists/${lid}/players/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})})},
+  teams:{items:l=>l.teamItems||[], idField:'id', add:addTeamsUI,
+    name:it=>it.teamName, sub:it=>it.teamAbbr||'',
+    rm:(lid,k)=>`/api/lists/${lid}/teams/${k}`,
+    reorder:(lid,ids)=>api(`/api/lists/${lid}/teams/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})})},
+  team_seasons:{items:l=>l.teamItems||[], idField:'id', add:addTeamsUI,
+    name:it=>it.teamName, sub:it=>[it.season,(it.wins!=null&&it.losses!=null)?`${it.wins}–${it.losses}`:''].filter(Boolean).join(' · '),
+    rm:(lid,k)=>`/api/lists/${lid}/teams/${k}`,
+    reorder:(lid,ids)=>api(`/api/lists/${lid}/teams/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})})},
+  jerseys:{items:l=>l.jerseyItems||[], idField:'id', add:addJerseysUI, thumb:it=>it.imageUrl,
+    name:it=>it.label, sub:it=>[it.teamName,it.yearRange].filter(Boolean).join(' · '),
+    rm:(lid,k)=>`/api/lists/${lid}/jerseys/${k}`,
+    reorder:(lid,ids)=>api(`/api/lists/${lid}/jerseys/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})})},
+};
 
 let ME=null;
 
@@ -96,18 +126,16 @@ async function renderIndex(){
   const root=$('#root');
   root.innerHTML=`
     <h1>My Lists</h1>
-    <p class="sub">Rank games and players, then share them anywhere.</p>
+    <p class="sub">Rank games, players, teams, seasons & jerseys — then share them anywhere.</p>
     <div class="section-label">New list</div>
-    <div class="card">
-      <div class="stack">
-        <input id="nl-title" placeholder="List title (e.g. Top 10 games this season)" maxlength="100">
-        <div class="row">
-          <select id="nl-type" style="max-width:200px">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
-          <label class="chk"><input type="checkbox" id="nl-ranked" style="width:auto"> Ranked</label>
-          <button class="btn primary" id="nl-create">Create list</button>
-        </div>
+    <div class="card"><div class="stack">
+      <input id="nl-title" placeholder="List title (e.g. Top 10 games this season)" maxlength="100">
+      <div class="row">
+        <select id="nl-type" style="max-width:200px">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
+        <label class="chk"><input type="checkbox" id="nl-ranked" style="width:auto"> Ranked</label>
+        <button class="btn primary" id="nl-create">Create list</button>
       </div>
-    </div>
+    </div></div>
     <div class="section-label">Your lists</div>
     <div id="mylists"><div class="state">Loading…</div></div>`;
   $('#nl-create').addEventListener('click',createList);
@@ -145,25 +173,21 @@ async function renderDetail(id){
   let list;
   try{ list=(await api('/api/lists/'+id)).list; }catch(e){ root.innerHTML=`<div class="state">${esc(e.message)}</div>`; return; }
   const type=list.listType||'games';
-  const items = type==='games' ? (list.games||[]) : (list.playerItems||[]);
-  const ranked=list.isRanked;
+  const cfg=CFG[type]||CFG.games;
+  const items=cfg.items(list);
 
   root.innerHTML=`
     <a class="btn sm" id="back">← My Lists</a>
-    <div class="row" style="justify-content:space-between;margin:16px 0 4px">
-      <h2>${esc(list.title)}</h2>
-    </div>
-    <div class="m sub">${TYPES[type]||type}${ranked?' · ranked':''} · ${items.length} item${items.length===1?'':'s'}</div>
+    <div class="row" style="margin:16px 0 4px"><h2>${esc(list.title)}</h2></div>
+    <div class="m sub">${TYPES[type]||type}${list.isRanked?' · ranked':''} · ${items.length} item${items.length===1?'':'s'}</div>
     <div class="row" style="margin:14px 0 4px">
       <button class="btn" id="share">Share</button>
       <a class="btn" href="/list/${id}" target="_blank">View public page</a>
       <button class="btn" id="edit">Edit</button>
       <button class="btn danger" id="del">Delete</button>
     </div>
-
     <div class="section-label">Add ${TYPES[type]||type}</div>
     <div class="card" id="addbox"></div>
-
     <div class="section-label">Items</div>
     <div id="items"></div>`;
 
@@ -175,72 +199,84 @@ async function renderDetail(id){
     try{await api('/api/lists/'+id,{method:'DELETE'});renderIndex();}catch(e){toast(e.message);}});
   $('#edit').addEventListener('click',()=>editMeta(list));
 
-  renderItems(list,items);
-  (type==='games'?addGamesUI:addPlayersUI)(list);
+  renderItems(list,items,cfg);
+  cfg.add(list);
 }
 
-function renderItems(list,items){
-  const box=$('#items'); const type=list.listType||'games'; const ranked=list.isRanked;
+function renderItems(list,items,cfg){
+  const box=$('#items'); const ranked=list.isRanked;
   if(!items.length){ box.innerHTML='<div class="muted">No items yet — add some above.</div>'; return; }
   box.innerHTML=items.map((it,i)=>{
-    const name = type==='games' ? `${it.awayTeamAbbr||'?'} @ ${it.homeTeamAbbr||'?'}` : it.playerName;
-    const sub = type==='games'
-      ? [it.gameDate,(it.awayScore!=null&&it.homeScore!=null)?`${it.awayScore}–${it.homeScore}`:''].filter(Boolean).join(' · ')
-      : [it.team,(type==='player_seasons'?it.season:null)].filter(Boolean).join(' · ');
-    const key = type==='games' ? it.gameId : it.id;
+    const key=it[cfg.idField]; const sub=cfg.sub(it);
+    const thumb=cfg.thumb?`<img class="thumb" src="${esc(cfg.thumb(it))}" alt="">`:'';
     return `<div class="item">
       ${ranked?`<span class="rank">${i+1}</span>`:'<span class="rank" style="color:var(--rule)">•</span>'}
-      <div class="grow"><div class="name">${esc(name)}</div>${sub?`<div class="s">${esc(sub)}</div>`:''}</div>
-      ${ranked?`<button class="btn sm" data-up="${key}" ${i===0?'disabled':''}>↑</button><button class="btn sm" data-down="${key}" ${i===items.length-1?'disabled':''}>↓</button>`:''}
-      <button class="btn sm danger" data-rm="${key}">✕</button>
+      ${thumb}
+      <div class="grow"><div class="name">${esc(cfg.name(it))}</div>${sub?`<div class="s">${esc(sub)}</div>`:''}</div>
+      ${ranked?`<button class="btn sm" data-up="${esc(key)}" ${i===0?'disabled':''}>↑</button><button class="btn sm" data-down="${esc(key)}" ${i===items.length-1?'disabled':''}>↓</button>`:''}
+      <button class="btn sm danger" data-rm="${esc(key)}">✕</button>
     </div>`;}).join('');
-  box.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>removeItem(list,b.dataset.rm)));
-  box.querySelectorAll('[data-up]').forEach(b=>b.addEventListener('click',()=>move(list,items,b.dataset.up,-1)));
-  box.querySelectorAll('[data-down]').forEach(b=>b.addEventListener('click',()=>move(list,items,b.dataset.down,1)));
+  box.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>removeItem(list,cfg,b.dataset.rm)));
+  box.querySelectorAll('[data-up]').forEach(b=>b.addEventListener('click',()=>move(list,items,cfg,b.dataset.up,-1)));
+  box.querySelectorAll('[data-down]').forEach(b=>b.addEventListener('click',()=>move(list,items,cfg,b.dataset.down,1)));
 }
 
-async function removeItem(list,key){
-  const type=list.listType||'games';
-  const url = type==='games' ? `/api/lists/${list.id}/games/${key}` : `/api/lists/${list.id}/players/${key}`;
-  try{ await api(url,{method:'DELETE'}); renderDetail(list.id); }catch(e){ toast(e.message); }
+async function removeItem(list,cfg,key){
+  try{ await api(cfg.rm(list.id,key),{method:'DELETE'}); renderDetail(list.id); }catch(e){ toast(e.message); }
 }
-
-async function move(list,items,key,dir){
-  const type=list.listType||'games'; const idField = type==='games'?'gameId':'id';
-  const idx=items.findIndex(x=>String(x[idField])===String(key)); const j=idx+dir;
+async function move(list,items,cfg,key,dir){
+  const idx=items.findIndex(x=>String(x[cfg.idField])===String(key)); const j=idx+dir;
   if(idx<0||j<0||j>=items.length)return;
   const arr=items.slice(); [arr[idx],arr[j]]=[arr[j],arr[idx]];
-  const ids=arr.map(x=>x[idField]);
-  try{
-    if(type==='games') await api(`/api/lists/${list.id}/games/reorder`,{method:'PATCH',body:JSON.stringify({gameIds:ids})});
-    else await api(`/api/lists/${list.id}/players/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})});
-    renderDetail(list.id);
-  }catch(e){ toast(e.message); }
+  try{ await cfg.reorder(list.id, arr.map(x=>x[cfg.idField])); renderDetail(list.id); }catch(e){ toast(e.message); }
 }
 
-// ---- add players (typeahead) ----
-function addPlayersUI(list){
-  const type=list.listType;
+// ---- generic search-add helper for players/teams/jerseys ----
+function searchAdd(list, cfg, opts){
+  // opts: {placeholder, league (bool), search(q,league)->[results], row(r)->html, add(r,league)->promise, immediate}
+  const lg = opts.league ? `<select id="lg" style="max-width:110px"><option value="nba">NBA</option><option value="wnba">WNBA</option></select>` : '';
   $('#addbox').innerHTML=`<div class="stack">
-    <div class="row"><input id="pq" placeholder="Search players…" style="flex:1">
-      <select id="plg" style="max-width:110px"><option value="nba">NBA</option><option value="wnba">WNBA</option></select></div>
-    <div id="pres"></div></div>`;
+    <div class="row"><input id="q" placeholder="${opts.placeholder}" style="flex:1">${lg}</div>
+    <div id="res"></div></div>`;
   let t;
-  $('#pq').addEventListener('input',()=>{clearTimeout(t);t=setTimeout(async()=>{
-    const q=$('#pq').value.trim(); const res=$('#pres');
-    if(q.length<2){res.innerHTML='';return;}
+  async function run(){
+    const q=$('#q').value.trim(); const res=$('#res'); const league=opts.league?$('#lg').value:'nba';
+    if(opts.minLen && q.length<opts.minLen){ res.innerHTML=''; return; }
+    res.innerHTML='<div class="muted">Searching…</div>';
     try{
-      const {players}=await api(`/api/lists/players/search?q=${encodeURIComponent(q)}&type=${type}&league=${$('#plg').value}`);
-      res.innerHTML = players.length? players.map((p,i)=>`<div class="res"><div class="grow"><b>${esc(p.playerName)}</b> <span class="muted">${esc([p.team,type==='player_seasons'?p.season:null].filter(Boolean).join(' · '))}</span></div><button class="btn sm primary" data-i="${i}">Add</button></div>`).join('') : '<div class="muted">No matches.</div>';
+      const results=await opts.search(q,league);
+      res.innerHTML = results.length ? results.map((r,i)=>`<div class="res">${opts.row(r)}<button class="btn sm primary" data-i="${i}">Add</button></div>`).join('') : '<div class="muted">No matches.</div>';
       res.querySelectorAll('[data-i]').forEach(b=>b.addEventListener('click',async()=>{
-        const p=players[b.dataset.i];
-        try{ await api(`/api/lists/${list.id}/players`,{method:'POST',body:JSON.stringify({
-          playerId:p.playerId,playerName:p.playerName,team:p.team,season:p.season,league:$('#plg').value})});
-          toast('Added'); renderDetail(list.id);
-        }catch(e){ toast(e.message); }
+        try{ await opts.add(results[b.dataset.i],league); toast('Added'); renderDetail(list.id); }catch(e){ toast(e.message); }
       }));
     }catch(e){ res.innerHTML=`<div class="muted">${esc(e.message)}</div>`; }
-  },250);});
+  }
+  $('#q').addEventListener('input',()=>{clearTimeout(t);t=setTimeout(run,250);});
+  if(opts.league) $('#lg').addEventListener('change',run);
+  if(opts.immediate) run();
+}
+
+function addPlayersUI(list){
+  const type=list.listType;
+  searchAdd(list,CFG[type],{ placeholder:'Search players…', league:true, minLen:2,
+    search:async(q,lg)=>(await api(`/api/lists/players/search?q=${encodeURIComponent(q)}&type=${type}&league=${lg}`)).players,
+    row:p=>`<div class="grow"><b>${esc(p.playerName)}</b> <span class="muted">${esc([p.team,type==='player_seasons'?p.season:null].filter(Boolean).join(' · '))}</span></div>`,
+    add:(p,lg)=>api(`/api/lists/${list.id}/players`,{method:'POST',body:JSON.stringify({playerId:p.playerId,playerName:p.playerName,team:p.team,season:p.season,league:lg})}) });
+}
+
+function addTeamsUI(list){
+  const type=list.listType;
+  searchAdd(list,CFG[type],{ placeholder:'Search teams…', league:true, minLen:0, immediate:true,
+    search:async(q,lg)=>(await api(`/api/teams/search?q=${encodeURIComponent(q)}&type=${type}&league=${lg}`)).teams,
+    row:tm=>`<div class="grow"><b>${esc(tm.teamName)}</b> <span class="muted">${esc([tm.teamAbbr,type==='team_seasons'?tm.season:null,(type==='team_seasons'&&tm.wins!=null)?`${tm.wins}–${tm.losses}`:null].filter(Boolean).join(' · '))}</span></div>`,
+    add:(tm,lg)=>api(`/api/lists/${list.id}/teams`,{method:'POST',body:JSON.stringify({teamAbbr:tm.teamAbbr,teamName:tm.teamName,season:type==='team_seasons'?tm.season:tm.latestSeason,wins:tm.wins,losses:tm.losses,league:lg})}) });
+}
+
+function addJerseysUI(list){
+  searchAdd(list,CFG.jerseys,{ placeholder:'Search jerseys (team or name)…', league:true, minLen:2,
+    search:async(q,lg)=>(await api(`/api/jerseys/search?q=${encodeURIComponent(q)}&league=${lg}`)).jerseys,
+    row:j=>`<img class="thumb" src="${esc(j.imageUrl)}" alt=""><div class="grow"><b>${esc(j.label)}</b> <span class="muted">${esc([j.teamName,j.yearRange].filter(Boolean).join(' · '))}</span></div>`,
+    add:(j)=>api(`/api/lists/${list.id}/jerseys`,{method:'POST',body:JSON.stringify({jerseyId:j.id,label:j.label,imageUrl:j.imageUrl})}) });
 }
 
 // ---- add games (browse by season/team) ----
@@ -260,11 +296,9 @@ function addGamesUI(list){
     const tm=$('#gteam').value.trim(); if(tm)p.set('team',tm);
     try{
       const {games}=await api('/api/games?'+p.toString());
-      res.innerHTML = games.length? games.map((g,i)=>`<div class="res"><div class="grow"><b>${esc(g.away_team_abbr)} @ ${esc(g.home_team_abbr)}</b> <span class="muted">${esc(g.game_date)}${(g.away_score!=null)?` · ${g.away_score}–${g.home_score}`:''}</span></div><button class="btn sm primary" data-g="${esc(g.game_id)}">Add</button></div>`).join('') : '<div class="muted">No games found.</div>';
+      res.innerHTML = games.length? games.map((g)=>`<div class="res"><div class="grow"><b>${esc(g.away_team_abbr)} @ ${esc(g.home_team_abbr)}</b> <span class="muted">${esc(g.game_date)}${(g.away_score!=null)?` · ${g.away_score}–${g.home_score}`:''}</span></div><button class="btn sm primary" data-g="${esc(g.game_id)}">Add</button></div>`).join('') : '<div class="muted">No games found.</div>';
       res.querySelectorAll('[data-g]').forEach(b=>b.addEventListener('click',async()=>{
-        try{ await api(`/api/lists/${list.id}/games`,{method:'POST',body:JSON.stringify({gameId:b.dataset.g})});
-          toast('Added'); renderDetail(list.id);
-        }catch(e){ toast(e.message); }
+        try{ await api(`/api/lists/${list.id}/games`,{method:'POST',body:JSON.stringify({gameId:b.dataset.g})}); toast('Added'); renderDetail(list.id); }catch(e){ toast(e.message); }
       }));
     }catch(e){ res.innerHTML=`<div class="muted">${esc(e.message)}</div>`; }
   });
@@ -272,7 +306,6 @@ function addGamesUI(list){
 
 // ---- edit meta ----
 function editMeta(list){
-  $('#addbox').scrollIntoView({behavior:'smooth'});
   const box=$('#items');
   box.innerHTML=`<div class="card"><div class="stack">
     <input id="e-title" value="${esc(list.title)}" maxlength="100">
@@ -283,6 +316,7 @@ function editMeta(list){
       <button class="btn primary" id="e-save">Save</button>
       <button class="btn" id="e-cancel">Cancel</button>
     </div></div></div>`;
+  box.scrollIntoView({behavior:'smooth'});
   $('#e-cancel').addEventListener('click',()=>renderDetail(list.id));
   $('#e-save').addEventListener('click',async()=>{
     try{ await api('/api/lists/'+list.id,{method:'PATCH',body:JSON.stringify({
