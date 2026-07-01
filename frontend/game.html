@@ -968,6 +968,7 @@ function wnbaTeamLogoUrl(abbr) {
 const STAR_ON  = '#00C030';
 const STAR_OFF = '#d8d5cf';
 let _reviewUser    = null;
+let _reviewUserLoaded = false;
 let _currentTags   = [];
 let _attended      = false;
 let _boxscoreData  = null;
@@ -1044,10 +1045,30 @@ function avatarEl(name, url, userId = null, favoriteTeam = null) {
 // ── Aggregate rating display in scoreboard header ─────────
 async function loadAggRating() { /* no-op: shown in reviews tab */ }
 
+// Populate the current signed-in user (once). site-nav.js updates the header
+// avatar but doesn't set our page-level _reviewUser, so we fetch it ourselves.
+async function ensureReviewUser() {
+  if (_reviewUserLoaded) return;
+  _reviewUserLoaded = true;
+  try {
+    const res  = await fetch('/auth/me');
+    const data = await res.json();
+    _reviewUser = data.user || null;
+  } catch { _reviewUser = null; }
+}
+
+// Sign-in link that returns the user to THIS game's reviews tab (keeps gameId).
+function reviewSignInHref() {
+  const p = new URLSearchParams(window.location.search);
+  p.set('tab', 'reviews');
+  return `/auth/google/login?next=${encodeURIComponent(window.location.pathname + '?' + p.toString())}`;
+}
+
 // ── Load the reviews panel ────────────────────────────────
 async function loadReviewsPanel(append = false) {
   const panel = document.getElementById('panel-reviews');
   if (!panel) return;
+  await ensureReviewUser();
   const container = panel.querySelector('.reviews-panel') || panel;
 
   if (!append) {
@@ -1118,7 +1139,7 @@ function renderReviewsContent(g, reviews, hasMore) {
       </div>`
     : `<div class="reviews-write">
         <p class="review-signin-prompt">
-          <a href="/auth/google/login?next=${encodeURIComponent(window.location.pathname + '?tab=reviews')}">Sign in</a> to rate and review this game.
+          <a href="${reviewSignInHref()}">Sign in</a> to rate and review this game.
         </p>
       </div>`;
 
@@ -1207,7 +1228,7 @@ function wireWriteSection() {
       const likeBtn = e.target.closest('.btn-like');
       if (likeBtn) {
         if (!_reviewUser) {
-          window.location.href = `/auth/google/login?next=${encodeURIComponent(window.location.pathname + '?tab=reviews')}`;
+          window.location.href = reviewSignInHref();
           return;
         }
         const reviewId = likeBtn.dataset.reviewId;
