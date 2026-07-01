@@ -331,6 +331,8 @@ def _ensure_tables():
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_player_list_items_list_id ON player_list_items(list_id)
         """)
+        # Creator-attached stat tags (snapshot display strings, e.g. ["32.7 PPG"])
+        cur.execute("ALTER TABLE player_list_items ADD COLUMN IF NOT EXISTS stats JSONB DEFAULT '[]'::jsonb")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS jersey_list_items (
                 id         SERIAL PRIMARY KEY,
@@ -5166,7 +5168,7 @@ def get_list_detail(list_id):
     if list_type in ("players", "player_seasons"):
         p_order = "ORDER BY sort_order ASC NULLS LAST, added_at ASC" if lst.get("is_ranked") else "ORDER BY added_at ASC"
         cur.execute(f"""
-            SELECT id, player_id, player_name, team, season, sort_order, added_at, league
+            SELECT id, player_id, player_name, team, season, sort_order, added_at, league, stats
             FROM player_list_items WHERE list_id = %s {p_order}
         """, (list_id,))
         for r in cur.fetchall():
@@ -5179,6 +5181,7 @@ def get_list_detail(list_id):
                 "sortOrder":  r.get("sort_order"),
                 "addedAt":    str(r["added_at"]),
                 "league":     r.get("league") or "nba",
+                "stats":      r.get("stats") or [],
             })
 
     # Fetch jersey items (for jersey lists)
@@ -5549,8 +5552,70 @@ def add_player_to_list(list_id):
     return jsonify({"item": {
         "id": row["id"], "playerId": row.get("player_id"), "playerName": row["player_name"],
         "team": row.get("team"), "season": row.get("season"), "league": row.get("league", "nba"),
-        "sortOrder": row.get("sort_order"), "addedAt": str(row["added_at"]),
+        "sortOrder": row.get("sort_order"), "addedAt": str(row["added_at"]), "stats": [],
     }}), 201
+
+
+@app.route("/api/lists/<int:list_id>/players/<int:item_id>", methods=["PATCH"])
+@login_required
+def update_player_item(list_id, item_id):
+    """Set the creator-attached stat tags on a player list item (snapshot strings)."""
+    user = current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    stats = body.get("stats")
+    if not isinstance(stats, list):
+        return jsonify({"error": "stats must be an array"}), 400
+    stats = [str(s)[:24] for s in stats][:3]   # cap: 3 tags, short strings
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    cur.execute("UPDATE player_list_items SET stats = %s WHERE id = %s AND list_id = %s",
+                (json.dumps(stats), item_id, list_id))
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True, "stats": stats})
+
+
+@app.route("/api/players/<int:pid>/stat-options")
+def player_stat_options(pid):
+    """Return pickable stat tags for a player's season averages (NBA or WNBA).
+    Used by the list builder to attach snapshot stats to a player item."""
+    league = request.args.get("league", "nba").lower().strip()
+    season = request.args.get("season")
+    conn = get_conn(); cur = conn.cursor()
+    row = None
+    try:
+        if league == "wnba":
+            if season:
+                cur.execute("SELECT * FROM wnba_player_seasons WHERE player_id=%s AND season=%s LIMIT 1", (pid, season))
+            else:
+                cur.execute("SELECT * FROM wnba_player_seasons WHERE player_id=%s ORDER BY season DESC LIMIT 1", (pid,))
+            row = cur.fetchone()
+        else:
+            if season:
+                cur.execute("SELECT * FROM player_seasons WHERE player_id=%s AND season=%s AND season_type='Regular Season' LIMIT 1", (pid, season))
+            else:
+                cur.execute("SELECT * FROM player_seasons WHERE player_id=%s AND season_type='Regular Season' ORDER BY season DESC LIMIT 1", (pid,))
+            row = cur.fetchone()
+    except Exception:
+        row = None
+    cur.close(); conn.close()
+    if not row:
+        return jsonify({"options": []})
+
+    def num(col, lbl):
+        v = row.get(col)
+        return {"label": lbl, "display": f"{float(v):.1f} {lbl}"} if v is not None else None
+
+    def pct(col, lbl):
+        v = row.get(col)
+        return {"label": lbl, "display": f"{float(v) * 100:.1f}% {lbl}"} if v is not None else None
+
+    cands = [num("pts", "PPG"), num("reb", "RPG"), num("ast", "APG"), num("stl", "SPG"),
+             num("blk", "BPG"), num("fg3m", "3PM"), pct("fg_pct", "FG"), pct("fg3_pct", "3P"),
+             pct("ft_pct", "FT"), num("tov", "TOV")]
+    return jsonify({"options": [c for c in cands if c], "season": row.get("season")})
 
 
 @app.route("/api/lists/<int:list_id>/players/<int:item_id>", methods=["DELETE"])

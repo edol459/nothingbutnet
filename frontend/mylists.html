@@ -86,7 +86,12 @@ select:focus{border-color:var(--orange);}
 .badge.pub{background:rgba(26,122,74,.14);color:var(--green);}
 .muted{color:var(--ink3);font-size:13px;}
 .state{text-align:center;padding:56px 0;color:var(--ink3);font-family:var(--ff-mono);font-size:13px;}
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);font-size:13px;padding:9px 16px;border-radius:8px;z-index:999;}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);font-size:13px;padding:9px 16px;border-radius:8px;z-index:1001;}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px;}
+.modal{background:var(--bg-card);border:1px solid var(--rule);border-radius:14px;padding:22px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.28);}
+.chips{display:flex;flex-wrap:wrap;gap:8px;}
+.chip{font-family:var(--ff-mono);font-size:12px;padding:8px 12px;border-radius:999px;border:1px solid var(--rule);background:transparent;color:var(--ink2);cursor:pointer;}
+.chip.sel{background:var(--orange);color:#fff;border-color:var(--orange);}
 .stack{display:flex;flex-direction:column;gap:14px;}
 @media(max-width:640px){.wrap{padding:20px 14px 80px;}.card{padding:24px 20px 22px;}.b-title{font-size:26px;}}
 </style>
@@ -117,7 +122,8 @@ const SVG={grip:'<svg class="grip" width="16" height="16" viewBox="0 0 24 24" fi
   down:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
   x:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
   mag:'<svg class="mag" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>',
-  check:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'};
+  check:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+  tag:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 12 22l-9-9V3h10z"/><circle cx="7.5" cy="7.5" r="1.3" fill="currentColor" stroke="none"/></svg>'};
 
 function imgLogo(abbr,league){const u=window.ydkTeamLogo&&ydkTeamLogo(abbr,league);return u?`<img class="lg" src="${u}" onerror="this.style.visibility='hidden'" alt="">`:'<span class="lg"></span>';}
 function imgHead(pid,league){const u=window.ydkHeadshot&&ydkHeadshot(pid,league);return u?`<img class="av" src="${u}" onerror="this.style.visibility='hidden'" alt="">`:'<span class="av"></span>';}
@@ -131,12 +137,12 @@ const CFG={
     sub:it=>[it.gameDate,(it.awayScore!=null&&it.homeScore!=null)?`${it.awayScore}–${it.homeScore}`:''].filter(Boolean).join(' · '),
     rm:(lid,k)=>`/api/lists/${lid}/games/${k}`,
     reorder:(lid,ids)=>api(`/api/lists/${lid}/games/reorder`,{method:'PATCH',body:JSON.stringify({gameIds:ids})})},
-  players:{items:l=>l.playerItems||[], idField:'id', add:addPlayersUI, img:it=>imgHead(it.playerId,it.league),
-    name:it=>it.playerName, sub:it=>it.team||'',
+  players:{items:l=>l.playerItems||[], idField:'id', add:addPlayersUI, img:it=>imgHead(it.playerId,it.league), stat:true,
+    name:it=>it.playerName, sub:it=>(it.stats&&it.stats.length)?it.stats.join(' · '):(it.team||''),
     rm:(lid,k)=>`/api/lists/${lid}/players/${k}`,
     reorder:(lid,ids)=>api(`/api/lists/${lid}/players/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})})},
-  player_seasons:{items:l=>l.playerItems||[], idField:'id', add:addPlayersUI, img:it=>imgHead(it.playerId,it.league),
-    name:it=>it.playerName, sub:it=>[it.team,it.season].filter(Boolean).join(' · '),
+  player_seasons:{items:l=>l.playerItems||[], idField:'id', add:addPlayersUI, img:it=>imgHead(it.playerId,it.league), stat:true,
+    name:it=>it.playerName, sub:it=>[(it.stats&&it.stats.length)?it.stats.join(' · '):it.team, it.season].filter(Boolean).join(' · '),
     rm:(lid,k)=>`/api/lists/${lid}/players/${k}`,
     reorder:(lid,ids)=>api(`/api/lists/${lid}/players/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})})},
   teams:{items:l=>l.teamItems||[], idField:'id', add:addTeamsUI, img:it=>imgLogo(it.teamAbbr,it.league),
@@ -263,12 +269,48 @@ function renderItems(list,items,cfg){
       ${ranked?`<span class="rnk">${i+1}</span>`:'<span class="rnk off">•</span>'}
       ${img}
       <div class="grow"><div class="nm">${esc(cfg.name(it))}</div>${sub?`<div class="mt">${esc(sub)}</div>`:''}</div>
+      ${cfg.stat?`<button class="iconbtn" data-stat="${esc(key)}" title="Attach stats">${SVG.tag}</button>`:''}
       ${ranked?`<button class="iconbtn" data-up="${esc(key)}" ${i===0?'disabled':''}>${SVG.up}</button><button class="iconbtn" data-down="${esc(key)}" ${i===items.length-1?'disabled':''}>${SVG.down}</button>`:''}
       <button class="iconbtn rm" data-rm="${esc(key)}">${SVG.x}</button>
     </li>`;}).join('')+`</ul>`;
   box.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>removeItem(list,cfg,b.dataset.rm)));
   box.querySelectorAll('[data-up]').forEach(b=>b.addEventListener('click',()=>move(list,items,cfg,b.dataset.up,-1)));
   box.querySelectorAll('[data-down]').forEach(b=>b.addEventListener('click',()=>move(list,items,cfg,b.dataset.down,1)));
+  box.querySelectorAll('[data-stat]').forEach(b=>b.addEventListener('click',()=>openStatPicker(list, items.find(x=>String(x.id)===b.dataset.stat))));
+}
+
+async function openStatPicker(list, item){
+  if(!item){ return; }
+  let opts=[];
+  try{
+    const qs=new URLSearchParams({league:item.league||'nba'}); if(item.season) qs.set('season',item.season);
+    opts=(await api(`/api/players/${item.playerId}/stat-options?${qs}`)).options||[];
+  }catch(e){}
+  if(!opts.length){ toast('No stats available for this player'); return; }
+  const sel=new Set(item.stats||[]);
+  const ov=document.createElement('div'); ov.className='modal-bg';
+  ov.innerHTML=`<div class="modal">
+    <div class="section-label" style="margin-bottom:4px">Attach stats · ${esc(item.playerName)}</div>
+    <div class="muted" style="margin-bottom:14px">Pick up to 3 to show on the card.</div>
+    <div class="chips">${opts.map(o=>`<button class="chip ${sel.has(o.display)?'sel':''}" data-d="${esc(o.display)}">${esc(o.display)}</button>`).join('')}</div>
+    <div class="seg" style="margin-top:18px;justify-content:flex-end">
+      <button class="btn sm" id="sp-cancel">Cancel</button>
+      <button class="btn sm primary" id="sp-save">Save</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  ov.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>{
+    const d=c.dataset.d;
+    if(sel.has(d)) sel.delete(d);
+    else { if(sel.size>=3){ toast('Max 3 stats'); return; } sel.add(d); }
+    c.classList.toggle('sel');
+  }));
+  const close=()=>ov.remove();
+  ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  ov.querySelector('#sp-cancel').addEventListener('click',close);
+  ov.querySelector('#sp-save').addEventListener('click',async()=>{
+    try{ await api(`/api/lists/${list.id}/players/${item.id}`,{method:'PATCH',body:JSON.stringify({stats:[...sel]})}); close(); toast('Saved'); renderDetail(list.id); }
+    catch(e){ toast(e.message); }
+  });
 }
 
 async function removeItem(list,cfg,key){

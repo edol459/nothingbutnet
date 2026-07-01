@@ -129,9 +129,11 @@ function shape(it, type){
       nameHtml:score, meta:sub, sub:sub, right:''};
   }
   if(type==='players'||type==='player_seasons'){
+    const statLine=(it.stats&&it.stats.length)?it.stats.join(' · '):'';
     const sub=[it.team,type==='player_seasons'?it.season:null].filter(Boolean).join(' · ');
     return {picBig:picHead(it.playerId,lg), picRow:picHead(it.playerId,lg),
-      nameHtml:esc(it.playerName), meta:sub, sub:it.team||'', right:rlogo(it.team,lg)};
+      nameHtml:esc(it.playerName), meta:(statLine||sub), sub:sub,
+      right: statLine?`<span class="stat">${esc(statLine)}</span>`:rlogo(it.team,lg)};
   }
   if(type==='teams'||type==='team_seasons'){
     const rec=(it.wins!=null&&it.losses!=null)?`${it.wins}-${it.losses}`:'';
