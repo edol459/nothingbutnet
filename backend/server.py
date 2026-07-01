@@ -20,7 +20,7 @@ os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
 import json
 import math
 from datetime import date
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
 import psycopg2
@@ -5098,8 +5098,7 @@ def get_user_lists(user_id):
 @login_required
 def create_list():
     user = current_user()
-    if not user.get("is_pro"):
-        return jsonify({"error": "Game Lists is a Pro feature."}), 403
+    # Lists are free — public, shareable lists drive growth (were Pro-gated).
     body  = request.get_json(force=True, silent=True) or {}
     title = (body.get("title") or "").strip()
     if not title:
@@ -5125,7 +5124,9 @@ def create_list():
 def get_list_detail(list_id):
     viewer = current_user()
     conn = get_conn(); cur = conn.cursor()
-    cur.execute("SELECT * FROM game_lists WHERE id = %s", (list_id,))
+    cur.execute("""SELECT gl.*, u.display_name AS creator_name, u.avatar_url AS creator_avatar
+                   FROM game_lists gl JOIN users u ON u.id = gl.user_id
+                   WHERE gl.id = %s""", (list_id,))
     lst = cur.fetchone()
     if not lst:
         cur.close(); conn.close()
@@ -5227,11 +5228,122 @@ def get_list_detail(list_id):
 
     cur.close(); conn.close()
     result = dict(_format_list(lst, len(games)))
+    result["creatorName"] = lst.get("creator_name")
+    result["creatorAvatar"] = lst.get("creator_avatar")
     result["games"] = games
     result["playerItems"] = player_items
     result["jerseyItems"] = jersey_items
     result["teamItems"] = team_items
     return jsonify({"list": result})
+
+
+# ── Public list page + share image (growth: shareable, no login) ──────────────
+def _list_preview(cur, list_id: int, lst: dict):
+    """Return (labels[str], total_count) for a list's items, in display order."""
+    lt = lst.get("list_type") or "games"
+    ranked = lst.get("is_ranked")
+    labels, total = [], 0
+    if lt == "games":
+        cur.execute("SELECT COUNT(*) AS n FROM game_list_items WHERE list_id=%s", (list_id,))
+        total = cur.fetchone()["n"]
+        order = "gli.sort_order ASC NULLS LAST, gli.added_at DESC" if ranked else "gli.added_at DESC"
+        cur.execute(f"""SELECT g.away_team_abbr AS a, g.home_team_abbr AS h, g.game_date AS d
+                        FROM game_list_items gli LEFT JOIN games g ON g.game_id=gli.game_id
+                        WHERE gli.list_id=%s ORDER BY {order} LIMIT 6""", (list_id,))
+        for r in cur.fetchall():
+            mk = f"{r['a'] or '?'} @ {r['h'] or '?'}"
+            labels.append(f"{mk}  ·  {r['d']}" if r.get("d") else mk)
+    elif lt in ("players", "player_seasons"):
+        cur.execute("SELECT COUNT(*) AS n FROM player_list_items WHERE list_id=%s", (list_id,))
+        total = cur.fetchone()["n"]
+        order = "sort_order ASC NULLS LAST, added_at ASC" if ranked else "added_at ASC"
+        cur.execute(f"""SELECT player_name, season FROM player_list_items
+                        WHERE list_id=%s ORDER BY {order} LIMIT 6""", (list_id,))
+        for r in cur.fetchall():
+            labels.append(f"{r['player_name']} ({r['season']})" if lt == "player_seasons" and r.get("season") else r["player_name"])
+    elif lt in ("teams", "team_seasons"):
+        cur.execute("SELECT COUNT(*) AS n FROM team_list_items WHERE list_id=%s", (list_id,))
+        total = cur.fetchone()["n"]
+        order = "sort_order ASC NULLS LAST, added_at ASC" if ranked else "added_at ASC"
+        cur.execute(f"""SELECT team_name, season FROM team_list_items
+                        WHERE list_id=%s ORDER BY {order} LIMIT 6""", (list_id,))
+        for r in cur.fetchall():
+            labels.append(f"{r['team_name']} ({r['season']})" if lt == "team_seasons" and r.get("season") else r["team_name"])
+    elif lt == "jerseys":
+        cur.execute("SELECT COUNT(*) AS n FROM jersey_list_items WHERE list_id=%s", (list_id,))
+        total = cur.fetchone()["n"]
+        order = "sort_order ASC NULLS LAST, added_at ASC" if ranked else "added_at ASC"
+        cur.execute(f"""SELECT label FROM jersey_list_items
+                        WHERE list_id=%s ORDER BY {order} LIMIT 6""", (list_id,))
+        labels = [r["label"] for r in cur.fetchall()]
+    return labels, total
+
+
+def _fetch_public_list(list_id: int):
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("""SELECT gl.*, u.display_name FROM game_lists gl
+                   JOIN users u ON u.id = gl.user_id WHERE gl.id = %s""", (list_id,))
+    lst = cur.fetchone()
+    if not lst or not lst.get("is_public"):
+        cur.close(); conn.close()
+        return None, None, None, None
+    labels, total = _list_preview(cur, list_id, lst)
+    cur.close(); conn.close()
+    return lst, labels, total, (lst.get("display_name") or "ydkball")
+
+
+@app.route("/list/<int:list_id>")
+@app.route("/lists/<int:list_id>")
+def public_list_page(list_id):
+    import html as _html
+    lst, _labels, total, creator = _fetch_public_list(list_id)
+    base = request.url_root.rstrip("/")
+    if lst:
+        title = lst["title"]
+        og_title = f"{title} — ydkball"
+        og_desc = (lst.get("description") or "").strip() or \
+            f"{'A ranked list' if lst.get('is_ranked') else 'A list'} by {creator} · {total} on ydkball"
+        og_image = f"{base}/list/{list_id}/og.png"
+    else:
+        og_title = "ydkball"
+        og_desc = "NBA & WNBA scores, stats, game reviews, and daily games."
+        og_image = f"{base}/og-image.png"
+
+    meta = (
+        f'<title>{_html.escape(og_title)}</title>\n'
+        f'<meta name="description" content="{_html.escape(og_desc)}">\n'
+        f'<meta property="og:title" content="{_html.escape(og_title)}">\n'
+        f'<meta property="og:description" content="{_html.escape(og_desc)}">\n'
+        f'<meta property="og:image" content="{_html.escape(og_image)}">\n'
+        f'<meta property="og:url" content="{_html.escape(request.url)}">\n'
+        f'<meta property="og:type" content="website">\n'
+        f'<meta name="twitter:card" content="summary_large_image">\n'
+        f'<meta name="twitter:image" content="{_html.escape(og_image)}">'
+    )
+    with open(os.path.join(FRONTEND_DIR, "list.html"), encoding="utf-8") as f:
+        shell = f.read()
+    return shell.replace("<!--OG_TAGS-->", meta)
+
+
+@app.route("/list/<int:list_id>/og.png")
+def list_og_image(list_id):
+    import og_image
+    lst, labels, total, creator = _fetch_public_list(list_id)
+    if not lst:
+        return "", 404
+    kicker = ("RANKED LIST" if lst.get("is_ranked") else "LIST")
+    noun = "ranked list" if lst.get("is_ranked") else "list"
+    subtitle = f"A {noun} by {creator}  ·  {total} item{'' if total == 1 else 's'}"
+    png = og_image.render_list_card(lst["title"], subtitle, labels, kicker)
+    resp = Response(png, mimetype="image/png")
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
+@app.route("/mylists")
+def mylists_page():
+    # Client-side gated (calls /api/me/lists, which is login_required)
+    return app.send_static_file("mylists.html")
 
 
 @app.route("/api/lists/<int:list_id>", methods=["PATCH"])

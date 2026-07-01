@@ -7,9 +7,24 @@
    this script fails); this only enhances it.
    ============================================================ */
 (function () {
+  // TODO: set this to your Buy Me a Coffee / Ko-fi / Stripe support URL.
+  var SUPPORT_URL = 'https://buymeacoffee.com/ydkball';
+
   function init() {
     var host = document.querySelector('.site-nav');
     if (!host) return;
+
+    // Support link — every page, one place (uses the same nav-link styling)
+    var linksWrap = host.querySelector('.site-nav__links');
+    if (linksWrap && !linksWrap.querySelector('.nav-support')) {
+      var sup = document.createElement('a');
+      sup.className = 'nav-support';
+      sup.href = SUPPORT_URL;
+      sup.target = '_blank';
+      sup.rel = 'noopener';
+      sup.textContent = '☕ Support';
+      linksWrap.appendChild(sup);
+    }
 
     // Active link
     var path = location.pathname.replace(/\/+$/, '') || '/';
@@ -36,6 +51,14 @@
         if (!slot) return;
         var u = d && d.user;
         if (u) {
+          // Logged-in: surface "My Lists" in the nav (before the Support link)
+          if (linksWrap && !linksWrap.querySelector('.nav-mylists')) {
+            var ml = document.createElement('a');
+            ml.className = 'nav-mylists';
+            ml.href = '/mylists';
+            ml.textContent = 'My Lists';
+            linksWrap.insertBefore(ml, linksWrap.querySelector('.nav-support'));
+          }
           if (typeof u.night_mode !== 'undefined') {
             localStorage.setItem('ydkball_night', u.night_mode ? '1' : '0');
             document.documentElement.classList.toggle('night-mode', !!u.night_mode);

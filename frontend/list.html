@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!--OG_TAGS-->
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0c0c0d;--ink2:#2a2a2e;--ink3:#6b6b78;--ink4:#a8a8b3;
+  --paper:#F5F0E8;--paper2:#eeecea;--paper3:#e5e2dc;--bg-card:#FDFAF4;
+  --rule:#d8d5cf;--orange:#e8530a;--gold:#C9922A;--green:#1a7a4a;--red:#c0392b;
+  --ff-serif:'DM Serif Display',Georgia,serif;--ff-sans:'Instrument Sans',system-ui,sans-serif;
+  --ff-mono:'DM Mono','Courier New',monospace;--nav-h:58px;font-size:15px;
+}
+html.night-mode{
+  --paper:#18181b;--paper2:#222228;--paper3:#2c2c34;--bg-card:#222228;
+  --rule:#3a3a46;--ink:#ededf0;--ink2:#c0c0cc;--ink3:#8080a0;--ink4:#4a4a68;
+  --orange:#e8530a;--green:#22c55e;--red:#f87171;color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html{background:var(--paper);}
+body{font-family:var(--ff-sans);background:var(--paper);color:var(--ink);min-height:100vh;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:760px;margin:0 auto;padding:28px 20px 96px;}
+.kicker{font-family:var(--ff-mono);font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--orange);}
+h1.title{font-family:var(--ff-serif);font-size:2.6rem;line-height:1.05;letter-spacing:-.02em;margin:6px 0 14px;}
+.byline{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.byline img{width:30px;height:30px;border-radius:50%;object-fit:cover;border:1.5px solid var(--rule);}
+.byline .who{font-size:14px;color:var(--ink2);}
+.byline .who b{color:var(--ink);font-weight:600;}
+.desc{font-size:15px;color:var(--ink2);line-height:1.5;margin-bottom:18px;}
+.meta{font-family:var(--ff-mono);font-size:12px;color:var(--ink3);margin-bottom:22px;}
+.share-row{display:flex;gap:10px;margin-bottom:26px;flex-wrap:wrap;}
+.btn{font-family:var(--ff-mono);font-size:12px;letter-spacing:.05em;text-transform:uppercase;
+  padding:10px 16px;border-radius:8px;cursor:pointer;border:1px solid var(--rule);
+  background:var(--bg-card);color:var(--ink);transition:all .15s;text-decoration:none;display:inline-block;}
+.btn:hover{border-color:var(--orange);color:var(--orange);}
+.btn.primary{background:var(--orange);color:#fff;border-color:var(--orange);}
+.btn.primary:hover{opacity:.9;color:#fff;}
+.items{list-style:none;border-top:1px solid var(--rule);}
+.item{display:flex;align-items:center;gap:14px;padding:14px 4px;border-bottom:1px solid var(--paper3);}
+.rank{font-family:var(--ff-serif);font-size:1.5rem;color:var(--orange);min-width:34px;text-align:center;}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--rule);margin:0 14px;flex-shrink:0;}
+.item .body{flex:1;min-width:0;}
+.item .name{font-size:16px;font-weight:600;color:var(--ink);}
+.item .sub{font-size:12px;color:var(--ink3);font-family:var(--ff-mono);margin-top:2px;}
+.item .score{font-family:var(--ff-mono);font-size:13px;color:var(--ink2);white-space:nowrap;}
+.cta{margin-top:34px;padding:22px;border:1px solid var(--rule);border-radius:12px;background:var(--bg-card);text-align:center;}
+.cta h3{font-family:var(--ff-serif);font-size:1.3rem;margin-bottom:6px;}
+.cta p{font-size:13px;color:var(--ink3);margin-bottom:14px;}
+.state{text-align:center;padding:60px 0;color:var(--ink3);font-family:var(--ff-mono);font-size:13px;}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);
+  font-size:13px;padding:9px 16px;border-radius:8px;z-index:999;animation:t .2s ease;}
+@keyframes t{from{opacity:0;transform:translate(-50%,6px)}to{opacity:1;transform:translate(-50%,0)}}
+@media(max-width:640px){h1.title{font-size:2rem;}.wrap{padding:20px 16px 80px;}}
+</style>
+<link rel="stylesheet" href="/site-nav.css">
+</head>
+<body>
+
+<header class="site-nav">
+  <div class="site-nav__bar">
+    <a class="site-nav__brand" href="/">
+      <img src="/transparent.png" alt="">
+      <span class="site-nav__word">ydk<span>ball</span></span>
+    </a>
+    <div class="site-nav__links" role="navigation" aria-label="Primary">
+      <a href="/">Home</a>
+      <a href="/reviews">Reviews</a>
+      <a href="/games">Games</a>
+      <a href="/stats">Stats</a>
+    </div>
+    <div class="site-nav__auth" id="nav-auth-slot"></div>
+  </div>
+</header>
+
+<div class="wrap" id="root">
+  <div class="state">Loading list…</div>
+</div>
+
+<script>
+const esc = s => (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2200);}
+
+const m = location.pathname.match(/\/lists?\/(\d+)/);
+const listId = m ? m[1] : null;
+
+function itemRow(rank, name, sub, right){
+  return `<li class="item">
+    ${rank!=null?`<span class="rank">${rank}</span>`:'<span class="dot"></span>'}
+    <div class="body"><div class="name">${esc(name)}</div>${sub?`<div class="sub">${esc(sub)}</div>`:''}</div>
+    ${right?`<span class="score">${esc(right)}</span>`:''}
+  </li>`;
+}
+
+function renderItems(list){
+  const ranked = list.isRanked;
+  const t = list.listType || 'games';
+  let rows = [];
+  if(t==='games'){
+    rows = (list.games||[]).map((g,i)=>itemRow(
+      ranked?i+1:null,
+      `${g.awayTeamAbbr||'?'} @ ${g.homeTeamAbbr||'?'}`,
+      g.gameDate||'',
+      (g.awayScore!=null&&g.homeScore!=null)?`${g.awayScore}–${g.homeScore}`:''));
+  } else if(t==='players'||t==='player_seasons'){
+    rows = (list.playerItems||[]).map((p,i)=>itemRow(
+      ranked?i+1:null, p.playerName,
+      [p.team, t==='player_seasons'?p.season:null].filter(Boolean).join(' · '), ''));
+  } else if(t==='teams'||t==='team_seasons'){
+    rows = (list.teamItems||[]).map((tm,i)=>itemRow(
+      ranked?i+1:null, tm.teamName,
+      [t==='team_seasons'?tm.season:null].filter(Boolean).join(' · '),
+      (tm.wins!=null&&tm.losses!=null)?`${tm.wins}–${tm.losses}`:''));
+  } else if(t==='jerseys'){
+    rows = (list.jerseyItems||[]).map((j,i)=>itemRow(
+      ranked?i+1:null, j.label, [j.teamName,j.yearRange].filter(Boolean).join(' · '), ''));
+  }
+  return rows.length ? `<ul class="items">${rows.join('')}</ul>` : `<div class="state">This list is empty.</div>`;
+}
+
+async function share(title){
+  const url = location.href;
+  if(navigator.share){ try{ await navigator.share({title, url}); return; }catch(e){} }
+  try{ await navigator.clipboard.writeText(url); toast('Link copied'); }
+  catch(e){ toast(url); }
+}
+
+async function load(){
+  const root = document.getElementById('root');
+  if(!listId){ root.innerHTML='<div class="state">List not found.</div>'; return; }
+  try{
+    const r = await fetch(`/api/lists/${listId}`);
+    if(r.status===404){ root.innerHTML='<div class="state">This list is private or no longer exists.</div>'; return; }
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const {list} = await r.json();
+    const count = (list.games||[]).length+(list.playerItems||[]).length+(list.teamItems||[]).length+(list.jerseyItems||[]).length;
+    const typeLabel = {games:'games',players:'players',player_seasons:'player seasons',teams:'teams',team_seasons:'team seasons',jerseys:'jerseys'}[list.listType||'games'];
+    const avatar = list.creatorAvatar ? `<img src="${esc(list.creatorAvatar)}" alt="">` : '';
+    root.innerHTML = `
+      <div class="kicker">${list.isRanked?'Ranked List':'List'}</div>
+      <h1 class="title">${esc(list.title)}</h1>
+      <div class="byline">${avatar}<span class="who">by <b>${esc(list.creatorName||'ydkball')}</b></span></div>
+      ${list.description?`<p class="desc">${esc(list.description)}</p>`:''}
+      <div class="meta">${count} ${typeLabel}</div>
+      <div class="share-row">
+        <button class="btn primary" id="shareBtn">Share</button>
+        <a class="btn" href="/">Explore ydkball</a>
+      </div>
+      ${renderItems(list)}
+      <div class="cta">
+        <h3>Make your own lists</h3>
+        <p>Rank games, players, teams & more — and share them anywhere.</p>
+        <a class="btn primary" href="/">Get started on ydkball</a>
+      </div>`;
+    document.getElementById('shareBtn').addEventListener('click',()=>share(list.title));
+    document.title = `${list.title} — ydkball`;
+  }catch(e){
+    root.innerHTML=`<div class="state">Couldn't load this list: ${esc(e.message)}</div>`;
+  }
+}
+load();
+</script>
+<script src="/site-nav.js"></script>
+</body>
+</html>
