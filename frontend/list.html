@@ -50,6 +50,11 @@ h1.title{font-family:var(--ff-serif);font-size:2.6rem;line-height:1.05;letter-sp
 .item .name{font-size:16px;font-weight:600;color:var(--ink);}
 .item .sub{font-size:12px;color:var(--ink3);font-family:var(--ff-mono);margin-top:2px;}
 .item .score{font-family:var(--ff-mono);font-size:13px;color:var(--ink2);white-space:nowrap;}
+.item .av{width:40px;height:40px;border-radius:50%;object-fit:cover;background:var(--paper3);flex-shrink:0;}
+.item .lg{width:34px;height:34px;object-fit:contain;flex-shrink:0;}
+.item .thumb{width:42px;height:42px;object-fit:contain;border-radius:6px;background:var(--paper3);flex-shrink:0;}
+.item .duo{display:inline-flex;align-items:center;flex-shrink:0;}
+.item .duo .lg:last-child{margin-left:-8px;}
 .cta{margin-top:34px;padding:22px;border:1px solid var(--rule);border-radius:12px;background:var(--bg-card);text-align:center;}
 .cta h3{font-family:var(--ff-serif);font-size:1.3rem;margin-bottom:6px;}
 .cta p{font-size:13px;color:var(--ink3);margin-bottom:14px;}
@@ -60,6 +65,7 @@ h1.title{font-family:var(--ff-serif);font-size:2.6rem;line-height:1.05;letter-sp
 @media(max-width:640px){h1.title{font-size:2rem;}.wrap{padding:20px 16px 80px;}}
 </style>
 <link rel="stylesheet" href="/site-nav.css">
+<script src="/nba-assets.js"></script>
 </head>
 <body>
 
@@ -90,9 +96,14 @@ function toast(m){const t=document.createElement('div');t.className='toast';t.te
 const m = location.pathname.match(/\/lists?\/(\d+)/);
 const listId = m ? m[1] : null;
 
-function itemRow(rank, name, sub, right){
+function imgLogo(abbr,league){const u=window.ydkTeamLogo&&ydkTeamLogo(abbr,league);return u?`<img class="lg" src="${u}" onerror="this.style.visibility='hidden'" alt="">`:'<span class="lg"></span>';}
+function imgHead(pid,league){const u=window.ydkHeadshot&&ydkHeadshot(pid,league);return u?`<img class="av" src="${u}" onerror="this.style.visibility='hidden'" alt="">`:'<span class="av"></span>';}
+function imgGame(g){const lg=g.league||'nba';return `<span class="duo">${imgLogo(g.awayTeamAbbr,lg)}${imgLogo(g.homeTeamAbbr,lg)}</span>`;}
+
+function itemRow(rank, img, name, sub, right){
   return `<li class="item">
     ${rank!=null?`<span class="rank">${rank}</span>`:'<span class="dot"></span>'}
+    ${img||''}
     <div class="body"><div class="name">${esc(name)}</div>${sub?`<div class="sub">${esc(sub)}</div>`:''}</div>
     ${right?`<span class="score">${esc(right)}</span>`:''}
   </li>`;
@@ -104,22 +115,23 @@ function renderItems(list){
   let rows = [];
   if(t==='games'){
     rows = (list.games||[]).map((g,i)=>itemRow(
-      ranked?i+1:null,
+      ranked?i+1:null, imgGame(g),
       `${g.awayTeamAbbr||'?'} @ ${g.homeTeamAbbr||'?'}`,
       g.gameDate||'',
       (g.awayScore!=null&&g.homeScore!=null)?`${g.awayScore}–${g.homeScore}`:''));
   } else if(t==='players'||t==='player_seasons'){
     rows = (list.playerItems||[]).map((p,i)=>itemRow(
-      ranked?i+1:null, p.playerName,
+      ranked?i+1:null, imgHead(p.playerId,p.league), p.playerName,
       [p.team, t==='player_seasons'?p.season:null].filter(Boolean).join(' · '), ''));
   } else if(t==='teams'||t==='team_seasons'){
     rows = (list.teamItems||[]).map((tm,i)=>itemRow(
-      ranked?i+1:null, tm.teamName,
+      ranked?i+1:null, imgLogo(tm.teamAbbr,tm.league), tm.teamName,
       [t==='team_seasons'?tm.season:null].filter(Boolean).join(' · '),
       (tm.wins!=null&&tm.losses!=null)?`${tm.wins}–${tm.losses}`:''));
   } else if(t==='jerseys'){
     rows = (list.jerseyItems||[]).map((j,i)=>itemRow(
-      ranked?i+1:null, j.label, [j.teamName,j.yearRange].filter(Boolean).join(' · '), ''));
+      ranked?i+1:null, `<img class="thumb" src="${esc(j.imageUrl)}" onerror="this.style.visibility='hidden'" alt="">`,
+      j.label, [j.teamName,j.yearRange].filter(Boolean).join(' · '), ''));
   }
   return rows.length ? `<ul class="items">${rows.join('')}</ul>` : `<div class="state">This list is empty.</div>`;
 }

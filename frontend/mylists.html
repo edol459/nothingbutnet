@@ -53,6 +53,10 @@ label.chk{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:va
 .item .name{font-weight:600;font-size:15px;}
 .item .s{font-family:var(--ff-mono);font-size:11px;color:var(--ink3);}
 .thumb{width:40px;height:40px;object-fit:contain;border-radius:6px;background:var(--paper3);flex-shrink:0;}
+.av{width:38px;height:38px;border-radius:50%;object-fit:cover;background:var(--paper3);flex-shrink:0;}
+.lg{width:32px;height:32px;object-fit:contain;flex-shrink:0;}
+.duo{display:inline-flex;align-items:center;flex-shrink:0;}
+.duo .lg:last-child{margin-left:-8px;}
 .res{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--paper3);font-size:14px;}
 .res .grow{flex:1;min-width:0;}
 .muted{color:var(--ink3);font-size:13px;}
@@ -62,6 +66,7 @@ label.chk{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:va
 @media(max-width:640px){.wrap{padding:20px 16px 80px;}h1{font-size:1.6rem;}}
 </style>
 <link rel="stylesheet" href="/site-nav.css">
+<script src="/nba-assets.js"></script>
 </head>
 <body>
 <header class="site-nav">
@@ -82,32 +87,37 @@ const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2000);}
 async function api(url,opts){const r=await fetch(url,Object.assign({credentials:'include',headers:{'Content-Type':'application/json'}},opts||{}));if(!r.ok){let e='HTTP '+r.status;try{e=(await r.json()).error||e;}catch(_){}throw new Error(e);}return r.json();}
 
+function imgLogo(abbr,league){const u=window.ydkTeamLogo&&ydkTeamLogo(abbr,league);return u?`<img class="lg" src="${u}" onerror="this.style.visibility='hidden'" alt="">`:'<span class="lg"></span>';}
+function imgHead(pid,league){const u=window.ydkHeadshot&&ydkHeadshot(pid,league);return u?`<img class="av" src="${u}" onerror="this.style.visibility='hidden'" alt="">`:'<span class="av"></span>';}
+function imgGame(it){const lg=it.league||'nba';return `<span class="duo">${imgLogo(it.awayTeamAbbr,lg)}${imgLogo(it.homeTeamAbbr,lg)}</span>`;}
+
 const TYPES={games:'Games',players:'Players',player_seasons:'Player Seasons',teams:'Teams',team_seasons:'Team Seasons',jerseys:'Jerseys'};
 
 // Per-type behavior: where items live, their id field, display, remove + reorder endpoints, and the add UI.
 const CFG={
-  games:{items:l=>l.games||[], idField:'gameId', add:addGamesUI,
+  games:{items:l=>l.games||[], idField:'gameId', add:addGamesUI, img:it=>imgGame(it),
     name:it=>`${it.awayTeamAbbr||'?'} @ ${it.homeTeamAbbr||'?'}`,
     sub:it=>[it.gameDate,(it.awayScore!=null&&it.homeScore!=null)?`${it.awayScore}–${it.homeScore}`:''].filter(Boolean).join(' · '),
     rm:(lid,k)=>`/api/lists/${lid}/games/${k}`,
     reorder:(lid,ids)=>api(`/api/lists/${lid}/games/reorder`,{method:'PATCH',body:JSON.stringify({gameIds:ids})})},
-  players:{items:l=>l.playerItems||[], idField:'id', add:addPlayersUI,
+  players:{items:l=>l.playerItems||[], idField:'id', add:addPlayersUI, img:it=>imgHead(it.playerId,it.league),
     name:it=>it.playerName, sub:it=>it.team||'',
     rm:(lid,k)=>`/api/lists/${lid}/players/${k}`,
     reorder:(lid,ids)=>api(`/api/lists/${lid}/players/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})})},
-  player_seasons:{items:l=>l.playerItems||[], idField:'id', add:addPlayersUI,
+  player_seasons:{items:l=>l.playerItems||[], idField:'id', add:addPlayersUI, img:it=>imgHead(it.playerId,it.league),
     name:it=>it.playerName, sub:it=>[it.team,it.season].filter(Boolean).join(' · '),
     rm:(lid,k)=>`/api/lists/${lid}/players/${k}`,
     reorder:(lid,ids)=>api(`/api/lists/${lid}/players/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})})},
-  teams:{items:l=>l.teamItems||[], idField:'id', add:addTeamsUI,
+  teams:{items:l=>l.teamItems||[], idField:'id', add:addTeamsUI, img:it=>imgLogo(it.teamAbbr,it.league),
     name:it=>it.teamName, sub:it=>it.teamAbbr||'',
     rm:(lid,k)=>`/api/lists/${lid}/teams/${k}`,
     reorder:(lid,ids)=>api(`/api/lists/${lid}/teams/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})})},
-  team_seasons:{items:l=>l.teamItems||[], idField:'id', add:addTeamsUI,
+  team_seasons:{items:l=>l.teamItems||[], idField:'id', add:addTeamsUI, img:it=>imgLogo(it.teamAbbr,it.league),
     name:it=>it.teamName, sub:it=>[it.season,(it.wins!=null&&it.losses!=null)?`${it.wins}–${it.losses}`:''].filter(Boolean).join(' · '),
     rm:(lid,k)=>`/api/lists/${lid}/teams/${k}`,
     reorder:(lid,ids)=>api(`/api/lists/${lid}/teams/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})})},
-  jerseys:{items:l=>l.jerseyItems||[], idField:'id', add:addJerseysUI, thumb:it=>it.imageUrl,
+  jerseys:{items:l=>l.jerseyItems||[], idField:'id', add:addJerseysUI,
+    img:it=>`<img class="thumb" src="${esc(it.imageUrl)}" onerror="this.style.visibility='hidden'" alt="">`,
     name:it=>it.label, sub:it=>[it.teamName,it.yearRange].filter(Boolean).join(' · '),
     rm:(lid,k)=>`/api/lists/${lid}/jerseys/${k}`,
     reorder:(lid,ids)=>api(`/api/lists/${lid}/jerseys/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})})},
@@ -208,10 +218,10 @@ function renderItems(list,items,cfg){
   if(!items.length){ box.innerHTML='<div class="muted">No items yet — add some above.</div>'; return; }
   box.innerHTML=items.map((it,i)=>{
     const key=it[cfg.idField]; const sub=cfg.sub(it);
-    const thumb=cfg.thumb?`<img class="thumb" src="${esc(cfg.thumb(it))}" alt="">`:'';
+    const img=cfg.img?cfg.img(it):'';
     return `<div class="item">
       ${ranked?`<span class="rank">${i+1}</span>`:'<span class="rank" style="color:var(--rule)">•</span>'}
-      ${thumb}
+      ${img}
       <div class="grow"><div class="name">${esc(cfg.name(it))}</div>${sub?`<div class="s">${esc(sub)}</div>`:''}</div>
       ${ranked?`<button class="btn sm" data-up="${esc(key)}" ${i===0?'disabled':''}>↑</button><button class="btn sm" data-down="${esc(key)}" ${i===items.length-1?'disabled':''}>↓</button>`:''}
       <button class="btn sm danger" data-rm="${esc(key)}">✕</button>
@@ -245,7 +255,7 @@ function searchAdd(list, cfg, opts){
     res.innerHTML='<div class="muted">Searching…</div>';
     try{
       const results=await opts.search(q,league);
-      res.innerHTML = results.length ? results.map((r,i)=>`<div class="res">${opts.row(r)}<button class="btn sm primary" data-i="${i}">Add</button></div>`).join('') : '<div class="muted">No matches.</div>';
+      res.innerHTML = results.length ? results.map((r,i)=>`<div class="res">${opts.row(r,league)}<button class="btn sm primary" data-i="${i}">Add</button></div>`).join('') : '<div class="muted">No matches.</div>';
       res.querySelectorAll('[data-i]').forEach(b=>b.addEventListener('click',async()=>{
         try{ await opts.add(results[b.dataset.i],league); toast('Added'); renderDetail(list.id); }catch(e){ toast(e.message); }
       }));
@@ -260,7 +270,7 @@ function addPlayersUI(list){
   const type=list.listType;
   searchAdd(list,CFG[type],{ placeholder:'Search players…', league:true, minLen:2,
     search:async(q,lg)=>(await api(`/api/lists/players/search?q=${encodeURIComponent(q)}&type=${type}&league=${lg}`)).players,
-    row:p=>`<div class="grow"><b>${esc(p.playerName)}</b> <span class="muted">${esc([p.team,type==='player_seasons'?p.season:null].filter(Boolean).join(' · '))}</span></div>`,
+    row:(p,lg)=>`${imgHead(p.playerId,lg)}<div class="grow"><b>${esc(p.playerName)}</b> <span class="muted">${esc([p.team,type==='player_seasons'?p.season:null].filter(Boolean).join(' · '))}</span></div>`,
     add:(p,lg)=>api(`/api/lists/${list.id}/players`,{method:'POST',body:JSON.stringify({playerId:p.playerId,playerName:p.playerName,team:p.team,season:p.season,league:lg})}) });
 }
 
@@ -268,7 +278,7 @@ function addTeamsUI(list){
   const type=list.listType;
   searchAdd(list,CFG[type],{ placeholder:'Search teams…', league:true, minLen:0, immediate:true,
     search:async(q,lg)=>(await api(`/api/teams/search?q=${encodeURIComponent(q)}&type=${type}&league=${lg}`)).teams,
-    row:tm=>`<div class="grow"><b>${esc(tm.teamName)}</b> <span class="muted">${esc([tm.teamAbbr,type==='team_seasons'?tm.season:null,(type==='team_seasons'&&tm.wins!=null)?`${tm.wins}–${tm.losses}`:null].filter(Boolean).join(' · '))}</span></div>`,
+    row:(tm,lg)=>`${imgLogo(tm.teamAbbr,lg)}<div class="grow"><b>${esc(tm.teamName)}</b> <span class="muted">${esc([tm.teamAbbr,type==='team_seasons'?tm.season:null,(type==='team_seasons'&&tm.wins!=null)?`${tm.wins}–${tm.losses}`:null].filter(Boolean).join(' · '))}</span></div>`,
     add:(tm,lg)=>api(`/api/lists/${list.id}/teams`,{method:'POST',body:JSON.stringify({teamAbbr:tm.teamAbbr,teamName:tm.teamName,season:type==='team_seasons'?tm.season:tm.latestSeason,wins:tm.wins,losses:tm.losses,league:lg})}) });
 }
 
@@ -279,29 +289,48 @@ function addJerseysUI(list){
     add:(j)=>api(`/api/lists/${list.id}/jerseys`,{method:'POST',body:JSON.stringify({jerseyId:j.id,label:j.label,imageUrl:j.imageUrl})}) });
 }
 
-// ---- add games (browse by season/team) ----
-function addGamesUI(list){
+// ---- add games (browse by filters, like iOS) ----
+async function addGamesUI(list){
   $('#addbox').innerHTML=`<div class="stack">
     <div class="row">
-      <select id="glg" style="max-width:100px"><option value="nba">NBA</option><option value="wnba">WNBA</option></select>
-      <input id="gseason" placeholder="Season (e.g. 2025-26 or 'all')" style="flex:1">
-      <input id="gteam" placeholder="Team abbr (opt.)" style="max-width:130px">
-      <button class="btn primary" id="gsearch">Search</button>
+      <select id="glg" style="max-width:96px"><option value="nba">NBA</option><option value="wnba">WNBA</option></select>
+      <select id="gseason" style="flex:1;min-width:110px"><option value="">All seasons</option></select>
+      <select id="gteam" style="flex:1;min-width:110px"><option value="">All teams</option></select>
+      <select id="gsort" style="max-width:150px">
+        <option value="date">Newest</option><option value="date_asc">Oldest</option>
+        <option value="rating">Top rated</option><option value="reviews">Most reviewed</option></select>
     </div>
-    <div id="gres"><div class="muted">Search games to add.</div></div></div>`;
-  $('#gsearch').addEventListener('click',async()=>{
-    const res=$('#gres'); res.innerHTML='<div class="muted">Searching…</div>';
-    const p=new URLSearchParams({league:$('#glg').value,limit:'40'});
-    const s=$('#gseason').value.trim(); if(s)p.set('season',s);
-    const tm=$('#gteam').value.trim(); if(tm)p.set('team',tm);
+    <div id="gres"><div class="muted">Loading games…</div></div></div>`;
+  const lg=$('#glg'),seasonSel=$('#gseason'),teamSel=$('#gteam'),sortSel=$('#gsort');
+  async function loadFilters(){
+    const league=lg.value; let seasons=[],teams=[];
+    try{seasons=(await api(`/api/seasons?source=games&league=${league}`)).seasons||[];}catch(_){}
+    try{teams=(await api(`/api/teams/search?type=teams&league=${league}`)).teams||[];}catch(_){}
+    const uniq=[...new Set(seasons.map(s=>s.season))];
+    seasonSel.innerHTML='<option value="">All seasons</option>'+uniq.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+    teamSel.innerHTML='<option value="">All teams</option>'+teams.map(t=>`<option value="${esc(t.teamAbbr)}">${esc(t.teamName)}</option>`).join('');
+  }
+  async function run(){
+    const res=$('#gres'); res.innerHTML='<div class="muted">Loading…</div>';
+    const league=lg.value; const p=new URLSearchParams({league,limit:'50'});
+    let sort=sortSel.value,dir='desc'; if(sort==='date_asc'){sort='date';dir='asc';}
+    p.set('sort',sort); p.set('dir',dir);
+    if(seasonSel.value)p.set('season',seasonSel.value);
+    if(teamSel.value)p.set('team',teamSel.value);
     try{
       const {games}=await api('/api/games?'+p.toString());
-      res.innerHTML = games.length? games.map((g)=>`<div class="res"><div class="grow"><b>${esc(g.away_team_abbr)} @ ${esc(g.home_team_abbr)}</b> <span class="muted">${esc(g.game_date)}${(g.away_score!=null)?` · ${g.away_score}–${g.home_score}`:''}</span></div><button class="btn sm primary" data-g="${esc(g.game_id)}">Add</button></div>`).join('') : '<div class="muted">No games found.</div>';
+      res.innerHTML=games.length?games.map(g=>`<div class="res">
+        <span class="duo">${imgLogo(g.away_team_abbr,league)}${imgLogo(g.home_team_abbr,league)}</span>
+        <div class="grow"><b>${esc(g.away_team_abbr)} @ ${esc(g.home_team_abbr)}</b> <span class="muted">${esc(g.game_date)}${g.away_score!=null?` · ${g.away_score}–${g.home_score}`:''}</span></div>
+        <button class="btn sm primary" data-g="${esc(g.game_id)}">Add</button></div>`).join('') : '<div class="muted">No games found.</div>';
       res.querySelectorAll('[data-g]').forEach(b=>b.addEventListener('click',async()=>{
-        try{ await api(`/api/lists/${list.id}/games`,{method:'POST',body:JSON.stringify({gameId:b.dataset.g})}); toast('Added'); renderDetail(list.id); }catch(e){ toast(e.message); }
+        try{await api(`/api/lists/${list.id}/games`,{method:'POST',body:JSON.stringify({gameId:b.dataset.g})});toast('Added');renderDetail(list.id);}catch(e){toast(e.message);}
       }));
     }catch(e){ res.innerHTML=`<div class="muted">${esc(e.message)}</div>`; }
-  });
+  }
+  lg.addEventListener('change',async()=>{await loadFilters();run();});
+  [seasonSel,teamSel,sortSel].forEach(el=>el.addEventListener('change',run));
+  await loadFilters(); run();
 }
 
 // ---- edit meta ----

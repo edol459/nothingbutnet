@@ -23,7 +23,7 @@
       sup.href = SUPPORT_URL;
       sup.target = '_blank';
       sup.rel = 'noopener';
-      sup.textContent = '☕ Support';
+      sup.innerHTML = '<span style="font-size:16px;vertical-align:-2px">☕</span> Support';
       bar.insertBefore(sup, authSlot);
     }
 
