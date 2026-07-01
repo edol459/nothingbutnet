@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>My Lists — ydkball</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0c0c0d;--ink2:#2a2a2e;--ink3:#6b6b78;--ink4:#a8a8b3;
+  --paper:#F5F0E8;--paper2:#eeecea;--paper3:#e5e2dc;--bg-card:#FDFAF4;
+  --rule:#d8d5cf;--orange:#e8530a;--gold:#C9922A;--green:#1a7a4a;--red:#c0392b;
+  --ff-serif:'DM Serif Display',Georgia,serif;--ff-sans:'Instrument Sans',system-ui,sans-serif;
+  --ff-mono:'DM Mono','Courier New',monospace;--nav-h:58px;font-size:15px;}
+html.night-mode{--paper:#18181b;--paper2:#222228;--paper3:#2c2c34;--bg-card:#222228;
+  --rule:#3a3a46;--ink:#ededf0;--ink2:#c0c0cc;--ink3:#8080a0;--ink4:#4a4a68;
+  --green:#22c55e;--red:#f87171;color-scheme:dark;}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html{background:var(--paper);}
+body{font-family:var(--ff-sans);background:var(--paper);color:var(--ink);min-height:100vh;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:760px;margin:0 auto;padding:26px 20px 96px;}
+h1{font-family:var(--ff-serif);font-size:2rem;letter-spacing:-.02em;margin-bottom:4px;}
+h2{font-family:var(--ff-serif);font-size:1.5rem;margin:0;}
+.sub{font-size:13px;color:var(--ink3);}
+.section-label{font-family:var(--ff-mono);font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3);margin:26px 0 12px;}
+.card{background:var(--bg-card);border:1px solid var(--rule);border-radius:10px;padding:16px;}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+input,select,textarea{font-family:var(--ff-sans);font-size:14px;padding:9px 12px;background:var(--bg-card);
+  border:1px solid var(--rule);border-radius:8px;color:var(--ink);outline:none;width:100%;}
+input:focus,select:focus,textarea:focus{border-color:var(--orange);}
+label.chk{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--ink2);cursor:pointer;white-space:nowrap;}
+.btn{font-family:var(--ff-mono);font-size:12px;letter-spacing:.04em;text-transform:uppercase;padding:9px 14px;
+  border-radius:8px;cursor:pointer;border:1px solid var(--rule);background:var(--bg-card);color:var(--ink);transition:all .15s;white-space:nowrap;text-decoration:none;display:inline-block;}
+.btn:hover{border-color:var(--orange);color:var(--orange);}
+.btn.primary{background:var(--orange);color:#fff;border-color:var(--orange);}
+.btn.primary:hover{opacity:.9;color:#fff;}
+.btn.sm{padding:5px 9px;font-size:10px;}
+.btn.danger{color:var(--red);border-color:rgba(192,57,43,.4);}
+.btn.danger:hover{background:var(--red);color:#fff;}
+.list-card{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--rule);border-radius:10px;background:var(--bg-card);margin-bottom:10px;}
+.list-card .grow{flex:1;min-width:0;}
+.list-card .t{font-weight:600;font-size:16px;}
+.list-card .m{font-family:var(--ff-mono);font-size:11px;color:var(--ink3);margin-top:3px;}
+.pill{display:inline-block;padding:2px 7px;border-radius:4px;font-family:var(--ff-mono);font-size:9px;text-transform:uppercase;background:var(--paper3);color:var(--ink3);}
+.pill.pub{background:rgba(26,122,74,.14);color:var(--green);}
+.item{display:flex;align-items:center;gap:12px;padding:11px 4px;border-bottom:1px solid var(--paper3);}
+.item .rank{font-family:var(--ff-serif);color:var(--orange);min-width:28px;text-align:center;font-size:1.2rem;}
+.item .grow{flex:1;min-width:0;}
+.item .name{font-weight:600;font-size:15px;}
+.item .s{font-family:var(--ff-mono);font-size:11px;color:var(--ink3);}
+.res{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--paper3);font-size:14px;}
+.res .grow{flex:1;min-width:0;}
+.muted{color:var(--ink3);font-size:13px;}
+.state{text-align:center;padding:56px 0;color:var(--ink3);font-family:var(--ff-mono);font-size:13px;}
+.hide{display:none;}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);font-size:13px;padding:9px 16px;border-radius:8px;z-index:999;}
+.stack{display:flex;flex-direction:column;gap:10px;}
+@media(max-width:640px){.wrap{padding:20px 16px 80px;}h1{font-size:1.6rem;}}
+</style>
+<link rel="stylesheet" href="/site-nav.css">
+</head>
+<body>
+<header class="site-nav">
+  <div class="site-nav__bar">
+    <a class="site-nav__brand" href="/"><img src="/transparent.png" alt=""><span class="site-nav__word">ydk<span>ball</span></span></a>
+    <div class="site-nav__links" role="navigation" aria-label="Primary">
+      <a href="/">Home</a><a href="/reviews">Reviews</a><a href="/games">Games</a><a href="/stats">Stats</a>
+    </div>
+    <div class="site-nav__auth" id="nav-auth-slot"></div>
+  </div>
+</header>
+
+<div class="wrap" id="root"><div class="state">Loading…</div></div>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s);
+const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2000);}
+async function api(url,opts){const r=await fetch(url,Object.assign({credentials:'include',headers:{'Content-Type':'application/json'}},opts||{}));if(!r.ok){let e='HTTP '+r.status;try{e=(await r.json()).error||e;}catch(_){}throw new Error(e);}return r.json();}
+const TYPES={games:'Games',players:'Players',player_seasons:'Player Seasons'};
+
+let ME=null;
+
+async function boot(){
+  try{ const d=await (await fetch('/auth/me',{credentials:'include'})).json(); ME=d&&d.user; }catch(e){}
+  if(!ME){ $('#root').innerHTML=`<div class="state">Sign in to make lists.<br><br><a class="btn primary" href="/auth/google/login?next=/mylists">Sign in</a></div>`; return; }
+  renderIndex();
+}
+
+// ---------- INDEX ----------
+async function renderIndex(){
+  const root=$('#root');
+  root.innerHTML=`
+    <h1>My Lists</h1>
+    <p class="sub">Rank games and players, then share them anywhere.</p>
+    <div class="section-label">New list</div>
+    <div class="card">
+      <div class="stack">
+        <input id="nl-title" placeholder="List title (e.g. Top 10 games this season)" maxlength="100">
+        <div class="row">
+          <select id="nl-type" style="max-width:200px">${Object.entries(TYPES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
+          <label class="chk"><input type="checkbox" id="nl-ranked" style="width:auto"> Ranked</label>
+          <button class="btn primary" id="nl-create">Create list</button>
+        </div>
+      </div>
+    </div>
+    <div class="section-label">Your lists</div>
+    <div id="mylists"><div class="state">Loading…</div></div>`;
+  $('#nl-create').addEventListener('click',createList);
+  try{
+    const {lists}=await api('/api/me/lists');
+    const box=$('#mylists');
+    if(!lists.length){ box.innerHTML='<div class="muted">No lists yet — create one above.</div>'; return; }
+    box.innerHTML=lists.map(l=>`
+      <div class="list-card">
+        <div class="grow">
+          <div class="t">${esc(l.title)}</div>
+          <div class="m">${TYPES[l.listType]||l.listType}${l.isRanked?' · ranked':''} · <span class="pill ${l.isPublic?'pub':''}">${l.isPublic?'public':'private'}</span></div>
+        </div>
+        <button class="btn sm" data-manage="${l.id}">Manage</button>
+        <a class="btn sm" href="/list/${l.id}" target="_blank">View</a>
+      </div>`).join('');
+    box.querySelectorAll('[data-manage]').forEach(b=>b.addEventListener('click',()=>renderDetail(b.dataset.manage)));
+  }catch(e){ $('#mylists').innerHTML=`<div class="state">${esc(e.message)}</div>`; }
+}
+
+async function createList(){
+  const title=$('#nl-title').value.trim();
+  if(!title){ toast('Enter a title'); return; }
+  try{
+    const {list}=await api('/api/me/lists',{method:'POST',body:JSON.stringify({
+      title, listType:$('#nl-type').value, isRanked:$('#nl-ranked').checked })});
+    renderDetail(list.id);
+  }catch(e){ toast(e.message); }
+}
+
+// ---------- DETAIL ----------
+async function renderDetail(id){
+  const root=$('#root');
+  root.innerHTML='<div class="state">Loading list…</div>';
+  let list;
+  try{ list=(await api('/api/lists/'+id)).list; }catch(e){ root.innerHTML=`<div class="state">${esc(e.message)}</div>`; return; }
+  const type=list.listType||'games';
+  const items = type==='games' ? (list.games||[]) : (list.playerItems||[]);
+  const ranked=list.isRanked;
+
+  root.innerHTML=`
+    <a class="btn sm" id="back">← My Lists</a>
+    <div class="row" style="justify-content:space-between;margin:16px 0 4px">
+      <h2>${esc(list.title)}</h2>
+    </div>
+    <div class="m sub">${TYPES[type]||type}${ranked?' · ranked':''} · ${items.length} item${items.length===1?'':'s'}</div>
+    <div class="row" style="margin:14px 0 4px">
+      <button class="btn" id="share">Share</button>
+      <a class="btn" href="/list/${id}" target="_blank">View public page</a>
+      <button class="btn" id="edit">Edit</button>
+      <button class="btn danger" id="del">Delete</button>
+    </div>
+
+    <div class="section-label">Add ${TYPES[type]||type}</div>
+    <div class="card" id="addbox"></div>
+
+    <div class="section-label">Items</div>
+    <div id="items"></div>`;
+
+  $('#back').addEventListener('click',renderIndex);
+  $('#share').addEventListener('click',async()=>{const u=location.origin+'/list/'+id;
+    if(navigator.share){try{await navigator.share({title:list.title,url:u});return;}catch(_){}}
+    try{await navigator.clipboard.writeText(u);toast('Link copied');}catch(_){toast(u);}});
+  $('#del').addEventListener('click',async()=>{ if(!confirm('Delete this list?'))return;
+    try{await api('/api/lists/'+id,{method:'DELETE'});renderIndex();}catch(e){toast(e.message);}});
+  $('#edit').addEventListener('click',()=>editMeta(list));
+
+  renderItems(list,items);
+  (type==='games'?addGamesUI:addPlayersUI)(list);
+}
+
+function renderItems(list,items){
+  const box=$('#items'); const type=list.listType||'games'; const ranked=list.isRanked;
+  if(!items.length){ box.innerHTML='<div class="muted">No items yet — add some above.</div>'; return; }
+  box.innerHTML=items.map((it,i)=>{
+    const name = type==='games' ? `${it.awayTeamAbbr||'?'} @ ${it.homeTeamAbbr||'?'}` : it.playerName;
+    const sub = type==='games'
+      ? [it.gameDate,(it.awayScore!=null&&it.homeScore!=null)?`${it.awayScore}–${it.homeScore}`:''].filter(Boolean).join(' · ')
+      : [it.team,(type==='player_seasons'?it.season:null)].filter(Boolean).join(' · ');
+    const key = type==='games' ? it.gameId : it.id;
+    return `<div class="item">
+      ${ranked?`<span class="rank">${i+1}</span>`:'<span class="rank" style="color:var(--rule)">•</span>'}
+      <div class="grow"><div class="name">${esc(name)}</div>${sub?`<div class="s">${esc(sub)}</div>`:''}</div>
+      ${ranked?`<button class="btn sm" data-up="${key}" ${i===0?'disabled':''}>↑</button><button class="btn sm" data-down="${key}" ${i===items.length-1?'disabled':''}>↓</button>`:''}
+      <button class="btn sm danger" data-rm="${key}">✕</button>
+    </div>`;}).join('');
+  box.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>removeItem(list,b.dataset.rm)));
+  box.querySelectorAll('[data-up]').forEach(b=>b.addEventListener('click',()=>move(list,items,b.dataset.up,-1)));
+  box.querySelectorAll('[data-down]').forEach(b=>b.addEventListener('click',()=>move(list,items,b.dataset.down,1)));
+}
+
+async function removeItem(list,key){
+  const type=list.listType||'games';
+  const url = type==='games' ? `/api/lists/${list.id}/games/${key}` : `/api/lists/${list.id}/players/${key}`;
+  try{ await api(url,{method:'DELETE'}); renderDetail(list.id); }catch(e){ toast(e.message); }
+}
+
+async function move(list,items,key,dir){
+  const type=list.listType||'games'; const idField = type==='games'?'gameId':'id';
+  const idx=items.findIndex(x=>String(x[idField])===String(key)); const j=idx+dir;
+  if(idx<0||j<0||j>=items.length)return;
+  const arr=items.slice(); [arr[idx],arr[j]]=[arr[j],arr[idx]];
+  const ids=arr.map(x=>x[idField]);
+  try{
+    if(type==='games') await api(`/api/lists/${list.id}/games/reorder`,{method:'PATCH',body:JSON.stringify({gameIds:ids})});
+    else await api(`/api/lists/${list.id}/players/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})});
+    renderDetail(list.id);
+  }catch(e){ toast(e.message); }
+}
+
+// ---- add players (typeahead) ----
+function addPlayersUI(list){
+  const type=list.listType;
+  $('#addbox').innerHTML=`<div class="stack">
+    <div class="row"><input id="pq" placeholder="Search players…" style="flex:1">
+      <select id="plg" style="max-width:110px"><option value="nba">NBA</option><option value="wnba">WNBA</option></select></div>
+    <div id="pres"></div></div>`;
+  let t;
+  $('#pq').addEventListener('input',()=>{clearTimeout(t);t=setTimeout(async()=>{
+    const q=$('#pq').value.trim(); const res=$('#pres');
+    if(q.length<2){res.innerHTML='';return;}
+    try{
+      const {players}=await api(`/api/lists/players/search?q=${encodeURIComponent(q)}&type=${type}&league=${$('#plg').value}`);
+      res.innerHTML = players.length? players.map((p,i)=>`<div class="res"><div class="grow"><b>${esc(p.playerName)}</b> <span class="muted">${esc([p.team,type==='player_seasons'?p.season:null].filter(Boolean).join(' · '))}</span></div><button class="btn sm primary" data-i="${i}">Add</button></div>`).join('') : '<div class="muted">No matches.</div>';
+      res.querySelectorAll('[data-i]').forEach(b=>b.addEventListener('click',async()=>{
+        const p=players[b.dataset.i];
+        try{ await api(`/api/lists/${list.id}/players`,{method:'POST',body:JSON.stringify({
+          playerId:p.playerId,playerName:p.playerName,team:p.team,season:p.season,league:$('#plg').value})});
+          toast('Added'); renderDetail(list.id);
+        }catch(e){ toast(e.message); }
+      }));
+    }catch(e){ res.innerHTML=`<div class="muted">${esc(e.message)}</div>`; }
+  },250);});
+}
+
+// ---- add games (browse by season/team) ----
+function addGamesUI(list){
+  $('#addbox').innerHTML=`<div class="stack">
+    <div class="row">
+      <select id="glg" style="max-width:100px"><option value="nba">NBA</option><option value="wnba">WNBA</option></select>
+      <input id="gseason" placeholder="Season (e.g. 2025-26 or 'all')" style="flex:1">
+      <input id="gteam" placeholder="Team abbr (opt.)" style="max-width:130px">
+      <button class="btn primary" id="gsearch">Search</button>
+    </div>
+    <div id="gres"><div class="muted">Search games to add.</div></div></div>`;
+  $('#gsearch').addEventListener('click',async()=>{
+    const res=$('#gres'); res.innerHTML='<div class="muted">Searching…</div>';
+    const p=new URLSearchParams({league:$('#glg').value,limit:'40'});
+    const s=$('#gseason').value.trim(); if(s)p.set('season',s);
+    const tm=$('#gteam').value.trim(); if(tm)p.set('team',tm);
+    try{
+      const {games}=await api('/api/games?'+p.toString());
+      res.innerHTML = games.length? games.map((g,i)=>`<div class="res"><div class="grow"><b>${esc(g.away_team_abbr)} @ ${esc(g.home_team_abbr)}</b> <span class="muted">${esc(g.game_date)}${(g.away_score!=null)?` · ${g.away_score}–${g.home_score}`:''}</span></div><button class="btn sm primary" data-g="${esc(g.game_id)}">Add</button></div>`).join('') : '<div class="muted">No games found.</div>';
+      res.querySelectorAll('[data-g]').forEach(b=>b.addEventListener('click',async()=>{
+        try{ await api(`/api/lists/${list.id}/games`,{method:'POST',body:JSON.stringify({gameId:b.dataset.g})});
+          toast('Added'); renderDetail(list.id);
+        }catch(e){ toast(e.message); }
+      }));
+    }catch(e){ res.innerHTML=`<div class="muted">${esc(e.message)}</div>`; }
+  });
+}
+
+// ---- edit meta ----
+function editMeta(list){
+  $('#addbox').scrollIntoView({behavior:'smooth'});
+  const box=$('#items');
+  box.innerHTML=`<div class="card"><div class="stack">
+    <input id="e-title" value="${esc(list.title)}" maxlength="100">
+    <textarea id="e-desc" rows="2" placeholder="Description (optional)">${esc(list.description||'')}</textarea>
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="e-pub" ${list.isPublic?'checked':''} style="width:auto"> Public</label>
+      <label class="chk"><input type="checkbox" id="e-rank" ${list.isRanked?'checked':''} style="width:auto"> Ranked</label>
+      <button class="btn primary" id="e-save">Save</button>
+      <button class="btn" id="e-cancel">Cancel</button>
+    </div></div></div>`;
+  $('#e-cancel').addEventListener('click',()=>renderDetail(list.id));
+  $('#e-save').addEventListener('click',async()=>{
+    try{ await api('/api/lists/'+list.id,{method:'PATCH',body:JSON.stringify({
+      title:$('#e-title').value.trim(), description:$('#e-desc').value.trim(),
+      isPublic:$('#e-pub').checked, isRanked:$('#e-rank').checked })});
+      toast('Saved'); renderDetail(list.id);
+    }catch(e){ toast(e.message); }
+  });
+}
+
+boot();
+</script>
+<script src="/site-nav.js"></script>
+</body>
+</html>

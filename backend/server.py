@@ -5340,6 +5340,12 @@ def list_og_image(list_id):
     return resp
 
 
+@app.route("/mylists")
+def mylists_page():
+    # Client-side gated (calls /api/me/lists, which is login_required)
+    return app.send_static_file("mylists.html")
+
+
 @app.route("/api/lists/<int:list_id>", methods=["PATCH"])
 @login_required
 def update_list(list_id):
