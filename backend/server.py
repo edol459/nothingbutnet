@@ -5140,7 +5140,7 @@ def get_list_detail(list_id):
         SELECT gli.game_id, gli.added_at, gli.sort_order,
                g.home_team_abbr, g.away_team_abbr,
                g.home_score, g.away_score,
-               g.game_date, g.league
+               g.game_date, g.league, g.season_type
         FROM game_list_items gli
         LEFT JOIN games g ON g.game_id = gli.game_id
         WHERE gli.list_id = %s
@@ -5158,6 +5158,7 @@ def get_list_detail(list_id):
             "awayScore":    r.get("away_score"),
             "gameDate":     str(r["game_date"]) if r.get("game_date") else None,
             "league":       r.get("league", "nba"),
+            "seasonType":   r.get("season_type"),
         })
     # Fetch player items (for player/player_seasons lists)
     player_items = []
