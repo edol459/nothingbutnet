@@ -111,4 +111,23 @@ html { background: var(--paper); }
     padding: 5px 0;
   }
   .site-nav__links a { padding: 6px 6px; }
+  .site-nav .nav-support { margin-left: auto; margin-right: 10px; padding: 6px 11px; }
 }
+
+/* ── Support button — highlighted, sits next to the avatar ── */
+.site-nav .nav-support {
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: var(--orange);
+  color: #fff;
+  padding: 7px 13px;
+  border-radius: 6px;
+  text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-right: 12px;
+  transition: opacity 0.15s;
+}
+.site-nav .nav-support:hover { opacity: 0.9; }

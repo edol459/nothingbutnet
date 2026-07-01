@@ -820,6 +820,7 @@ function renderProfile() {
 
     <div class="profile-tabs">
       <button class="profile-tab active" data-tab="reviews">Game Log</button>
+      <button class="profile-tab" data-tab="lists">Lists</button>
       <button class="profile-tab" data-tab="friends">Friends${PROFILE.friend_count > 0 ? ` (${PROFILE.friend_count})` : ''}</button>
       ${isOwn ? '<button class="profile-tab" data-tab="find">Find Friends</button>' : ''}
     </div>
@@ -861,6 +862,7 @@ function renderProfile() {
       </div>
       <div id="reviews-list"><div class="loading-state">Loading…</div></div>
     </div>
+    <div id="tab-lists" style="display:none"></div>
     <div id="tab-friends" style="display:none"></div>
     ${isOwn ? '<div id="tab-find" style="display:none"></div>' : ''}
   `;
@@ -872,10 +874,11 @@ function renderProfile() {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.profile-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      ['reviews','friends','find'].forEach(t => {
+      ['reviews','lists','friends','find'].forEach(t => {
         const el = document.getElementById(`tab-${t}`);
         if (el) el.style.display = btn.dataset.tab === t ? '' : 'none';
       });
+      if (btn.dataset.tab === 'lists' && !document.getElementById('tab-lists').dataset.loaded) loadLists();
       if (btn.dataset.tab === 'friends') {
         // Clear the dot once the user opens the tab
         const dot = btn.querySelector('.tab-dot');
@@ -922,6 +925,40 @@ async function loadGlSeasons() {
       }
     });
   } catch {}
+}
+
+// ── Lists tab ─────────────────────────────────────────────────
+async function loadLists() {
+  const box = document.getElementById('tab-lists');
+  if (!box) return;
+  box.dataset.loaded = '1';
+  box.innerHTML = '<div class="loading-state">Loading…</div>';
+  const own = PROFILE.is_own;
+  const esc = s => (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const TYPE = {games:'Games', players:'Players', player_seasons:'Player Seasons', teams:'Teams', team_seasons:'Team Seasons', jerseys:'Jerseys'};
+  try {
+    const url = own ? '/api/me/lists' : `/api/users/${PROFILE_ID}/lists`;
+    const data = await (await fetch(url, { credentials: 'include' })).json();
+    const lists = data.lists || [];
+    let html = own
+      ? '<a href="/mylists" class="btn btn-primary" style="display:inline-block;margin-bottom:16px;font-size:12px;padding:8px 14px">+ New / manage lists</a>'
+      : '';
+    if (!lists.length) {
+      box.innerHTML = html + `<div class="loading-state">${own ? 'No lists yet — create your first above.' : 'No public lists.'}</div>`;
+      return;
+    }
+    html += lists.map(l => `
+      <a href="/list/${l.id}" style="display:flex;align-items:center;gap:12px;padding:13px 4px;border-bottom:1px solid var(--paper3);text-decoration:none;color:inherit">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:15px">${esc(l.title)}</div>
+          <div style="font-family:var(--ff-mono);font-size:11px;color:var(--ink3);margin-top:3px">${TYPE[l.listType] || l.listType}${l.isRanked ? ' · ranked' : ''}${own ? ` · ${l.isPublic ? 'public' : 'private'}` : ''}</div>
+        </div>
+        <span style="font-family:var(--ff-mono);font-size:11px;color:var(--ink3)">View →</span>
+      </a>`).join('');
+    box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = '<div class="loading-state">Couldn\'t load lists.</div>';
+  }
 }
 
 // ── Reviews tab ───────────────────────────────────────────────
