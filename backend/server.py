@@ -4377,9 +4377,10 @@ def get_recent_reviews():
 def get_feed():
     limit        = min(int(request.args.get("limit", 20)), 100)
     offset       = int(request.args.get("offset", 0))
-    friends_only = request.args.get("friends") in ("1", "true")
-    user         = current_user()
-    user_id      = user["id"] if user else None
+    friends_only  = request.args.get("friends") in ("1", "true")
+    include_lists = request.args.get("include_lists") in ("1", "true")
+    user          = current_user()
+    user_id       = user["id"] if user else None
 
     if friends_only and not user_id:
         return jsonify({"items": [], "has_more": False})
@@ -4414,6 +4415,69 @@ def get_feed():
         perf_block_where  = "AND pr.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = %s)"
         perf_block_params = [user_id]
 
+    # Lists are an opt-in feed arm: older app builds only understand game/performance
+    # reviews and would mis-decode a "list" row, so only newer clients ask for them.
+    list_arm            = ""
+    list_friends_params = []
+    list_block_params   = []
+    if include_lists:
+        item_count_expr = (
+            "(  (SELECT COUNT(*) FROM game_list_items   WHERE list_id = gl.id)"
+            " + (SELECT COUNT(*) FROM player_list_items WHERE list_id = gl.id)"
+            " + (SELECT COUNT(*) FROM jersey_list_items WHERE list_id = gl.id)"
+            " + (SELECT COUNT(*) FROM team_list_items   WHERE list_id = gl.id) )"
+        )
+        list_friends_join = ""
+        if friends_only:
+            list_friends_join = """
+                JOIN friendships fr ON (
+                    (fr.sender_id = %s AND fr.receiver_id = gl.user_id)
+                    OR (fr.receiver_id = %s AND fr.sender_id = gl.user_id)
+                ) AND fr.status = 'accepted'
+            """
+            list_friends_params = [user_id, user_id]
+        list_block_where = ""
+        if user_id:
+            list_block_where = "AND gl.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = %s)"
+            list_block_params = [user_id]
+        list_arm = f"""
+            UNION ALL
+
+            SELECT
+                'list'::text                         AS type,
+                gl.id,
+                NULL::text                           AS game_id,
+                NULL::integer                        AS person_id,
+                NULL::text                           AS player_name,
+                gl.user_id,
+                NULL::integer                        AS rating,
+                NULL::numeric                        AS stars,
+                NULL::text                           AS review_text,
+                '[]'::jsonb                          AS tags,
+                FALSE                                AS attended,
+                gl.created_at,
+                u.display_name, u.avatar_url, u.favorite_team,
+                u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
+                NULL::date                           AS game_date,
+                NULL::text                           AS home_team_abbr,
+                NULL::text                           AS away_team_abbr,
+                NULL::integer                        AS home_score,
+                NULL::integer                        AS away_score,
+                0::bigint                            AS like_count,
+                FALSE                                AS liked_by_me,
+                0::bigint                            AS reply_count,
+                gl.title                             AS list_title,
+                gl.description                       AS list_description,
+                {item_count_expr}                    AS list_item_count,
+                COALESCE(gl.list_type, 'games')      AS list_type,
+                COALESCE(gl.is_ranked, FALSE)        AS list_is_ranked
+            FROM game_lists gl
+            JOIN users u ON gl.user_id = u.id
+            {list_friends_join}
+            WHERE gl.is_public = TRUE {list_block_where}
+              AND {item_count_expr} > 0
+        """
+
     if user_id:
         rl_me_join      = "LEFT JOIN review_likes rl_me ON rl_me.review_id = gr.id AND rl_me.user_id = %s"
         liked_by_me_col = "BOOL_OR(rl_me.user_id IS NOT NULL) AS liked_by_me"
@@ -4444,7 +4508,12 @@ def get_feed():
                 g.home_score, g.away_score,
                 COUNT(rl.review_id)                  AS like_count,
                 {liked_by_me_col},
-                (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
+                (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count,
+                NULL::text     AS list_title,
+                NULL::text     AS list_description,
+                NULL::bigint   AS list_item_count,
+                NULL::text     AS list_type,
+                NULL::boolean  AS list_is_ranked
             FROM game_reviews gr
             JOIN users u  ON gr.user_id = u.id
             JOIN games g  ON gr.game_id = g.game_id
@@ -4475,12 +4544,18 @@ def get_feed():
                 g.home_score, g.away_score,
                 0::bigint                            AS like_count,
                 FALSE                                AS liked_by_me,
-                0::bigint                            AS reply_count
+                0::bigint                            AS reply_count,
+                NULL::text     AS list_title,
+                NULL::text     AS list_description,
+                NULL::bigint   AS list_item_count,
+                NULL::text     AS list_type,
+                NULL::boolean  AS list_is_ranked
             FROM performance_reviews pr
             JOIN users u ON pr.user_id = u.id
             LEFT JOIN games g ON pr.game_id = g.game_id
             {perf_friends_join}
             WHERE 1=1 {perf_block_where}
+            {list_arm}
         )
         SELECT * FROM combined
         ORDER BY created_at DESC
@@ -4493,6 +4568,8 @@ def get_feed():
         game_block_params +
         perf_friends_params +
         perf_block_params +
+        list_friends_params +
+        list_block_params +
         [limit, offset]
     )
 
@@ -4607,6 +4684,27 @@ def _format_feed_rows(rows) -> list:
     items = []
     for r in rows:
         d = dict(r)
+        if d["type"] == "list":
+            items.append({
+                "type":                 "list",
+                "id":                   d["id"],
+                "user_id":              d["user_id"],
+                "display_name":         d.get("display_name", ""),
+                "avatar_url":           d.get("avatar_url") or "",
+                "favorite_team":        d.get("favorite_team") or "",
+                "is_pro":               bool(d.get("is_pro", False)),
+                "xp":                   d.get("xp"),
+                "equipped_ring":        d.get("equipped_ring"),
+                "equipped_title":       d.get("equipped_title"),
+                "created_at":           str(d["created_at"]),
+                "list_title":           d.get("list_title"),
+                "list_description":     d.get("list_description"),
+                "list_item_count":      int(d.get("list_item_count") or 0),
+                "list_type":            d.get("list_type") or "games",
+                "list_is_ranked":       bool(d.get("list_is_ranked", False)),
+                "ball_knowledge_level": _xp_to_level(int(d.get("xp") or 0)),
+            })
+            continue
         items.append({
             "type":               d["type"],
             "id":                 d["id"],
