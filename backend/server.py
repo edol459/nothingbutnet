@@ -2065,7 +2065,11 @@ def get_scoreboard():
                 date_ok  = abs((today_dt - cdn_dt).days) <= 1
             except Exception:
                 date_ok = cdn_date == _game_today
-            if date_ok and cdn_games:
+            # Authoritative even with zero games: in the offseason the CDN reports
+            # today's date with an empty games list, and that's the correct answer.
+            # Requiring cdn_games here made every offseason request fall through to
+            # ScoreboardV3, which times out (~15 s) on cloud IPs.
+            if date_ok:
                 away_k = "awayTeam"; home_k = "homeTeam"
                 games = []
                 for g in cdn_games:
@@ -2305,7 +2309,14 @@ def get_scoreboard():
                             return jsonify({"games": games, "date": date})
             except Exception:
                 pass
-        return jsonify({"error": str(e), "games": [], "date": date}), 200
+        # Cache the empty result so we don't re-pay the ScoreboardV3 timeout on every
+        # request (today caches for 5 min via the is_today fast path above).
+        empty = {"games": [], "date": date}
+        if is_today:
+            _today_sb_cache.update({"payload": empty, "ts": _time.time(), "date": _game_today})
+        elif not is_past:
+            _future_sb_cache[date] = {"payload": empty, "ts": _time.time()}
+        return jsonify({**empty, "error": str(e)}), 200
 
 
 # ── /api/news ─────────────────────────────────────────────────────
