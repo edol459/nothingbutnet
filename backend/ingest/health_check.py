@@ -506,12 +506,12 @@ def send_email_report(health, threshold=FAIL):
     msg.attach(MIMEText(health.render(), "plain", "utf-8"))
     msg.attach(MIMEText(health.render_html(), "html", "utf-8"))
 
-    # Railway networking is IPv6-first but has no IPv6 route to smtp.gmail.com,
-    # so smtplib fails with "[Errno 101] Network is unreachable". Force IPv4 by
-    # filtering getaddrinfo for the duration of the send (scoped + restored, so
-    # importing this module elsewhere is unaffected). Hostname is preserved for
-    # TLS cert verification.
+    # Railway is IPv6-first with no IPv6 route to smtp.gmail.com (→ "Network is
+    # unreachable"), and it blocks/hangs on port 465 SSL (→ timeouts). So: force
+    # IPv4 (scoped getaddrinfo filter, restored after) AND use port 587 STARTTLS,
+    # which cloud hosts allow. Hostname preserved for TLS cert verification.
     import socket as _socket
+    import ssl as _ssl
     _orig_gai = _socket.getaddrinfo
 
     def _ipv4_only(*args, **kwargs):
@@ -521,7 +521,10 @@ def send_email_report(health, threshold=FAIL):
 
     _socket.getaddrinfo = _ipv4_only
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as s:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as s:
+            s.ehlo()
+            s.starttls(context=_ssl.create_default_context())
+            s.ehlo()
             s.login(sender, app_pw)
             s.sendmail(sender, [recipient], msg.as_string())
     finally:
