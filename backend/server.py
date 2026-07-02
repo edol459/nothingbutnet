@@ -9305,53 +9305,97 @@ def guesswho_page():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# GET /api/players/browse  — paginated active-roster player list
+# GET /api/players/browse  — paginated player list with filters
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/players/browse")
 def browse_players():
-    limit  = min(int(request.args.get("limit", 30)), 50)
-    offset = int(request.args.get("offset", 0))
-    q      = request.args.get("q", "").strip()
+    limit    = min(int(request.args.get("limit", 30)), 50)
+    offset   = int(request.args.get("offset", 0))
+    q        = request.args.get("q", "").strip()
+    league   = request.args.get("league", "nba").lower()
+    season   = request.args.get("season", "").strip()
+    team     = request.args.get("team", "").strip()
+    position = request.args.get("position", "").strip()  # NBA only: G / F / C
+    sort     = request.args.get("sort", "name")
+    is_wnba  = league == "wnba"
+
+    _safe_sort = {
+        "name": "player_name ASC",
+        "pts":  "pts  DESC NULLS LAST",
+        "reb":  "reb  DESC NULLS LAST",
+        "ast":  "ast  DESC NULLS LAST",
+        "stl":  "stl  DESC NULLS LAST",
+        "blk":  "blk  DESC NULLS LAST",
+        "gp":   "gp   DESC NULLS LAST",
+    }
+    order_sql = _safe_sort.get(sort, "player_name ASC")
+
+    def _f(v): return round(float(v), 1) if v is not None else None
+
     try:
         conn = get_conn(); cur = conn.cursor()
-        # Most recent Regular Season in player_seasons
-        cur.execute("""
-            SELECT MAX(season) FROM player_seasons
-            WHERE season_type = 'Regular Season'
-        """)
-        latest = (cur.fetchone() or {}).get("max") or "2024-25"
-        where  = "ps.season = %s AND ps.season_type = 'Regular Season'"
-        params = [latest]
-        if q:
-            where += " AND p.player_name ILIKE %s"
-            params.append(f"%{q}%")
-        cur.execute(f"""
-            SELECT DISTINCT ON (p.player_id)
-                   p.player_id   AS person_id,
-                   p.player_name,
-                   p.position,
-                   ps.team_abbr,
-                   ps.pts, ps.reb, ps.ast, ps.gp
-            FROM players p
-            JOIN player_seasons ps ON p.player_id = ps.player_id
-            WHERE {where}
-            ORDER BY p.player_id, p.player_name
-            LIMIT %s OFFSET %s
-        """, params + [limit + 1, offset])
-        rows = cur.fetchall()
+
+        if is_wnba:
+            cur.execute("SELECT MAX(season) FROM wnba_player_seasons WHERE season_type = 'Regular Season'")
+            latest = (cur.fetchone() or {}).get("max") or "2025"
+            if not season: season = latest
+            conds  = ["season_type = 'Regular Season'", "season = %s"]
+            params = [season]
+            if q:    conds.append("player_name ILIKE %s"); params.append(f"%{q}%")
+            if team: conds.append("team ILIKE %s");        params.append(team)
+            inner_where = " AND ".join(conds)
+            cur.execute(f"""
+                SELECT * FROM (
+                    SELECT DISTINCT ON (player_id)
+                           player_id AS person_id, player_name,
+                           NULL::text    AS position,
+                           team          AS team_abbr,
+                           pts, reb, ast, stl, blk, gp
+                    FROM wnba_player_seasons
+                    WHERE {inner_where}
+                    ORDER BY player_id
+                ) t
+                ORDER BY {order_sql}
+                LIMIT %s OFFSET %s
+            """, params + [limit + 1, offset])
+        else:
+            cur.execute("SELECT MAX(season) FROM player_seasons WHERE season_type = 'Regular Season'")
+            latest = (cur.fetchone() or {}).get("max") or "2024-25"
+            if not season: season = latest
+            conds  = ["ps.season = %s", "ps.season_type = 'Regular Season'"]
+            params = [season]
+            if q:        conds.append("p.player_name ILIKE %s");  params.append(f"%{q}%")
+            if team:     conds.append("ps.team_abbr ILIKE %s");   params.append(team)
+            if position: conds.append("p.position ILIKE %s");     params.append(f"{position}%")
+            inner_where = " AND ".join(conds)
+            cur.execute(f"""
+                SELECT * FROM (
+                    SELECT DISTINCT ON (p.player_id)
+                           p.player_id AS person_id, p.player_name, p.position,
+                           ps.team_abbr, ps.pts, ps.reb, ps.ast, ps.stl, ps.blk, ps.gp
+                    FROM players p
+                    JOIN player_seasons ps ON p.player_id = ps.player_id
+                    WHERE {inner_where}
+                    ORDER BY p.player_id
+                ) t
+                ORDER BY {order_sql}
+                LIMIT %s OFFSET %s
+            """, params + [limit + 1, offset])
+
+        rows     = cur.fetchall()
         has_more = len(rows) > limit
-        players  = []
-        for r in rows[:limit]:
-            players.append({
+        players  = [
+            {
                 "person_id":   r["person_id"],
                 "player_name": r["player_name"],
                 "position":    r.get("position"),
                 "team_abbr":   r.get("team_abbr"),
-                "pts": round(float(r["pts"]), 1) if r.get("pts") is not None else None,
-                "reb": round(float(r["reb"]), 1) if r.get("reb") is not None else None,
-                "ast": round(float(r["ast"]), 1) if r.get("ast") is not None else None,
+                "pts": _f(r.get("pts")), "reb": _f(r.get("reb")), "ast": _f(r.get("ast")),
+                "stl": _f(r.get("stl")), "blk": _f(r.get("blk")),
                 "gp":  int(r["gp"]) if r.get("gp") is not None else None,
-            })
+            }
+            for r in rows[:limit]
+        ]
         cur.close(); conn.close()
         return jsonify({"players": players, "has_more": has_more})
     except Exception as e:
