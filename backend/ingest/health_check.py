@@ -632,15 +632,27 @@ def main():
     print("=" * 70)
     print(f"\nReport saved to {out_path}")
 
+    email_failed = False
     if args.email:
         threshold = {"fail": FAIL, "warn": WARN, "always": OK}[args.email_on]
         try:
             sent, info = send_email_report(h, threshold=threshold)
-            print(("📧 " if sent else "✉️  skipped: ") + info)
         except Exception as e:
-            print(f"📧 email FAILED: {e}", file=sys.stderr)
+            sent, info = False, f"exception: {e}"
+        if sent:
+            print("📧 " + info)
+        elif info.startswith("status "):     # below-threshold skip — not a failure
+            print("✉️  skipped: " + info)
+        else:
+            print("📧 email FAILED: " + info, file=sys.stderr)
+            email_failed = True
 
     conn.close()
+    # In --email mode the job's success is DELIVERING the report, not the health
+    # status (which lives in the email). Exit non-zero only if the email itself
+    # failed — otherwise Railway flags the service "crashed" on every FAIL day.
+    if args.email:
+        sys.exit(1 if email_failed else 0)
     sys.exit(1 if h.overall() == FAIL else 0)
 
 
