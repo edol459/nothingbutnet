@@ -6334,10 +6334,47 @@ def get_notifications():
     user  = current_user()
     uid   = user["id"]
     limit = min(int(request.args.get("limit", 50)), 100)
+    include_lists = request.args.get("include_lists") in ("1", "true")
     try:
         conn = get_conn()
         cur  = conn.cursor()
-        cur.execute("""
+        # List-published notifications are opt-in: older app builds don't know the
+        # "list_published" type and would fail to decode the notifications array.
+        list_arm = ""
+        list_params: list = []
+        if include_lists:
+            list_arm = """
+                UNION ALL
+
+                -- A friend published a public list.
+                -- (list id is carried in review_id, list title in reply_text)
+                SELECT
+                    'list_published'        AS type,
+                    gl.created_at,
+                    u.id,
+                    u.display_name,
+                    u.avatar_url,
+                    gl.id                   AS review_id,
+                    NULL::text              AS game_id,
+                    NULL::text              AS home_team_abbr,
+                    NULL::text              AS away_team_abbr,
+                    NULL::date              AS game_date,
+                    gl.title                AS reply_text,
+                    NULL::text              AS league
+                FROM game_lists gl
+                JOIN users u ON u.id = gl.user_id
+                JOIN friendships f ON (
+                    (f.sender_id = %s AND f.receiver_id = gl.user_id)
+                    OR (f.receiver_id = %s AND f.sender_id = gl.user_id)
+                ) AND f.status = 'accepted'
+                WHERE gl.is_public = TRUE
+                  AND (  (SELECT COUNT(*) FROM game_list_items   WHERE list_id = gl.id)
+                       + (SELECT COUNT(*) FROM player_list_items WHERE list_id = gl.id)
+                       + (SELECT COUNT(*) FROM jersey_list_items WHERE list_id = gl.id)
+                       + (SELECT COUNT(*) FROM team_list_items   WHERE list_id = gl.id) ) > 0
+            """
+            list_params = [uid, uid]
+        cur.execute(f"""
             SELECT type, created_at, actor_id, actor_name, actor_avatar,
                    review_id, game_id, home_team_abbr, away_team_abbr,
                    game_date::text, reply_text, league
@@ -6403,10 +6440,11 @@ def get_notifications():
                 FROM friendships f
                 JOIN users u ON u.id = f.sender_id
                 WHERE f.receiver_id = %s AND f.status = 'pending'
+                {list_arm}
             ) n
             ORDER BY created_at DESC
             LIMIT %s
-        """, (uid, uid, uid, uid, uid, limit))
+        """, (uid, uid, uid, uid, uid, *list_params, limit))
 
         rows = cur.fetchall()
         cur.close(); conn.close()
