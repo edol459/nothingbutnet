@@ -6180,6 +6180,26 @@ def update_title():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def _compress_avatar(data_url: str, max_dim: int = 200, quality: int = 80) -> str:
+    """Downscale a base64 image data URL to a small JPEG thumbnail.
+    Avatars render at <=90px, so storing anything larger just bloats every
+    user-bearing API response (feed/profile/notifications). Returns the input
+    unchanged on any failure."""
+    try:
+        import base64, io
+        from PIL import Image
+        _, _, b64 = data_url.partition(",")
+        if not b64:
+            return data_url
+        img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+        img.thumbnail((max_dim, max_dim), Image.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=quality, optimize=True)
+        return "data:image/jpeg;base64," + base64.b64encode(out.getvalue()).decode("ascii")
+    except Exception:
+        return data_url
+
+
 # POST /api/me/avatar  — upload / replace profile picture
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/me/avatar", methods=["POST"])
@@ -6199,6 +6219,10 @@ def update_avatar():
     # Limit size: base64-encoded ~200 KB image → ~270 KB string
     if len(data) > 300_000:
         return jsonify({"error": "Image too large (max ~200 KB after resize)"}), 400
+
+    # Downscale before storing — avatars display at <=90px; large blobs bloat
+    # every feed/profile/notification response that carries this user.
+    data = _compress_avatar(data)
 
     try:
         conn = get_conn()
