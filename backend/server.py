@@ -9305,6 +9305,59 @@ def guesswho_page():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/players/browse  — paginated active-roster player list
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/players/browse")
+def browse_players():
+    limit  = min(int(request.args.get("limit", 30)), 50)
+    offset = int(request.args.get("offset", 0))
+    q      = request.args.get("q", "").strip()
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        # Most recent Regular Season in player_seasons
+        cur.execute("""
+            SELECT MAX(season) FROM player_seasons
+            WHERE season_type = 'Regular Season'
+        """)
+        latest = (cur.fetchone() or {}).get("max") or "2024-25"
+        where  = "ps.season = %s AND ps.season_type = 'Regular Season'"
+        params = [latest]
+        if q:
+            where += " AND p.player_name ILIKE %s"
+            params.append(f"%{q}%")
+        cur.execute(f"""
+            SELECT DISTINCT ON (p.player_id)
+                   p.player_id   AS person_id,
+                   p.player_name,
+                   p.position,
+                   ps.team_abbr,
+                   ps.pts, ps.reb, ps.ast, ps.gp
+            FROM players p
+            JOIN player_seasons ps ON p.player_id = ps.player_id
+            WHERE {where}
+            ORDER BY p.player_id, p.player_name
+            LIMIT %s OFFSET %s
+        """, params + [limit + 1, offset])
+        rows = cur.fetchall()
+        has_more = len(rows) > limit
+        players  = []
+        for r in rows[:limit]:
+            players.append({
+                "person_id":   r["person_id"],
+                "player_name": r["player_name"],
+                "position":    r.get("position"),
+                "team_abbr":   r.get("team_abbr"),
+                "pts": round(float(r["pts"]), 1) if r.get("pts") is not None else None,
+                "reb": round(float(r["reb"]), 1) if r.get("reb") is not None else None,
+                "ast": round(float(r["ast"]), 1) if r.get("ast") is not None else None,
+                "gp":  int(r["gp"]) if r.get("gp") is not None else None,
+            })
+        cur.close(); conn.close()
+        return jsonify({"players": players, "has_more": has_more})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # Player profile  GET /api/players/<person_id>/profile
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
