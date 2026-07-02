@@ -473,21 +473,22 @@ class Health:
 
 
 def send_email_report(health, threshold=FAIL):
-    """Email the report via Gmail SMTP if overall status meets/exceeds threshold.
+    """Email the report if overall status meets/exceeds threshold.
 
-    Env required: GMAIL_ADDRESS, GMAIL_APP_PASSWORD. Optional: REPORT_TO (defaults
-    to GMAIL_ADDRESS). Returns (sent: bool, message: str).
+    Delivery: prefers the Resend HTTP API when RESEND_API_KEY is set (required on
+    Railway, which blocks SMTP); otherwise falls back to Gmail SMTP (local dev).
+    Env: RESEND_API_KEY (+ optional RESEND_FROM) for HTTP; GMAIL_ADDRESS/
+    GMAIL_APP_PASSWORD for SMTP; REPORT_TO for the recipient (defaults to
+    GMAIL_ADDRESS). Returns (sent: bool, message: str).
     """
     order = {OK: 0, WARN: 1, FAIL: 2}
     ov = health.overall()
     if order[ov] < order[threshold]:
         return False, f"status {ov} below threshold {threshold} — no email sent"
 
-    sender = os.getenv("GMAIL_ADDRESS")
-    app_pw = os.getenv("GMAIL_APP_PASSWORD")
-    recipient = os.getenv("REPORT_TO", sender)
-    if not sender or not app_pw:
-        return False, "GMAIL_ADDRESS / GMAIL_APP_PASSWORD not set — cannot send"
+    recipient = os.getenv("REPORT_TO") or os.getenv("GMAIL_ADDRESS")
+    if not recipient:
+        return False, "REPORT_TO / GMAIL_ADDRESS not set — no recipient"
 
     icon = ICON[ov]
     n_fail = sum(r["status"] == FAIL for r in health.results)
@@ -499,17 +500,43 @@ def send_email_report(health, threshold=FAIL):
     else:
         subject = f"{icon} ydkball data report — all healthy ({health.today})"
 
+    html = health.render_html()
+    text = health.render()
+
+    # Railway blocks outbound SMTP on ALL ports (25/465/587) — SMTP just times out
+    # there. So prefer an HTTP email API (Resend) over port 443, which is open.
+    # SMTP stays as a fallback for local/off-Railway runs.
+    resend_key = os.getenv("RESEND_API_KEY")
+    if resend_key:
+        import requests
+        from_addr = os.getenv("RESEND_FROM", "ydkball <onboarding@resend.dev>")
+        try:
+            resp = requests.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {resend_key}",
+                         "Content-Type": "application/json"},
+                json={"from": from_addr, "to": [recipient],
+                      "subject": subject, "html": html, "text": text},
+                timeout=30)
+        except Exception as e:
+            return False, f"Resend request failed: {e}"
+        if resp.status_code >= 300:
+            return False, f"Resend error {resp.status_code}: {resp.text[:200]}"
+        return True, f"emailed {recipient} via Resend (subject: {subject})"
+
+    # SMTP fallback (works off Railway, e.g. local dev)
+    sender = os.getenv("GMAIL_ADDRESS")
+    app_pw = os.getenv("GMAIL_APP_PASSWORD")
+    if not sender or not app_pw:
+        return False, "no RESEND_API_KEY, and GMAIL_ADDRESS/GMAIL_APP_PASSWORD not set — cannot send"
+
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = sender
     msg["To"] = recipient
-    msg.attach(MIMEText(health.render(), "plain", "utf-8"))
-    msg.attach(MIMEText(health.render_html(), "html", "utf-8"))
+    msg.attach(MIMEText(text, "plain", "utf-8"))
+    msg.attach(MIMEText(html, "html", "utf-8"))
 
-    # Railway is IPv6-first with no IPv6 route to smtp.gmail.com (→ "Network is
-    # unreachable"), and it blocks/hangs on port 465 SSL (→ timeouts). So: force
-    # IPv4 (scoped getaddrinfo filter, restored after) AND use port 587 STARTTLS,
-    # which cloud hosts allow. Hostname preserved for TLS cert verification.
     import socket as _socket
     import ssl as _ssl
     _orig_gai = _socket.getaddrinfo
@@ -529,7 +556,7 @@ def send_email_report(health, threshold=FAIL):
             s.sendmail(sender, [recipient], msg.as_string())
     finally:
         _socket.getaddrinfo = _orig_gai
-    return True, f"emailed {recipient} (subject: {subject})"
+    return True, f"emailed {recipient} via Gmail SMTP (subject: {subject})"
 
 
 def collect(conn, today=None, write_snapshot=True):
