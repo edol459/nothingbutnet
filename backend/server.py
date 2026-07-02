@@ -574,6 +574,15 @@ def _ensure_tables():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_poeltl_results_user ON poeltl_results(user_id, mode)")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS game_watches (
+                user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                game_id    TEXT    NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (user_id, game_id)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_game_watches_user ON game_watches(user_id)")
         conn.commit()
         cur.close(); conn.close()
     except Exception as e:
@@ -3522,15 +3531,27 @@ def get_games():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/games/<game_id>")
 def get_game(game_id):
+    user    = current_user()
+    user_id = user["id"] if user else None
     try:
         conn = get_conn()
         cur  = conn.cursor()
         cur.execute("SELECT * FROM games WHERE game_id = %s", (game_id,))
         row = cur.fetchone()
-        cur.close(); conn.close()
         if not row:
+            cur.close(); conn.close()
             return jsonify({"error": "Game not found"}), 404
-        return jsonify({"game": _format_game(dict(row))})
+        game = _format_game(dict(row))
+        if user_id:
+            cur.execute(
+                "SELECT 1 FROM game_watches WHERE user_id = %s AND game_id = %s",
+                (user_id, game_id)
+            )
+            game["is_watched"] = cur.fetchone() is not None
+        else:
+            game["is_watched"] = False
+        cur.close(); conn.close()
+        return jsonify({"game": game})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3720,6 +3741,45 @@ def delete_review(game_id):
         if not deleted:
             return jsonify({"error": "Review not found"}), 404
         return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# POST/DELETE /api/games/<game_id>/watch  — mark / unmark watched
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/games/<game_id>/watch", methods=["POST"])
+@login_required
+def watch_game(game_id):
+    user = current_user()
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            INSERT INTO game_watches (user_id, game_id)
+            VALUES (%s, %s)
+            ON CONFLICT DO NOTHING
+        """, (user["id"], game_id))
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"is_watched": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/games/<game_id>/watch", methods=["DELETE"])
+@login_required
+def unwatch_game(game_id):
+    user = current_user()
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            DELETE FROM game_watches WHERE user_id = %s AND game_id = %s
+        """, (user["id"], game_id))
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"is_watched": False})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
