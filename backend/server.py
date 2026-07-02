@@ -108,19 +108,42 @@ class _PersistentConn:
 
 _tl = threading.local()
 
+import time as _time            # noqa: E402 — needed here; also imported later
+_CONN_MAX_AGE = 180.0          # recycle a thread-local connection after this long
+
+def _new_raw_conn():
+    return psycopg2.connect(
+        DATABASE_URL,
+        cursor_factory=psycopg2.extras.RealDictCursor,
+        connect_timeout=10,
+        # TCP keepalives so a dead peer (Railway network blip / PG failover) is
+        # detected in ~80s instead of hanging on a half-open socket until the
+        # process is redeployed.
+        keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=5,
+        # Cap any single statement so a stuck query can't pin a thread forever.
+        options="-c statement_timeout=30000",
+    )
+
 def get_conn():
-    w = getattr(_tl, "conn", None)
+    w    = getattr(_tl, "conn", None)
+    born = getattr(_tl, "conn_born", 0.0)
     if w is not None:
         try:
-            if not w._raw.closed:
+            if not w._raw.closed and (_time.time() - born) < _CONN_MAX_AGE:
                 w._raw.rollback()
                 return w
         except Exception:
             pass
-    raw = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor,
-                           connect_timeout=10)
+        # aged out, closed, or unhealthy — drop it and open a fresh one so a bad
+        # connection heals on its own instead of surviving until the next deploy.
+        try:
+            w._raw.close()
+        except Exception:
+            pass
+    raw = _new_raw_conn()
     w = _PersistentConn(raw)
     _tl.conn = w
+    _tl.conn_born = _time.time()
     return w
 
 def _resolve_1900_game_time(status_text: str, game_date: str) -> str:
