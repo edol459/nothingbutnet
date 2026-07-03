@@ -22,8 +22,11 @@ Design notes
 - Column-existence is introspected at runtime, so freshness checks light up
   automatically as tables gain/lose timestamp columns. `player_seasons` has no
   updated_at today, so it is covered by snapshot anomaly detection instead.
-- Season-aware: NBA freshness is only enforced in-season; WNBA likewise. The
-  daily-puzzle checks always run (they should generate year-round).
+- Season-aware: NBA freshness is only enforced in-season; WNBA likewise.
+- Daily puzzles (Higher-or-Lower + Guess Who) are LAZILY generated on first play
+  — there is no puzzle_gen cron. So "no puzzle yet today" before anyone has played
+  is normal, not a failure; the puzzle checks are informational, and an EMPTY
+  payload (generator ran but produced nothing) is the only real breakage.
 """
 
 import os
@@ -130,14 +133,10 @@ class Health:
                 warn_h=30, fail_h=54,
                 ctx="runs daily on Railway — works year-round")
 
-        # Puzzle generation cron → newest survival/poeltl row created_at.
-        for tbl, label in (("survival_daily", "Higher-or-Lower generator"),
-                           ("poeltl_daily", "Guess-Who generator")):
-            if self.table_exists(tbl) and self.column_exists(tbl, "created_at"):
-                ts = self._scalar(f"SELECT MAX(created_at) FROM {tbl}")
-                self._freshness_verdict(
-                    sec, f"Puzzle cron ({label})", ts, now,
-                    warn_h=30, fail_h=54, ctx="should generate daily")
+        # NB: no puzzle-generator freshness check — Higher-or-Lower & Guess Who
+        # are lazily generated on first play (no cron), so a table's newest
+        # created_at reflects the last time someone *played*, not a job's health.
+        # See check_daily_puzzles for the (informational) puzzle status.
 
         # Local Windows pipeline writes player_seasons (no timestamp col) — the
         # best timestamp proxy is games.updated_at during NBA season.
@@ -192,9 +191,10 @@ class Health:
                              "started": r[4]}
 
         # (key, label, critical-when-missing?)
+        # No puzzle_gen entry — puzzles are lazily generated on first play, so
+        # there is no cron that records runs here (see check_daily_puzzles).
         expected = [
             ("cloud_daily", "Cloud daily update", True),
-            ("puzzle_gen",  "Puzzle generation", True),
             # local pipeline only feeds NBA stats — non-critical in the offseason
             ("local_daily", "Local daily update (Windows PC)", self.nba_in_season()),
         ]
@@ -229,6 +229,10 @@ class Health:
     #  CHECK 2 — daily puzzles exist for today (and a few days ahead)
     # ──────────────────────────────────────────────────────────────────────────
     def check_daily_puzzles(self):
+        # Both games are lazily generated on first play (no cron). So the only
+        # real breakage detectable here is a row that exists but has an EMPTY
+        # payload (generator ran and produced nothing). A missing row just means
+        # nobody has played yet today — informational, not a failure.
         sec = "Daily puzzles"
         for tbl, label in (("survival_daily", "Higher or Lower"),
                            ("poeltl_daily", "Guess Who")):
@@ -243,22 +247,89 @@ class Health:
                     f"FROM {tbl} WHERE date = %s", (self.today,))
                 row = cur.fetchone()
             if row is None:
-                self.add(sec, FAIL, f"{label} — today",
-                         f"NO puzzle for {self.today} (generator did not run)")
+                self.add(sec, INFO, f"{label} — today",
+                         f"not generated yet for {self.today} "
+                         "(lazy — created on first play)")
             elif not row[0]:
                 self.add(sec, FAIL, f"{label} — today",
-                         f"puzzle row exists for {self.today} but payload is empty")
+                         f"puzzle row exists for {self.today} but payload is EMPTY "
+                         "— generator ran but produced nothing")
             else:
-                self.add(sec, OK, f"{label} — today", f"generated for {self.today}")
+                self.add(sec, OK, f"{label} — today",
+                         f"generated for {self.today} (someone has played)")
 
-            # lookahead buffer (so a one-day cron miss doesn't break the game)
-            ahead = self._scalar(
-                f"SELECT COUNT(*) FROM {tbl} WHERE date > %s", (self.today,))
-            if ahead == 0:
-                self.add(sec, WARN, f"{label} — buffer",
-                         "no future puzzles queued (zero margin for a missed run)")
-            else:
-                self.add(sec, OK, f"{label} — buffer", f"{ahead} day(s) pre-generated ahead")
+    # ──────────────────────────────────────────────────────────────────────────
+    #  CHECK 2b — data completeness: did the per-game data actually LAND?
+    #  Run-tracking proves a pipeline *ran* (exit 0); anomaly detection proves
+    #  counts didn't drop. NEITHER proves the rows that SHOULD exist do — a fetch
+    #  can return an empty/stale response and still exit 0. This anchors on ground
+    #  truth (the finished-games schedule) and asserts the local pipeline's
+    #  per-game output has caught up to it. Self-calibrating by season: with no
+    #  recent finals (offseason) nothing is due, so it stays quiet.
+    # ──────────────────────────────────────────────────────────────────────────
+    def check_data_completeness(self):
+        sec = "Data completeness"
+        if not self.table_exists("games"):
+            return
+
+        # The `games` table holds BOTH leagues; NBA seasons are hyphenated
+        # ("2025-26"), WNBA are single-year ("2026"). Scope each arm to its league
+        # so an in-season WNBA slate doesn't get mistaken for an NBA schedule.
+
+        # ── NBA: player_gamelogs (local pipeline) vs the NBA schedule ──
+        if self.table_exists("player_gamelogs"):
+            last_final = self._scalar(
+                "SELECT MAX(game_date) FROM games "
+                "WHERE status='Final' AND season LIKE '%%-%%'")
+            last_landed = self._scalar("SELECT MAX(game_date) FROM player_gamelogs")
+            self._completeness_arm(
+                sec, "NBA game logs", last_final, last_landed,
+                landed_noun="gamelogs",
+                empty_msg="player_gamelogs is EMPTY — local pipeline not landing data")
+
+        # ── WNBA: box scores (cloud pipeline) vs the WNBA schedule ──
+        # wnba_player_game_stats has no date column, so join to games via game_id.
+        if self.table_exists("wnba_player_game_stats"):
+            last_final = self._scalar(
+                "SELECT MAX(game_date) FROM games "
+                "WHERE status='Final' AND season NOT LIKE '%%-%%'")
+            last_landed = self._scalar(
+                "SELECT MAX(g.game_date) FROM games g "
+                "JOIN wnba_player_game_stats w ON w.game_id = g.game_id "
+                "WHERE g.status='Final' AND g.season NOT LIKE '%%-%%'")
+            self._completeness_arm(
+                sec, "WNBA box scores", last_final, last_landed,
+                landed_noun="box scores",
+                empty_msg="no WNBA box scores landed yet — pipeline not landing data")
+
+    def _completeness_arm(self, sec, label, last_final, last_landed,
+                          landed_noun, empty_msg):
+        """Compare a league's landed per-game data against its finished-game
+        schedule. Self-calibrating: only enforced while the league is actively
+        playing (a final in the last few days); otherwise it's the offseason and
+        nothing is due, so we stay quiet."""
+        if last_final is None:
+            self.add(sec, INFO, label, "no finished games on record yet")
+            return
+        days_since = (self.today - last_final).days
+        if days_since > 3:
+            self.add(sec, INFO, label,
+                     f"last final {last_final} ({days_since}d ago) — offseason, nothing due")
+            return
+        if last_landed is None:
+            self.add(sec, FAIL, label,
+                     f"schedule has finals through {last_final} but {empty_msg}")
+            return
+        behind = (last_final - last_landed).days
+        detail = f"{landed_noun} through {last_landed}, schedule through {last_final}"
+        if behind <= 1:            # data lands the morning after — 1 day is normal
+            self.add(sec, OK, label, f"current — {detail}")
+        elif behind == 2:
+            self.add(sec, WARN, label, f"1 day past the normal overnight lag — {detail}")
+        else:
+            self.add(sec, FAIL, label,
+                     f"{behind} days behind schedule — pipeline ran but isn't "
+                     f"landing data ({detail})")
 
     # ──────────────────────────────────────────────────────────────────────────
     #  CHECK 3 — day-over-day anomaly detection (snapshot compare)
@@ -572,6 +643,7 @@ def collect(conn, today=None, write_snapshot=True):
     h.check_freshness()
     h.check_pipeline_runs()
     h.check_daily_puzzles()
+    h.check_data_completeness()
     h.check_anomalies()
     h.check_known_gaps()
     if write_snapshot:
@@ -612,6 +684,7 @@ def main():
     h.check_freshness()
     h.check_pipeline_runs()
     h.check_daily_puzzles()
+    h.check_data_completeness()
     h.check_anomalies()
     h.check_known_gaps()
     if not args.no_snapshot:
