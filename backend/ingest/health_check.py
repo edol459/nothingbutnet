@@ -138,6 +138,36 @@ class Health:
         # created_at reflects the last time someone *played*, not a job's health.
         # See check_daily_puzzles for the (informational) puzzle status.
 
+        # Wholesale-recompute aggregate tables have no natural date column, so an
+        # `updated_at` is stamped on every write by a DB trigger (installed via
+        # add_freshness_tracking.py). Reading MAX(updated_at) tells us the daily
+        # pipeline actually refreshed the table — not just that it exited 0.
+        # Guarded by column_exists so this stays dormant until the migration runs.
+        #   (table, label, enforce-now?, context)
+        agg = [
+            ("player_seasons", "Season stats (aggregates/DARKO/LEBRON)", True,
+             "cloud + local both write daily — expected year-round"),
+            ("team_seasons",   "Team W-L records", True,
+             "cloud writes daily — expected year-round"),
+            ("player_matchups", "Matchup defense", self.nba_in_season(),
+             "local pipeline, NBA in-season"),
+            ("team_rosters",    "Rosters (WoWY)",  self.nba_in_season(),
+             "local pipeline, NBA in-season"),
+            ("wowy_lineups",    "WoWY lineups",    self.nba_in_season(),
+             "local pipeline, NBA in-season"),
+            ("player_pctiles",  "Percentiles (Builder)", self.nba_in_season(),
+             "local pipeline, NBA in-season"),
+        ]
+        for tbl, label, enforce, ctx in agg:
+            if not (self.table_exists(tbl) and self.column_exists(tbl, "updated_at")):
+                continue
+            if not enforce:
+                self.add(sec, INFO, label, f"offseason — not refreshed now ({ctx})")
+                continue
+            ts = self._scalar(f"SELECT MAX(updated_at) FROM {tbl}")
+            self._freshness_verdict(sec, label, ts, now,
+                                    warn_h=30, fail_h=54, ctx=ctx)
+
         # Local Windows pipeline writes player_seasons (no timestamp col) — the
         # best timestamp proxy is games.updated_at during NBA season.
         if self.nba_in_season() and self.column_exists("games", "updated_at"):
@@ -146,9 +176,6 @@ class Health:
             self._freshness_verdict(
                 sec, "Games table (NBA in-season)", ts, now,
                 warn_h=30, fail_h=54, ctx="new finals should land daily")
-        else:
-            self.add(sec, INFO, "Local pipeline (player_seasons)",
-                     "no timestamp column — covered by anomaly detection + Layer 2 run-tracking")
 
     def _freshness_verdict(self, sec, name, ts, now, warn_h, fail_h, ctx=""):
         if ts is None:
