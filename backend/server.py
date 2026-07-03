@@ -3878,6 +3878,58 @@ def get_performance_reviews(game_id, person_id):
         return jsonify({"error": str(e)}), 500
 
 
+# GET /api/performances/<game_id>/summary
+# Batch per-player rating summary for one game (fan avg + count + my rating),
+# so the box score can show every player's rating in one request.
+@app.route("/api/performances/<game_id>/summary")
+def get_performance_summary(game_id):
+    user    = current_user()
+    user_id = user["id"] if user else None
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute(_PERF_TABLE); cur.execute(_PERF_MIGRATE); conn.commit()
+
+        cur.execute("""
+            SELECT person_id,
+                   COUNT(*)            AS review_count,
+                   AVG(rating::float)  AS avg_rating
+            FROM performance_reviews
+            WHERE game_id = %s
+            GROUP BY person_id
+        """, (game_id,))
+        players = {}
+        for r in cur.fetchall():
+            pid = r["person_id"]
+            cnt = int(r["review_count"])
+            players[str(pid)] = {
+                "person_id":    pid,
+                "avg_stars":    round(r["avg_rating"] / 2, 2) if cnt > 0 else None,
+                "review_count": cnt,
+                "my_rating":    None,
+                "my_stars":     None,
+            }
+
+        if user_id:
+            cur.execute("""
+                SELECT person_id, rating FROM performance_reviews
+                WHERE game_id = %s AND user_id = %s
+            """, (game_id, user_id))
+            for r in cur.fetchall():
+                pid   = r["person_id"]
+                entry = players.setdefault(str(pid), {
+                    "person_id": pid, "avg_stars": None, "review_count": 0,
+                    "my_rating": None, "my_stars": None,
+                })
+                entry["my_rating"] = r["rating"]
+                entry["my_stars"]  = round(r["rating"] / 2, 1)
+
+        cur.close(); conn.close()
+        return jsonify({"players": players})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # POST /api/performances/<game_id>/<person_id>/reviews
 @app.route("/api/performances/<game_id>/<int:person_id>/reviews", methods=["POST"])
 @login_required
