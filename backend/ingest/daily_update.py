@@ -126,6 +126,16 @@ def main():
     ]
 
     run_id = pipeline_status.start_run(pipeline_status.CLOUD_DAILY)
+    if run_id is None:
+        # start_run swallows its own errors (best-effort), so a None here means
+        # this run will NOT show up in pipeline_runs / the health report. Make
+        # that loud — it's the difference between "cron down" and "cron ran but
+        # didn't record" when debugging from the logs.
+        print("⚠️  pipeline_status.start_run() returned None — this run will NOT "
+              "be recorded. Check DATABASE_URL in THIS service and any "
+              "'[pipeline_status]' errors above.", flush=True)
+    else:
+        print(f"📝 pipeline_status: recording run #{run_id} (cloud_daily)", flush=True)
     failed_steps = []
     step_results = []
     try:
