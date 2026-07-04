@@ -886,8 +886,14 @@ async function loadPerfRatings(personId){
   const el=document.getElementById('pcRating'); if(!el) return;
   let data={avg_stars:null,review_count:0,my_rating:null,reviews:[]};
   try{ const r=await fetch(`/api/performances/${GAME_ID}/${personId}/reviews`); if(r.ok) data=await r.json(); }catch(_){}
-  const my=data.my_rating||0;
-  const stars=[1,2,3,4,5].map(i=>{ const filled=my>=i*2; return `<span class="pcStar" data-v="${i*2}" style="cursor:pointer;font-size:26px;color:${filled?'var(--green)':'var(--ink4)'};line-height:1;">${filled?'★':'☆'}</span>`; }).join('');
+  const my=data.my_rating||0;   // 1–10 (each unit = half a star)
+  const pct=i=> my>=i*2 ? 100 : (my>=i*2-1 ? 50 : 0);
+  const stars=[1,2,3,4,5].map(i=>`<span style="position:relative;display:inline-block;width:28px;height:28px;font-size:26px;line-height:28px;text-align:center;">
+      <span style="color:var(--ink4);">☆</span>
+      <span style="position:absolute;left:0;top:0;height:100%;overflow:hidden;color:var(--green);width:${pct(i)}%;">★</span>
+      <span class="pcHalf" data-v="${i*2-1}" style="position:absolute;left:0;top:0;width:50%;height:100%;cursor:pointer;"></span>
+      <span class="pcHalf" data-v="${i*2}"   style="position:absolute;right:0;top:0;width:50%;height:100%;cursor:pointer;"></span>
+    </span>`).join('');
   const avg=data.avg_stars!=null?`<span style="color:var(--green);font-weight:600;">★ ${data.avg_stars.toFixed(1)}</span> · ${data.review_count} rating${data.review_count===1?'':'s'}`:'No ratings yet';
   const list=(data.reviews||[]).map(rv=>{
     const av=rv.avatar_url?`<img src="${_pcEsc(rv.avatar_url)}" style="width:26px;height:26px;border-radius:50%;object-fit:cover;">`:`<span style="width:26px;height:26px;border-radius:50%;background:var(--paper3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;color:var(--ink3);">${_pcEsc((rv.display_name||'?').charAt(0).toUpperCase())}</span>`;
@@ -895,18 +901,23 @@ async function loadPerfRatings(personId){
   }).join('');
   el.innerHTML=`
     <div style="font-family:var(--ff-mono);font-size:11px;letter-spacing:.06em;color:var(--ink4);margin-bottom:8px;">${my?'YOUR RATING':'RATE THIS PERFORMANCE'}</div>
-    <div id="pcStars" style="display:flex;gap:4px;margin-bottom:6px;">${stars}</div>
+    <div id="pcStars" style="display:flex;gap:4px;margin-bottom:4px;">${stars}</div>
+    ${my?`<button id="pcRemove" style="background:none;border:none;color:var(--red);font-size:12px;cursor:pointer;padding:0;margin-bottom:6px;">Remove rating</button>`:''}
     <div style="font-family:var(--ff-mono);font-size:12px;color:var(--ink4);text-align:right;">${avg}</div>
     ${list?`<div style="margin-top:10px;">${list}</div>`:''}`;
-  el.querySelectorAll('.pcStar').forEach(st=>{
-    st.addEventListener('click', async ()=>{
-      const v=parseInt(st.dataset.v,10);
+  el.querySelectorAll('.pcHalf').forEach(h=>{
+    h.addEventListener('click', async ()=>{
+      const v=parseInt(h.dataset.v,10);
       try{
         const r=await fetch(`/api/performances/${GAME_ID}/${personId}/reviews`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rating:v})});
         if(r.status===401){ _pcToast('Sign in to rate'); return; }
         loadPerfRatings(personId);
       }catch(_){ _pcToast('Could not save'); }
     });
+  });
+  const rm=document.getElementById('pcRemove');
+  if(rm) rm.addEventListener('click', async ()=>{
+    try{ await fetch(`/api/performances/${GAME_ID}/${personId}/reviews`,{method:'DELETE'}); loadPerfRatings(personId); }catch(_){ }
   });
 }
 
