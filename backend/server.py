@@ -5313,6 +5313,35 @@ def _format_list(row: dict, game_count: int = 0) -> dict:
     }
 
 
+# Likes + comments on lists (created lazily, like review_likes).
+_LIST_SOCIAL_TABLES = """
+CREATE TABLE IF NOT EXISTS list_likes (
+    user_id    INTEGER REFERENCES users(id)      ON DELETE CASCADE,
+    list_id    INTEGER REFERENCES game_lists(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (user_id, list_id)
+);
+CREATE TABLE IF NOT EXISTS list_comments (
+    id         SERIAL PRIMARY KEY,
+    list_id    INTEGER REFERENCES game_lists(id) ON DELETE CASCADE,
+    user_id    INTEGER REFERENCES users(id)      ON DELETE CASCADE,
+    text       TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+"""
+
+
+def _format_comment(r: dict) -> dict:
+    return {
+        "id":          r["id"],
+        "userId":      r["user_id"],
+        "displayName": r.get("display_name"),
+        "avatarUrl":   r.get("avatar_url"),
+        "text":        r["text"],
+        "createdAt":   str(r.get("created_at", "")),
+    }
+
+
 @app.route("/api/me/lists", methods=["GET"])
 @login_required
 def get_my_lists():
@@ -5491,6 +5520,17 @@ def get_list_detail(list_id):
                 "league":    r.get("league") or "nba",
             })
 
+    # ── Social: likes + comment count ──
+    cur.execute(_LIST_SOCIAL_TABLES); conn.commit()
+    cur.execute("SELECT COUNT(*) AS n FROM list_likes WHERE list_id = %s", (list_id,))
+    like_count = int(cur.fetchone()["n"])
+    liked_by_me = False
+    if viewer:
+        cur.execute("SELECT 1 FROM list_likes WHERE list_id = %s AND user_id = %s", (list_id, viewer["id"]))
+        liked_by_me = cur.fetchone() is not None
+    cur.execute("SELECT COUNT(*) AS n FROM list_comments WHERE list_id = %s", (list_id,))
+    comment_count = int(cur.fetchone()["n"])
+
     cur.close(); conn.close()
     result = dict(_format_list(lst, len(games)))
     result["creatorName"] = lst.get("creator_name")
@@ -5499,7 +5539,116 @@ def get_list_detail(list_id):
     result["playerItems"] = player_items
     result["jerseyItems"] = jersey_items
     result["teamItems"] = team_items
+    result["likeCount"] = like_count
+    result["likedByMe"] = liked_by_me
+    result["commentCount"] = comment_count
     return jsonify({"list": result})
+
+
+# ━━━ Likes + comments on lists ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@app.route("/api/lists/<int:list_id>/like", methods=["POST"])
+@login_required
+def toggle_list_like(list_id):
+    user = current_user()
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute(_LIST_SOCIAL_TABLES); conn.commit()
+        cur.execute("SELECT 1 FROM list_likes WHERE user_id = %s AND list_id = %s", (user["id"], list_id))
+        if cur.fetchone():
+            cur.execute("DELETE FROM list_likes WHERE user_id = %s AND list_id = %s", (user["id"], list_id))
+            liked = False
+        else:
+            cur.execute("INSERT INTO list_likes (user_id, list_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                        (user["id"], list_id))
+            liked = True
+            cur.execute("SELECT user_id FROM game_lists WHERE id = %s", (list_id,))
+            owner = cur.fetchone()
+            if owner and owner["user_id"] != user["id"]:
+                _grant_xp(cur, owner["user_id"], "list_like", f"{list_id}:{user['id']}", 5)
+        cur.execute("SELECT COUNT(*) AS n FROM list_likes WHERE list_id = %s", (list_id,))
+        n = int(cur.fetchone()["n"])
+        conn.commit(); cur.close(); conn.close()
+        return jsonify({"liked": liked, "like_count": n})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/lists/<int:list_id>/comments", methods=["GET"])
+def get_list_comments(list_id):
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute(_LIST_SOCIAL_TABLES); conn.commit()
+        cur.execute("""
+            SELECT lc.*, u.display_name, u.avatar_url
+            FROM list_comments lc JOIN users u ON u.id = lc.user_id
+            WHERE lc.list_id = %s ORDER BY lc.created_at ASC
+        """, (list_id,))
+        comments = [_format_comment(dict(r)) for r in cur.fetchall()]
+        cur.close(); conn.close()
+        return jsonify({"comments": comments})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/lists/<int:list_id>/comments", methods=["POST"])
+@login_required
+def add_list_comment(list_id):
+    user = current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    text = (body.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    text = text[:1000]
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute(_LIST_SOCIAL_TABLES); conn.commit()
+        cur.execute("SELECT is_public, user_id FROM game_lists WHERE id = %s", (list_id,))
+        lst = cur.fetchone()
+        if not lst or (not lst["is_public"] and lst["user_id"] != user["id"]):
+            cur.close(); conn.close()
+            return jsonify({"error": "not found"}), 404
+        cur.execute("INSERT INTO list_comments (list_id, user_id, text) VALUES (%s, %s, %s) RETURNING id",
+                    (list_id, user["id"], text))
+        new_id = cur.fetchone()["id"]
+        if lst["user_id"] != user["id"]:
+            _grant_xp(cur, lst["user_id"], "list_comment", f"{new_id}", 3)
+        conn.commit()
+        cur.execute("""
+            SELECT lc.*, u.display_name, u.avatar_url
+            FROM list_comments lc JOIN users u ON u.id = lc.user_id
+            WHERE lc.id = %s
+        """, (new_id,))
+        comment = _format_comment(dict(cur.fetchone()))
+        cur.close(); conn.close()
+        return jsonify({"comment": comment}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/lists/<int:list_id>/comments/<int:comment_id>", methods=["DELETE"])
+@login_required
+def delete_list_comment(list_id, comment_id):
+    user = current_user()
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute(_LIST_SOCIAL_TABLES); conn.commit()
+        cur.execute("SELECT user_id FROM list_comments WHERE id = %s AND list_id = %s", (comment_id, list_id))
+        c = cur.fetchone()
+        if not c:
+            cur.close(); conn.close()
+            return jsonify({"error": "not found"}), 404
+        cur.execute("SELECT user_id FROM game_lists WHERE id = %s", (list_id,))
+        owner = cur.fetchone()
+        # Comment author OR list owner may delete
+        if c["user_id"] != user["id"] and not (owner and owner["user_id"] == user["id"]):
+            cur.close(); conn.close()
+            return jsonify({"error": "forbidden"}), 403
+        cur.execute("DELETE FROM list_comments WHERE id = %s", (comment_id,))
+        conn.commit(); cur.close(); conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Public list page + share image (growth: shareable, no login) ──────────────
