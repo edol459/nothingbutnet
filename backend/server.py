@@ -8662,7 +8662,26 @@ def get_wnba_top_performers():
             print(f"[wnba] boxscore error {gid}: {e}", flush=True)
 
     all_players.sort(key=lambda x: x["total"], reverse=True)
-    return jsonify({"players": all_players[:5], "date": date_str})
+    top5 = all_players[:5]
+
+    # Attach the crowd's avg performance rating (0–5) to each, if any exist.
+    try:
+        pconn = get_conn(); pcur = pconn.cursor()
+        for pl in top5:
+            pcur.execute("""
+                SELECT AVG(rating::float) AS a, COUNT(*) AS n
+                FROM performance_reviews
+                WHERE game_id = %s AND person_id = %s
+            """, (str(pl["game_id"]), pl["player_id"]))
+            r = pcur.fetchone()
+            n = int(r["n"]) if r and r["n"] else 0
+            pl["fan_stars"] = round(r["a"] / 2, 1) if n > 0 else None
+        pcur.close()
+    except Exception:
+        for pl in top5:
+            pl.setdefault("fan_stars", None)
+
+    return jsonify({"players": top5, "date": date_str})
 
 
 # ── ESPN WNBA team ID cache ───────────────────────────────────────────────────
