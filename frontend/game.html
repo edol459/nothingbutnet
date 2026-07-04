@@ -801,7 +801,7 @@ function buildBox(box) {
       if (dnp) return `<tr class="dnp-row"><td><div class="player-cell">${p.name || ''}</div></td><td colspan="${cols.length-1}" style="color:var(--ink4);font-size:11px;">DNP</td></tr>`;
       const pm = s.plusMinusPoints ?? 0;
       const pmColor = pm > 0 ? 'var(--green)' : pm < 0 ? 'var(--red)' : 'var(--ink3)';
-      return `<tr>
+      return `<tr ${p.personId?`style="cursor:pointer;" onclick="openPerfCard('${p.personId}')"`:''}>
         <td><div class="player-cell">
           ${p.personId ? `<img class="player-headshot-sm" src="${_headshotUrl(p.personId)}" onerror="this.style.display='none'">` : ''}
           <span>${p.name || ''}</span>
@@ -834,6 +834,76 @@ function buildBox(box) {
         ${playerRows(homePlayers,'home')}
       </table>
     </div>`;
+}
+
+// ── Player performance card (modal) ──────────────────────────────
+function _pcEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function _pcToast(m){ const t=document.createElement('div'); t.textContent=m; t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 18px;border-radius:20px;font-size:14px;z-index:10001;box-shadow:0 6px 20px rgba(0,0,0,.25);'; document.body.appendChild(t); setTimeout(()=>t.remove(),2200); }
+
+function openPerfCard(personId){
+  if(!personId || !_boxscoreData) return;
+  const box=_boxscoreData;
+  let p=null;
+  for(const t of [box.awayTeam, box.homeTeam]){
+    const f=(t?.players||[]).find(x=>String(x.personId)===String(personId));
+    if(f){ p=f; break; }
+  }
+  if(!p) return;
+  const s=p.statistics||{};
+  const matchup=`${box.awayTeam?.teamTricode||''} @ ${box.homeTeam?.teamTricode||''}`;
+  const slash=(m,a)=>`${m||0}-${a||0}`;
+  const pm=s.plusMinusPoints??0;
+  const big=(v,l)=>`<div style="flex:1;text-align:center;"><div style="font-family:var(--ff-mono);font-size:30px;font-weight:700;color:var(--ink);line-height:1;">${v??0}</div><div style="font-family:var(--ff-mono);font-size:10px;letter-spacing:.08em;color:var(--ink4);margin-top:4px;">${l}</div></div>`;
+  const row=(cells)=>`<div style="display:flex;border-top:1px solid var(--paper3);">${cells.map(([l,v])=>`<div style="flex:1;text-align:center;padding:10px 2px;"><div style="font-family:var(--ff-mono);font-size:9px;color:var(--ink4);letter-spacing:.06em;">${l}</div><div style="font-family:var(--ff-mono);font-size:14px;color:var(--ink);margin-top:3px;">${v}</div></div>`).join('')}</div>`;
+
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); });
+  ov.innerHTML=`<div style="background:var(--bg-card);border-radius:18px;max-width:440px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.35);">
+    <div style="display:flex;align-items:center;gap:12px;padding:18px 18px 12px;">
+      <img src="${_headshotUrl(personId)}" onerror="this.style.opacity=0" style="width:56px;height:42px;object-fit:cover;object-position:top;border-radius:8px;background:var(--paper3);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-family:var(--ff-serif);font-size:20px;color:var(--ink);">${_pcEsc(p.name)}</div>
+        <div style="font-family:var(--ff-mono);font-size:11px;color:var(--ink4);">${_pcEsc(matchup)}</div>
+      </div>
+      <button id="pcClose" style="background:none;border:none;font-size:24px;color:var(--ink4);cursor:pointer;line-height:1;">×</button>
+    </div>
+    <div style="display:flex;padding:6px 18px 14px;">${big(s.points,'PTS')}${big(s.reboundsTotal,'REB')}${big(s.assists,'AST')}</div>
+    ${row([['MIN',fmtMin(s.minutes||'')],['FG',slash(s.fieldGoalsMade,s.fieldGoalsAttempted)],['3P',slash(s.threePointersMade,s.threePointersAttempted)],['FT',slash(s.freeThrowsMade,s.freeThrowsAttempted)]])}
+    ${row([['STL',s.steals||0],['BLK',s.blocks||0],['TOV',s.turnovers||0],['PF',s.foulsPersonal||0],['+/-',(pm>0?'+':'')+pm]])}
+    <div id="pcRating" style="padding:16px 18px;border-top:1px solid var(--paper3);">Loading ratings…</div>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('#pcClose').addEventListener('click',()=>ov.remove());
+  loadPerfRatings(personId);
+}
+
+async function loadPerfRatings(personId){
+  const el=document.getElementById('pcRating'); if(!el) return;
+  let data={avg_stars:null,review_count:0,my_rating:null,reviews:[]};
+  try{ const r=await fetch(`/api/performances/${GAME_ID}/${personId}/reviews`); if(r.ok) data=await r.json(); }catch(_){}
+  const my=data.my_rating||0;
+  const stars=[1,2,3,4,5].map(i=>{ const filled=my>=i*2; return `<span class="pcStar" data-v="${i*2}" style="cursor:pointer;font-size:26px;color:${filled?'var(--green)':'var(--ink4)'};line-height:1;">${filled?'★':'☆'}</span>`; }).join('');
+  const avg=data.avg_stars!=null?`<span style="color:var(--green);font-weight:600;">★ ${data.avg_stars.toFixed(1)}</span> · ${data.review_count} rating${data.review_count===1?'':'s'}`:'No ratings yet';
+  const list=(data.reviews||[]).map(rv=>{
+    const av=rv.avatar_url?`<img src="${_pcEsc(rv.avatar_url)}" style="width:26px;height:26px;border-radius:50%;object-fit:cover;">`:`<span style="width:26px;height:26px;border-radius:50%;background:var(--paper3);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;color:var(--ink3);">${_pcEsc((rv.display_name||'?').charAt(0).toUpperCase())}</span>`;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--paper3);">${av}<span style="font-size:13px;color:var(--ink2);flex:1;">${_pcEsc(rv.display_name||'Someone')}</span><span style="color:var(--green);font-family:var(--ff-mono);font-size:12px;">★ ${(rv.stars!=null?rv.stars:0).toFixed(1)}</span></div>`;
+  }).join('');
+  el.innerHTML=`
+    <div style="font-family:var(--ff-mono);font-size:11px;letter-spacing:.06em;color:var(--ink4);margin-bottom:8px;">${my?'YOUR RATING':'RATE THIS PERFORMANCE'}</div>
+    <div id="pcStars" style="display:flex;gap:4px;margin-bottom:6px;">${stars}</div>
+    <div style="font-family:var(--ff-mono);font-size:12px;color:var(--ink4);text-align:right;">${avg}</div>
+    ${list?`<div style="margin-top:10px;">${list}</div>`:''}`;
+  el.querySelectorAll('.pcStar').forEach(st=>{
+    st.addEventListener('click', async ()=>{
+      const v=parseInt(st.dataset.v,10);
+      try{
+        const r=await fetch(`/api/performances/${GAME_ID}/${personId}/reviews`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rating:v})});
+        if(r.status===401){ _pcToast('Sign in to rate'); return; }
+        loadPerfRatings(personId);
+      }catch(_){ _pcToast('Could not save'); }
+    });
+  });
 }
 
 function sortPlayers(players) {

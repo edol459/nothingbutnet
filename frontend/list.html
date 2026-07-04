@@ -175,10 +175,15 @@ async function load(){
   const root=document.getElementById('root');
   if(!listId){ root.innerHTML='<div class="state">List not found.</div>'; return; }
   try{
-    const r=await fetch(`/api/lists/${listId}`);
+    const [r, meR] = await Promise.all([
+      fetch(`/api/lists/${listId}`),
+      fetch('/auth/me').catch(()=>null)
+    ]);
     if(r.status===404){ root.innerHTML='<div class="state">This list is private or no longer exists.</div>'; return; }
     if(!r.ok) throw new Error('HTTP '+r.status);
     const {list}=await r.json();
+    let me=null; try{ if(meR&&meR.ok) me=await meR.json(); }catch(_){}
+    const myId = me ? (me.id || (me.user&&me.user.id) || null) : null;
     const type=list.listType||'games';
     const items=itemsOf(list);
     const ranked=list.isRanked;
@@ -207,22 +212,103 @@ async function load(){
       <div class="byline">${avatar}<span class="who">by <b>${esc(list.creatorName||'ydkball')}</b></span><span class="meta">· ${items.length} ${items.length===1?'item':'items'}</span></div>
       ${list.description?`<p class="desc">${esc(list.description)}</p>`:''}
       <div class="actions">
+        <button class="btn" id="likeBtn"><span id="likeIcon" style="color:${list.likedByMe?'#e0245e':'inherit'};font-size:16px;line-height:1;">${list.likedByMe?'♥':'♡'}</span> <span id="likeCount">${list.likeCount||0}</span></button>
         <button class="btn primary" id="shareBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>Share</button>
         <a class="btn" href="/">Explore ydkball</a>
       </div>
       ${podiumHtml}
       ${rowsHtml}
+      <div class="comments" style="margin-top:36px;padding-top:22px;border-top:1px solid var(--rule);">
+        <h3 style="font-family:var(--ff-serif);font-size:22px;color:var(--ink);margin-bottom:14px;">Comments <span id="cCount" style="color:var(--ink4);font-size:16px;">(${list.commentCount||0})</span></h3>
+        <div id="commentBox"></div>
+        <div id="commentList" style="margin-top:14px;"></div>
+      </div>
       <div class="cta">
         <h3>Think you can do better?</h3>
         <p>Rank the players, games, teams and jerseys you'd defend to the grave — and share the card.</p>
         <a class="btn primary" href="/mylists" style="justify-content:center">Make your list — it's free</a>
       </div>`;
     document.getElementById('shareBtn').addEventListener('click',()=>share(list.title));
+    wireLike(list);
+    renderCommentBox(myId);
+    loadComments(myId, list.userId);
     document.title=`${list.title} — ydkball`;
   }catch(e){
     root.innerHTML=`<div class="state">Couldn't load this list: ${esc(e.message)}</div>`;
   }
 }
+
+let MY_ID=null, LIST_OWNER=null;
+
+function wireLike(list){
+  let liked=!!list.likedByMe, count=list.likeCount||0;
+  const btn=document.getElementById('likeBtn'), icon=document.getElementById('likeIcon'), cnt=document.getElementById('likeCount');
+  const paint=()=>{ icon.textContent=liked?'♥':'♡'; icon.style.color=liked?'#e0245e':'inherit'; cnt.textContent=count; };
+  btn.addEventListener('click', async ()=>{
+    const pL=liked, pC=count;
+    liked=!liked; count=Math.max(0,count+(liked?1:-1)); paint();
+    try{
+      const r=await fetch(`/api/lists/${listId}/like`,{method:'POST'});
+      if(r.status===401){ liked=pL; count=pC; paint(); toast('Sign in to like'); return; }
+      const d=await r.json(); liked=d.liked; count=d.like_count; paint();
+    }catch(_){ liked=pL; count=pC; paint(); }
+  });
+}
+
+function renderCommentBox(myId){
+  const box=document.getElementById('commentBox');
+  if(!myId){ box.innerHTML=`<div style="color:var(--ink4);font-size:14px;"><a href="/auth/google/login" style="color:var(--orange);">Sign in</a> to comment.</div>`; return; }
+  box.innerHTML=`<div style="display:flex;gap:8px;align-items:stretch;">
+    <textarea id="cInput" placeholder="Add a comment…" rows="2" style="flex:1;resize:vertical;font-family:inherit;font-size:14px;padding:10px 12px;border:1px solid var(--rule);border-radius:12px;background:var(--bg-card);color:var(--ink);"></textarea>
+    <button class="btn primary" id="cPost">Post</button>
+  </div>`;
+  document.getElementById('cPost').addEventListener('click', postComment);
+}
+
+async function loadComments(myId, ownerId){
+  MY_ID=myId; LIST_OWNER=ownerId;
+  try{
+    const r=await fetch(`/api/lists/${listId}/comments`);
+    const {comments}=await r.json();
+    renderComments(comments||[]);
+  }catch(_){}
+}
+
+function renderComments(comments){
+  const el=document.getElementById('commentList');
+  const cc=document.getElementById('cCount'); if(cc) cc.textContent=`(${comments.length})`;
+  if(!comments.length){ el.innerHTML=`<div style="color:var(--ink4);font-size:14px;">No comments yet.</div>`; return; }
+  el.innerHTML=comments.map(c=>{
+    const av=c.avatarUrl?`<img src="${esc(c.avatarUrl)}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;flex-shrink:0;">`:`<span style="width:34px;height:34px;border-radius:50%;background:var(--paper3);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--ink3);flex-shrink:0;">${esc((c.displayName||'?').charAt(0).toUpperCase())}</span>`;
+    const canDel=(MY_ID && (c.userId===MY_ID || LIST_OWNER===MY_ID));
+    const del=canDel?`<button onclick="deleteComment(${c.id})" style="background:none;border:none;color:var(--ink4);cursor:pointer;font-size:12px;padding:0;">Delete</button>`:'';
+    return `<div style="display:flex;gap:10px;padding:12px 0;border-bottom:1px solid var(--paper3);">${av}
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;gap:8px;align-items:center;"><b style="font-size:14px;color:var(--ink);">${esc(c.displayName||'Someone')}</b><span style="font-family:var(--ff-mono);font-size:11px;color:var(--ink4);">${esc((c.createdAt||'').slice(0,10))}</span>${del}</div>
+        <div style="font-size:14px;color:var(--ink2);margin-top:3px;white-space:pre-wrap;word-break:break-word;">${esc(c.text)}</div>
+      </div></div>`;
+  }).join('');
+}
+
+async function postComment(){
+  const inp=document.getElementById('cInput'); const text=(inp.value||'').trim(); if(!text) return;
+  const btn=document.getElementById('cPost'); btn.disabled=true;
+  try{
+    const r=await fetch(`/api/lists/${listId}/comments`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+    if(r.status===401){ toast('Sign in to comment'); return; }
+    inp.value='';
+    const cr=await fetch(`/api/lists/${listId}/comments`); const {comments}=await cr.json(); renderComments(comments||[]);
+  }catch(_){ toast('Could not post'); }
+  finally{ btn.disabled=false; }
+}
+
+async function deleteComment(id){
+  try{
+    await fetch(`/api/lists/${listId}/comments/${id}`,{method:'DELETE'});
+    const cr=await fetch(`/api/lists/${listId}/comments`); const {comments}=await cr.json(); renderComments(comments||[]);
+  }catch(_){}
+}
+
 load();
 </script>
 <script src="/site-nav.js"></script>

@@ -61,10 +61,10 @@
 
   /* ── page ────────────────────────────────────────────── */
   .page{padding-top:0}
-  .wrap{max-width:760px; margin:0 auto; padding:40px 20px 80px}
+  .wrap{max-width:760px; margin:0 auto; padding:20px 20px 80px}
   .pagehead{margin-bottom:6px}
   .eyebrow{font-family:var(--ff-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--orange)}
-  h1{font-family:var(--ff-serif); font-size:42px; line-height:1.05; color:var(--ink); margin:6px 0 8px}
+  h1{font-family:var(--ff-serif); font-size: clamp(2rem, 4vw, 3rem); line-height:1.05; color:var(--ink); margin:6px 0 8px}
   .lede{color:var(--ink3); font-size:16px; max-width:50ch; line-height:1.5}
 
   .grid{display:grid; grid-template-columns:1fr; gap:18px; margin-top:30px}
@@ -194,8 +194,7 @@ nav { padding-top: env(safe-area-inset-top, 0px); }
 <div class="page">
   <div class="wrap">
     <div class="pagehead">
-      <div class="eyebrow">ydkball games</div>
-      <h1>Games</h1>
+      <h1>ydk <em style="color: var(--orange); font-style: italic;">games</em></h1>
       <p class="lede">Test your basketball brain. Stay fresh in the offseason.</p>
     </div>
 

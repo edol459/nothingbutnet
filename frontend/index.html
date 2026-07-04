@@ -418,7 +418,7 @@ nav {
           <span style="font-family:var(--ff-mono);font-size:30px;font-weight:500;color:var(--paper3);line-height:1;">▲▼</span>
         </div>
       </a>
-      <a href="/poeltl" class="game-mode-card">
+      <a href="/guesswho" class="game-mode-card">
         <div>
           <div style="font-family:var(--ff-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--orange);margin-bottom:9px;">Daily · 8 guesses</div>
           <div style="font-family:var(--ff-serif);font-size:26px;letter-spacing:-.01em;color:var(--ink);line-height:1.05;">Guess Who</div>
@@ -640,7 +640,7 @@ function renderBoard() {
     html += `<div class="dormant-card">
       <div style="font-family:var(--ff-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink4);">NBA</div>
       <div style="font-family:var(--ff-serif);font-size:17px;color:var(--ink2);line-height:1.1;">Season's<br>on a break</div>
-      <div style="font-family:var(--ff-mono);font-size:10px;color:var(--ink4);line-height:1.4;">Tip-off returns in October. WNBA's got you till then.</div>
+      <div style="font-family:var(--ff-mono);font-size:10px;color:var(--ink4);line-height:1.4;">Tip-off returns in October.</div>
     </div>`;
   }
   strip.innerHTML = html;
@@ -861,6 +861,7 @@ async function loadPerformers() {
           </div>
         </div>
         <div style="display:flex;gap:12px;flex-shrink:0;">${stat(p.pts,'PTS')}${stat(p.reb,'REB')}${stat(p.ast,'AST')}</div>
+        <div title="Fan rating" style="display:flex;align-items:center;gap:3px;min-width:42px;flex-shrink:0;justify-content:flex-end;"><span style="font-size:12px;color:${p.fan_stars!=null?'var(--green)':'var(--ink4)'};">${p.fan_stars!=null?'★':'☆'}</span><span style="font-family:var(--ff-mono);font-size:14px;font-weight:600;color:${p.fan_stars!=null?'var(--green)':'var(--ink4)'};">${p.fan_stars!=null?p.fan_stars.toFixed(1):'–'}</span></div>
         <div style="font-family:var(--ff-mono);font-size:13px;font-weight:600;color:var(--ink3);min-width:34px;text-align:right;flex-shrink:0;">${p.total}</div>
       </a>`;
     }).join('');
