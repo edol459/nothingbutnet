@@ -61,9 +61,22 @@ for r in rows:
     print(f"{r['season']:10} {r['season_type']:16} {total:6} {ws:8} {empty:6}{flag}")
 
 print("-" * 52)
+
+# The table above can't show a (season, type) with ZERO rows, so separately
+# flag seasons that have a Regular Season but no Playoffs at all. Skip the
+# latest season (its playoffs may not have happened yet).
+by_season = {}
+for r in rows:
+    by_season.setdefault(r["season"], set()).add(r["season_type"])
+latest = max(by_season) if by_season else None
+missing_po = [s for s, ts in sorted(by_season.items())
+              if "Regular Season" in ts and "Playoffs" not in ts and s != latest]
+
 if gaps:
     print(f"\n⚠️  {len(gaps)} under-populated: " + ", ".join(gaps))
+if missing_po:
+    print(f"\n⚠️  {len(missing_po)} season(s) missing Playoffs entirely: " + ", ".join(missing_po))
     print("   Re-run e.g.: python backend/ingest/fetch_historical_seasons.py "
-          "--start 2001-02 --end 2002-03")
-else:
+          f"--start {missing_po[0]} --end {missing_po[-1]} --playoffs-only")
+if not gaps and not missing_po:
     print("\n✅ Every season looks fully populated.")
