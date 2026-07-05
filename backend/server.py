@@ -5884,24 +5884,10 @@ def search_list_players():
         return jsonify({"players": []})
     pattern = f"%{q}%"
     conn = get_conn(); cur = conn.cursor()
-    results = []
-    try:
-        if league == "wnba":
-            if list_type == "player_seasons":
-                cur.execute("""
-                    SELECT DISTINCT player_id, player_name, team, season
-                    FROM wnba_player_seasons
-                    WHERE player_name ILIKE %s AND season_type = 'Regular Season'
-                    ORDER BY player_name, season DESC LIMIT 30
-                """, (pattern,))
-            else:
-                cur.execute("""
-                    SELECT DISTINCT ON (player_id) player_id, player_name, team, season
-                    FROM wnba_player_seasons
-                    WHERE player_name ILIKE %s
-                    ORDER BY player_id, season DESC LIMIT 20
-                """, (pattern,))
-        else:
+
+    def _nba():
+        out = []
+        try:
             if list_type == "player_seasons":
                 cur.execute("""
                     SELECT p.player_id, p.player_name, ps.team_abbr AS team, ps.season
@@ -5919,13 +5905,54 @@ def search_list_players():
                     WHERE p.player_name ILIKE %s
                     ORDER BY p.player_id, ps.season DESC LIMIT 20
                 """, (pattern,))
-        for r in cur.fetchall():
-            item = {"playerId": r["player_id"], "playerName": r["player_name"], "team": r.get("team")}
+            for r in cur.fetchall():
+                item = {"playerId": r["player_id"], "playerName": r["player_name"],
+                        "team": r.get("team"), "league": "nba"}
+                if list_type == "player_seasons":
+                    item["season"] = r.get("season")
+                out.append(item)
+        except Exception:
+            pass
+        return out
+
+    def _wnba():
+        out = []
+        try:
             if list_type == "player_seasons":
-                item["season"] = r.get("season")
-            results.append(item)
-    except Exception:
-        pass
+                cur.execute("""
+                    SELECT DISTINCT player_id, player_name, team, season
+                    FROM wnba_player_seasons
+                    WHERE player_name ILIKE %s AND season_type = 'Regular Season'
+                    ORDER BY player_name, season DESC LIMIT 30
+                """, (pattern,))
+            else:
+                cur.execute("""
+                    SELECT DISTINCT ON (player_id) player_id, player_name, team, season
+                    FROM wnba_player_seasons
+                    WHERE player_name ILIKE %s
+                    ORDER BY player_id, season DESC LIMIT 20
+                """, (pattern,))
+            for r in cur.fetchall():
+                item = {"playerId": r["player_id"], "playerName": r["player_name"],
+                        "team": r.get("team"), "league": "wnba"}
+                if list_type == "player_seasons":
+                    item["season"] = r.get("season")
+                out.append(item)
+        except Exception:
+            pass
+        return out
+
+    if league == "all":
+        nba, wnba = _nba(), _wnba()
+        results = []
+        for i in range(max(len(nba), len(wnba))):   # interleave so both leagues surface
+            if i < len(nba):  results.append(nba[i])
+            if i < len(wnba): results.append(wnba[i])
+    elif league == "wnba":
+        results = _wnba()
+    else:
+        results = _nba()
+
     cur.close(); conn.close()
     return jsonify({"players": results})
 
