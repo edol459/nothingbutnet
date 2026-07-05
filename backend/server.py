@@ -3116,6 +3116,11 @@ def get_live_pbp(game_id):
 def game_page():
     return app.send_static_file("game.html")
 
+# ── Serve team.html ───────────────────────────────────────────────
+@app.route("/team")
+def team_page():
+    return app.send_static_file("team.html")
+
 # ── Serve builder.html ────────────────────────────────────────────
 @app.route("/builder.html")
 @app.route("/builder")
@@ -6262,6 +6267,40 @@ def team_profile(abbr):
             "record": {"wins": srow.get("wins"), "losses": srow.get("losses")},
             "roster": roster, "games": games,
         })
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/teams")
+def teams_list():
+    """Clean, deduped list of a league's current teams (canonical games abbr +
+    proper name) for the Browse Teams surface. Unlike /api/teams/search this
+    collapses the WNBA duplicate rows and drops placeholder/all-star noise."""
+    league = request.args.get("league", "nba").strip().lower()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT MAX(season) AS m FROM team_seasons WHERE league = %s", (league,))
+        row = cur.fetchone()
+        latest = row["m"] if row else None
+        if not latest:
+            return jsonify({"teams": [], "season": None})
+        cur.execute("""
+            SELECT team_abbr, team_name FROM team_seasons
+            WHERE league = %s AND season = %s
+        """, (league, latest))
+        rows = cur.fetchall()
+        if league == "wnba":
+            best = {}   # games_abbr -> name (prefer real names over placeholders)
+            for r in rows:
+                ga = _WNBA_STANDINGS_TO_GAMES.get(r["team_abbr"], r["team_abbr"])
+                name = r["team_name"]
+                if ga not in best or (name != ga and best[ga] == ga):
+                    best[ga] = name
+            teams = [{"teamAbbr": a, "teamName": n} for a, n in best.items() if n != a]
+        else:
+            teams = [{"teamAbbr": r["team_abbr"], "teamName": r["team_name"]} for r in rows]
+        teams.sort(key=lambda t: t["teamName"])
+        return jsonify({"teams": teams, "season": latest})
     finally:
         cur.close(); conn.close()
 

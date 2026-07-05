@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Team — ydkball</title>
+<meta name="description" content="NBA & WNBA team pages: record, roster, and schedule with community ratings.">
+<meta property="og:site_name" content="ydkball">
+<meta property="og:title" content="Team — ydkball">
+<meta property="og:description" content="Team record, roster, and schedule with community ratings.">
+<meta property="og:image" content="https://ydkball.net/og-image.png">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/night-mode.css">
+<link rel="stylesheet" href="/site-nav.css">
+<style>
+:root {
+  --ink:#0c0c0d; --ink2:#2a2a2e; --ink3:#6b6b78; --ink4:#a8a8b3;
+  --paper:#F5F0E8; --paper2:#eeecea; --paper3:#e5e2dc; --bg-card:#FDFAF4;
+  --rule:#d8d5cf; --orange:#e8530a; --orange-lt:#fff0ea; --gold:#C9922A;
+  --green:#1a7a4a; --star:#00C030; --red:#c0392b;
+  --ff-serif:'DM Serif Display',Georgia,serif;
+  --ff-sans:'Instrument Sans',system-ui,sans-serif;
+  --ff-mono:'DM Mono','Courier New',monospace;
+  --nav-h:58px; font-size:15px;
+}
+html.night-mode {
+  --paper:#18181b; --paper2:#222228; --paper3:#2c2c34; --bg-card:#222228;
+  --rule:#3a3a46; --ink:#ededf0; --ink2:#c0c0cc; --ink3:#8080a0; --ink4:#4a4a68;
+  --orange-lt:#2a1508; --green:#22c55e; --star:#22c55e; --red:#f87171; color-scheme:dark;
+}
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+html { scroll-behavior:smooth; overflow-x:clip; background:var(--paper); }
+body { font-family:var(--ff-sans); background:var(--paper); color:var(--ink); min-height:100vh; -webkit-font-smoothing:antialiased; overflow-x:clip; }
+a { color:inherit; }
+
+.page { max-width:860px; margin:0 auto; padding:26px 20px 90px; }
+
+/* Header */
+.thead { display:flex; align-items:center; gap:18px; padding-bottom:20px; border-bottom:1px solid var(--rule); }
+.thead img { width:76px; height:76px; object-fit:contain; flex-shrink:0; }
+.thead-logo-fallback { width:76px;height:76px;display:flex;align-items:center;justify-content:center;font-size:34px; }
+.thead-info { flex:1; min-width:0; }
+.thead-name { font-family:var(--ff-serif); font-size:32px; line-height:1.05; letter-spacing:-.01em; }
+.thead-meta { display:flex; align-items:center; gap:10px; margin-top:8px; color:var(--ink3); font-family:var(--ff-mono); font-size:14px; }
+.thead-record { font-weight:500; color:var(--ink); }
+.season-select { font-family:var(--ff-mono); font-size:13px; color:var(--orange); background:var(--paper2); border:1px solid var(--rule); border-radius:5px; padding:3px 8px; cursor:pointer; }
+.league-tag { font-family:var(--ff-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink4); border:1px solid var(--rule); border-radius:4px; padding:2px 6px; }
+
+/* Sections */
+.section { margin-top:30px; }
+.section-h { font-family:var(--ff-mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3); margin-bottom:12px; }
+
+/* Roster */
+.roster-row { display:flex; align-items:center; gap:12px; padding:9px 0; border-bottom:1px solid var(--paper3); }
+.roster-head { width:38px; height:28px; border-radius:5px; background:var(--paper3); object-fit:cover; flex-shrink:0; }
+.roster-name { font-weight:500; font-size:15px; flex:1; min-width:0; }
+.roster-stats { display:flex; gap:14px; }
+.rs-cell { text-align:center; min-width:34px; }
+.rs-val { font-family:var(--ff-mono); font-size:13px; font-weight:500; }
+.rs-lab { font-family:var(--ff-mono); font-size:8px; letter-spacing:.05em; color:var(--ink4); text-transform:uppercase; }
+
+/* Schedule */
+.sched-row { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--paper3); text-decoration:none; color:inherit; transition:background .12s; }
+.sched-row:hover { background:var(--paper2); }
+.sched-date { font-family:var(--ff-mono); font-size:11px; color:var(--ink3); width:52px; flex-shrink:0; }
+.sched-va { font-family:var(--ff-mono); font-size:11px; color:var(--ink3); width:20px; text-align:right; }
+.sched-opp-logo { width:22px; height:22px; object-fit:contain; }
+.sched-opp { font-family:var(--ff-mono); font-size:14px; font-weight:500; }
+.sched-spacer { flex:1; }
+.sched-res { font-family:var(--ff-mono); font-size:12px; font-weight:600; width:16px; text-align:center; }
+.sched-res.w { color:var(--green); } .sched-res.l { color:var(--red); }
+.sched-score { font-family:var(--ff-mono); font-size:13px; color:var(--ink2); width:58px; text-align:right; }
+.sched-up { font-family:var(--ff-mono); font-size:11px; color:var(--ink4); }
+.sched-stars { font-size:11px; letter-spacing:-1px; width:66px; text-align:right; }
+
+.loading, .empty { text-align:center; color:var(--ink3); padding:60px 0; font-family:var(--ff-mono); font-size:13px; }
+</style>
+</head>
+<body>
+
+<!-- ── Site header (canonical) ── -->
+<header class="site-nav">
+  <div class="site-nav__bar">
+    <a class="site-nav__brand" href="/">
+      <img src="/transparent.png" alt="">
+      <span class="site-nav__word">ydk<span>ball</span></span>
+    </a>
+    <div class="site-nav__links" role="navigation" aria-label="Primary">
+      <a href="/">Home</a>
+      <a href="/reviews">Reviews</a>
+      <a href="/games">Games</a>
+      <a href="/stats">Stats</a>
+    </div>
+    <div class="site-nav__auth" id="nav-auth-slot"></div>
+  </div>
+</header>
+
+<div class="page">
+  <div id="content"><div class="loading">Loading…</div></div>
+</div>
+
+<script src="/site-nav.js"></script>
+<script>
+// ── Logo helpers (self-contained) ──
+const NBA_IDS = {
+  ATL:1610612737,BOS:1610612738,BKN:1610612751,CHA:1610612766,CHI:1610612741,
+  CLE:1610612739,DAL:1610612742,DEN:1610612743,DET:1610612765,GSW:1610612744,
+  HOU:1610612745,IND:1610612754,LAC:1610612746,LAL:1610612747,MEM:1610612763,
+  MIA:1610612748,MIL:1610612749,MIN:1610612750,NOP:1610612740,NYK:1610612752,
+  OKC:1610612760,ORL:1610612753,PHI:1610612755,PHX:1610612756,POR:1610612757,
+  SAC:1610612758,SAS:1610612759,TOR:1610612761,UTA:1610612762,WAS:1610612764,
+};
+const WNBA_IDS = {
+  ATL:1611661330,CHI:1611661329,CON:1611661323,DAL:1611661321,GS:1611661331,GSV:1611661331,
+  IND:1611661325,LA:1611661320,LAS:1611661320,LV:1611661319,LVA:1611661319,MIN:1611661324,
+  NY:1611661313,NYL:1611661313,PHX:1611661317,POR:1611661327,PDX:1611661327,
+  SEA:1611661328,TOR:1611661332,WSH:1611661322,WAS:1611661322,
+};
+function logoUrl(abbr, league) {
+  abbr = (abbr||'').toUpperCase();
+  if (league === 'wnba') {
+    const id = WNBA_IDS[abbr];
+    return id ? `https://cdn.wnba.com/logos/wnba/${id}/global/L/logo.svg` : null;
+  }
+  const id = NBA_IDS[abbr];
+  return id ? `https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg` : null;
+}
+function headshotUrl(pid, league) {
+  return league === 'wnba'
+    ? `https://ak-static.cms.nba.com/wp-content/uploads/headshots/wnba/latest/260x190/${pid}.png`
+    : `https://cdn.nba.com/headshots/nba/latest/260x190/${pid}.png`;
+}
+function starsHTML(r10) {
+  if (!r10) return '';
+  const n = r10 / 2; let s = '';
+  for (let i = 1; i <= 5; i++) {
+    const f = Math.min(Math.max(n - (i-1), 0), 1);
+    if (f >= 1)      s += `<span style="color:var(--star)">★</span>`;
+    else if (f>=0.5) s += `<span style="background:linear-gradient(to right,var(--star) 50%,var(--rule) 50%);-webkit-background-clip:text;background-clip:text;color:transparent">★</span>`;
+    else             s += `<span style="color:var(--rule)">★</span>`;
+  }
+  return s;
+}
+function fmtDate(str) {
+  if (!str) return '';
+  const d = new Date(str + 'T00:00:00');
+  return d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+}
+function esc(s){ return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function statCell(v, lab){
+  return `<div class="rs-cell"><div class="rs-val">${v==null?'—':v.toFixed(1)}</div><div class="rs-lab">${lab}</div></div>`;
+}
+
+const params = new URLSearchParams(location.search);
+const ABBR   = (params.get('abbr') || '').toUpperCase();
+let   LEAGUE = (params.get('league') || 'nba').toLowerCase();
+
+async function load(season) {
+  const c = document.getElementById('content');
+  c.innerHTML = '<div class="loading">Loading…</div>';
+  if (!ABBR) { c.innerHTML = '<div class="empty">No team specified.</div>'; return; }
+  try {
+    const qs = new URLSearchParams({ league: LEAGUE });
+    if (season) qs.set('season', season);
+    const res = await fetch(`/api/teams/${ABBR}/profile?${qs}`);
+    if (!res.ok) throw new Error('not found');
+    const d = await res.json();
+    LEAGUE = d.league || LEAGUE;
+    render(d);
+  } catch (e) {
+    c.innerHTML = '<div class="empty">Team not found.</div>';
+  }
+}
+
+function render(d) {
+  document.title = `${d.teamName} — ydkball`;
+  const logo = logoUrl(d.teamAbbr, LEAGUE);
+  const logoHTML = logo
+    ? `<img src="${logo}" alt="${esc(d.teamName)}" onerror="this.outerHTML='<div class=\\'thead-logo-fallback\\'>🏀</div>'">`
+    : `<div class="thead-logo-fallback">🏀</div>`;
+
+  const seasonCtl = d.seasons.length > 1
+    ? `<select class="season-select" onchange="load(this.value)">${d.seasons.map(s =>
+        `<option value="${s}" ${s===d.season?'selected':''}>${s}</option>`).join('')}</select>`
+    : `<span>${d.season}</span>`;
+
+  const rec = (d.record.wins!=null && d.record.losses!=null) ? `${d.record.wins}–${d.record.losses}` : '—';
+
+  const roster = d.roster.map(p => `
+    <div class="roster-row">
+      <img class="roster-head" src="${headshotUrl(p.playerId, LEAGUE)}" alt="" onerror="this.style.visibility='hidden'">
+      <div class="roster-name">${esc(p.playerName)}</div>
+      <div class="roster-stats">
+        ${statCell(p.ppg,'PPG')}${statCell(p.rpg,'RPG')}${statCell(p.apg,'APG')}
+      </div>
+    </div>`).join('') || '<div class="empty">No roster data.</div>';
+
+  const sched = d.games.map(g => {
+    const oppLogo = logoUrl(g.opponent, LEAGUE);
+    const oppLogoHTML = oppLogo ? `<img class="sched-opp-logo" src="${oppLogo}" alt="" onerror="this.style.visibility='hidden'">` : '';
+    let right;
+    if (g.status && g.status.toLowerCase().startsWith('final') && g.teamScore!=null) {
+      const rc = g.result === 'W' ? 'w' : g.result === 'L' ? 'l' : '';
+      right = `<span class="sched-res ${rc}">${g.result||''}</span>
+               <span class="sched-score">${g.teamScore}–${g.oppScore}</span>`;
+    } else {
+      right = `<span class="sched-up">Upcoming</span><span class="sched-score"></span>`;
+    }
+    return `<a class="sched-row" href="/game?gameId=${g.gameId}">
+      <span class="sched-date">${fmtDate(g.date)}</span>
+      <span class="sched-va">${g.isHome ? 'vs' : '@'}</span>
+      ${oppLogoHTML}
+      <span class="sched-opp">${esc(g.opponent)}</span>
+      <span class="sched-spacer"></span>
+      ${right}
+      <span class="sched-stars">${starsHTML(g.rating)}</span>
+    </a>`;
+  }).join('') || '<div class="empty">No games.</div>';
+
+  document.getElementById('content').innerHTML = `
+    <div class="thead">
+      ${logoHTML}
+      <div class="thead-info">
+        <div class="thead-name">${esc(d.teamName)}</div>
+        <div class="thead-meta">
+          <span class="thead-record">${rec}</span>
+          <span>·</span>
+          ${seasonCtl}
+          <span class="league-tag">${LEAGUE}</span>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-h">Roster</div>
+      ${roster}
+    </div>
+    <div class="section">
+      <div class="section-h">Schedule</div>
+      ${sched}
+    </div>`;
+}
+
+load(null);
+</script>
+</body>
+</html>

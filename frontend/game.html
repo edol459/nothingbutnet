@@ -682,23 +682,23 @@ function renderScoreboard(box) {
 
   el.innerHTML = `
     <div class="game-sb">
-      <div class="sb-team away ${!isUpcoming && !isLive && !awayWon ? 'loser' : ''}">
+      <a href="${teamHref(awayAbbr)}" class="sb-team away ${!isUpcoming && !isLive && !awayWon ? 'loser' : ''}" style="text-decoration:none;color:inherit;">
         ${teamLogo(awayAbbr)}
         <div class="sb-team-info">
           <span class="sb-abbr ${!isUpcoming && !isLive && !awayWon ? 'loser' : ''}">${awayAbbr}</span>
           ${away.wins != null ? `<span class="sb-record">${away.wins}–${away.losses}</span>` : ''}
         </div>
         <span class="sb-score ${isUpcoming ? '' : awayWon ? 'win' : homeWon ? 'loss' : ''}">${isUpcoming ? '' : awayScore}</span>
-      </div>
+      </a>
       <div class="sb-center">${statusHtml}</div>
-      <div class="sb-team home ${!isUpcoming && !isLive && !homeWon ? 'loser' : ''}">
+      <a href="${teamHref(homeAbbr)}" class="sb-team home ${!isUpcoming && !isLive && !homeWon ? 'loser' : ''}" style="text-decoration:none;color:inherit;">
         <span class="sb-score ${isUpcoming ? '' : homeWon ? 'win' : awayWon ? 'loss' : ''}">${isUpcoming ? '' : homeScore}</span>
         <div class="sb-team-info" style="text-align:right;">
           <span class="sb-abbr ${!isUpcoming && !isLive && !homeWon ? 'loser' : ''}">${homeAbbr}</span>
           ${home.wins != null ? `<span class="sb-record">${home.wins}–${home.losses}</span>` : ''}
         </div>
         ${teamLogo(homeAbbr)}
-      </div>
+      </a>
     </div>
   `;
 
@@ -710,6 +710,10 @@ function teamLogo(abbr) {
     ? (wnbaTeamLogoUrl(abbr) || '')
     : `https://cdn.nba.com/logos/nba/${nbaTeamId(abbr)}/global/L/logo.svg`;
   return `<img class="sb-logo" src="${src}" alt="${abbr}" onerror="this.outerHTML='<div class=\\'sb-logo-fallback\\'>🏀</div>'">`;
+}
+
+function teamHref(abbr) {
+  return `/team?abbr=${encodeURIComponent(abbr)}&league=${IS_WNBA ? 'wnba' : 'nba'}`;
 }
 
 function renderTabs(box) {
