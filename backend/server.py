@@ -6145,6 +6145,127 @@ def search_teams():
     return jsonify({"teams": results})
 
 
+# WNBA abbreviation reconciliation. games + live feeds use one abbr set (LA,
+# LV, NY, GS, WSH, POR); the standings feed that populates team_seasons names +
+# records uses another (LAS, LVA, NYL, GSV, WAS, PDX); wnba_player_seasons is a
+# mix. We canonicalize on the games abbr but read both variants everywhere.
+_WNBA_STANDINGS_TO_GAMES = {"LAS": "LA", "LVA": "LV", "NYL": "NY",
+                            "GSV": "GS", "WAS": "WSH", "PDX": "POR"}
+_WNBA_GAMES_TO_STANDINGS = {v: k for k, v in _WNBA_STANDINGS_TO_GAMES.items()}
+
+
+@app.route("/api/teams/<abbr>/profile")
+def team_profile(abbr):
+    """Team page: record, season list, roster (season leaders), and the
+    team's schedule/results for a season (with crowd ratings). Works for
+    both leagues; WNBA games are distinguished by the '10' game_id prefix."""
+    abbr   = abbr.strip().upper()
+    league = request.args.get("league", "nba").strip().lower()
+    season = request.args.get("season", "").strip()
+    if league == "wnba":
+        abbr = _WNBA_STANDINGS_TO_GAMES.get(abbr, abbr)  # canonical = games abbr
+        alt = _WNBA_GAMES_TO_STANDINGS.get(abbr)
+        variants = [abbr] + ([alt] if alt else [])
+    else:
+        variants = [abbr]
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        # Seasons + record + name from team_seasons. Prefer rows with a real
+        # name (WNBA has duplicate rows where team_name == team_abbr).
+        cur.execute("""
+            SELECT season, team_name, wins, losses, team_abbr
+            FROM team_seasons
+            WHERE team_abbr = ANY(%s) AND league = %s
+            ORDER BY season DESC, (team_name = team_abbr) ASC
+        """, (variants, league))
+        rows = cur.fetchall()
+        if not rows:
+            return jsonify({"error": "team not found"}), 404
+        by_season = {}
+        for r in rows:
+            by_season.setdefault(r["season"], r)  # first = best-named
+        seasons = sorted(by_season.keys(), reverse=True)
+        if not season or season not in by_season:
+            season = seasons[0]
+        srow = by_season[season]
+
+        # Roster / season leaders (ordered by scoring)
+        roster = []
+        if league == "wnba":
+            cur.execute("""
+                SELECT player_id, player_name, gp, min, pts, reb, ast
+                FROM wnba_player_seasons
+                WHERE team = ANY(%s) AND season = %s AND season_type = 'Regular Season'
+                  AND COALESCE(gp, 0) > 0
+                ORDER BY pts DESC NULLS LAST
+            """, (variants, season))
+            for r in cur.fetchall():
+                roster.append({
+                    "playerId": r["player_id"], "playerName": r["player_name"],
+                    "gp": r.get("gp"), "mpg": r.get("min"),
+                    "ppg": r.get("pts"), "rpg": r.get("reb"), "apg": r.get("ast"),
+                })
+        else:
+            cur.execute("""
+                SELECT ps.player_id, p.player_name, ps.gp, ps.min_per_game,
+                       ps.pts, ps.reb, ps.ast
+                FROM player_seasons ps
+                JOIN players p ON p.player_id = ps.player_id
+                WHERE ps.team_abbr = %s AND ps.season = %s
+                  AND ps.season_type = 'Regular Season'
+                  AND COALESCE(ps.gp, 0) > 0
+                ORDER BY ps.pts DESC NULLS LAST
+            """, (abbr, season))
+            for r in cur.fetchall():
+                roster.append({
+                    "playerId": r["player_id"], "playerName": r["player_name"],
+                    "gp": r.get("gp"), "mpg": r.get("min_per_game"),
+                    "ppg": r.get("pts"), "rpg": r.get("reb"), "apg": r.get("ast"),
+                })
+
+        # Schedule / results for this season (crowd ratings included)
+        prefix_cond = "AND game_id LIKE '10%%'" if league == "wnba" else "AND game_id NOT LIKE '10%%'"
+        cur.execute(f"""
+            SELECT game_id, game_date, season_type,
+                   home_team_abbr, away_team_abbr, home_score, away_score,
+                   status, bayesian_rating, review_count
+            FROM games
+            WHERE season = %s
+              AND (home_team_abbr = ANY(%s) OR away_team_abbr = ANY(%s))
+              {prefix_cond}
+            ORDER BY game_date
+        """, (season, variants, variants))
+        games = []
+        for r in cur.fetchall():
+            is_home = r["home_team_abbr"] in variants
+            us   = r["home_score"] if is_home else r["away_score"]
+            them = r["away_score"] if is_home else r["home_score"]
+            final = (r["status"] or "").lower().startswith("final")
+            result = None
+            if final and us is not None and them is not None:
+                result = "W" if us > them else ("L" if us < them else "T")
+            games.append({
+                "gameId": r["game_id"],
+                "date": r["game_date"].isoformat() if r["game_date"] else None,
+                "seasonType": r["season_type"],
+                "isHome": is_home,
+                "opponent": r["away_team_abbr"] if is_home else r["home_team_abbr"],
+                "teamScore": us, "oppScore": them,
+                "status": r["status"], "result": result,
+                "rating": round(r["bayesian_rating"], 2) if r.get("bayesian_rating") else None,
+                "reviewCount": r.get("review_count") or 0,
+            })
+
+        return jsonify({
+            "teamAbbr": abbr, "teamName": srow["team_name"],
+            "league": league, "season": season, "seasons": seasons,
+            "record": {"wins": srow.get("wins"), "losses": srow.get("losses")},
+            "roster": roster, "games": games,
+        })
+    finally:
+        cur.close(); conn.close()
+
+
 @app.route("/api/lists/<int:list_id>/teams", methods=["POST"])
 @login_required
 def add_team_to_list(list_id):
