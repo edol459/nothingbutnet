@@ -9772,13 +9772,13 @@ def get_player_profile(person_id):
                        fgm, fga, fg_pct, fg3m, fg3a, fg3_pct, ftm, fta, ft_pct,
                        plus_minus, team
                 FROM wnba_player_seasons
-                WHERE player_id = %s AND season = %s
+                WHERE player_id = %s AND season = %s AND COALESCE(gp, 0) > 0
                 ORDER BY CASE WHEN season_type = 'Regular Season' THEN 0 ELSE 1 END
                 LIMIT 1
             """, (person_id, active_season))
             avg_row = cur.fetchone()
             if not avg_row:
-                # Fallback: compute from current-season CDN game stats
+                # Fallback: compute from current-season CDN game stats (also covers empty rows)
                 # wnba_player_game_stats has: pts, reb, ast, tov, fgm, fga, fg3m, fg3a
                 cur.execute("""
                     SELECT COUNT(DISTINCT game_id)                              AS gp,
@@ -9836,13 +9836,13 @@ def get_player_profile(person_id):
                        fgm, fga, fg_pct, fg3m, fg3a, fg3_pct, ftm, fta, ft_pct,
                        ts_pct, usg_pct, plus_minus, team_abbr
                 FROM player_seasons
-                WHERE player_id = %s AND season = %s
+                WHERE player_id = %s AND season = %s AND COALESCE(gp, 0) > 0
                 ORDER BY CASE WHEN season_type = 'Regular Season' THEN 0 ELSE 1 END
                 LIMIT 1
             """, (person_id, active_season))
             avg_row = cur.fetchone()
             if not avg_row:
-                # Fallback: compute from player_gamelogs
+                # Fallback: compute from player_gamelogs (also covers empty placeholder rows)
                 # gamelogs has: pts, reb, ast, fg3m, fgm, fga, ftm, fta, ts_pct
                 # (no fg3a, stl, blk, tov, pf, plus_minus)
                 cur.execute("""
