@@ -1007,9 +1007,10 @@ def get_seasons():
                 ORDER BY season DESC, season_type
             """, (league,))
         else:
-            cur.execute("""
+            table = "wnba_player_seasons" if league == "wnba" else "player_seasons"
+            cur.execute(f"""
                 SELECT DISTINCT season, season_type
-                FROM player_seasons
+                FROM {table}
                 ORDER BY season DESC, season_type
             """)
         rows = [dict(r) for r in cur.fetchall()]
