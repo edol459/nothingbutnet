@@ -276,8 +276,6 @@ function buildStatBar(s) {
   cells += cell(num(s.oppPpg), 'OPP');
   const diffCls = s.diff>0 ? 'stat-diff-pos' : s.diff<0 ? 'stat-diff-neg' : '';
   cells += cell((s.diff>0?'+':'')+num(s.diff), 'DIFF', diffCls);
-  if (s.homeRecord) cells += cell(s.homeRecord, 'HOME');
-  if (s.awayRecord) cells += cell(s.awayRecord, 'AWAY');
   // Box stats (present once backfilled)
   if (s.reb!=null || s.fgPct!=null) {
     cells += cell(num(s.reb), 'REB') + cell(num(s.ast), 'AST')

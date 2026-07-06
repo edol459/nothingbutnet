@@ -6261,33 +6261,15 @@ def team_profile(abbr):
                 "reviewCount": r.get("review_count") or 0,
             })
 
-        # ── Season stats: always derive PPG/OPP/DIFF/splits from games; layer
-        #    richer box+advanced stats from team_season_stats when available.
-        reg = [g for g in games
-               if g["seasonType"] == "Regular Season" and g["result"] in ("W", "L", "T")
-               and g["teamScore"] is not None and g["oppScore"] is not None]
-        stats = None
-        if reg:
-            gp = len(reg)
-            pf = sum(g["teamScore"] for g in reg)
-            pa = sum(g["oppScore"] for g in reg)
-            def _rec(subset):
-                w = sum(1 for g in subset if g["result"] == "W")
-                return f"{w}–{len(subset) - w}"
-            stats = {
-                "gp": gp,
-                "wins": sum(1 for g in reg if g["result"] == "W"),
-                "losses": sum(1 for g in reg if g["result"] == "L"),
-                "ppg": round(pf / gp, 1),
-                "oppPpg": round(pa / gp, 1),
-                "diff": round((pf - pa) / gp, 1),
-                "homeRecord": _rec([g for g in reg if g["isHome"]]),
-                "awayRecord": _rec([g for g in reg if not g["isHome"]]),
-            }
-        # Richer stats from the (optional) team_season_stats table.
+        # ── Season stats. Single source of truth is team_season_stats (uniform
+        #    across every season): PPG=pts, OPP=pts-plus_minus, DIFF=plus_minus,
+        #    plus box + advanced. Only if that table has no row for the season
+        #    (not yet backfilled) do we fall back to averaging the games table.
+        ts = None
         try:
             cur.execute("""
-                SELECT fg_pct, fg3_pct, ft_pct, reb, ast, stl, blk, tov,
+                SELECT gp, pts, plus_minus, fg_pct, fg3_pct, ft_pct,
+                       reb, ast, stl, blk, tov,
                        off_rating, def_rating, net_rating, pace
                 FROM team_season_stats
                 WHERE team_abbr = ANY(%s) AND league = %s AND season = %s
@@ -6295,25 +6277,41 @@ def team_profile(abbr):
                 LIMIT 1
             """, (variants, league, season))
             ts = cur.fetchone()
-            if ts:
-                if stats is None:
-                    stats = {}
-                stats.update({
-                    "fgPct":     ts.get("fg_pct"),
-                    "fg3Pct":    ts.get("fg3_pct"),
-                    "ftPct":     ts.get("ft_pct"),
-                    "reb":       ts.get("reb"),
-                    "ast":       ts.get("ast"),
-                    "stl":       ts.get("stl"),
-                    "blk":       ts.get("blk"),
-                    "tov":       ts.get("tov"),
-                    "offRating": ts.get("off_rating"),
-                    "defRating": ts.get("def_rating"),
-                    "netRating": ts.get("net_rating"),
-                    "pace":      ts.get("pace"),
-                })
         except Exception:
-            conn.rollback()  # table not created yet — derived stats still returned
+            conn.rollback()  # table not created yet
+
+        stats = None
+        if ts and ts.get("pts") is not None:
+            pts, pm = ts.get("pts"), ts.get("plus_minus")
+            stats = {
+                "gp": ts.get("gp"),
+                "wins": srow.get("wins"), "losses": srow.get("losses"),
+                "ppg": round(pts, 1),
+                "oppPpg": round(pts - pm, 1) if pm is not None else None,
+                "diff": round(pm, 1) if pm is not None else None,
+                "fgPct": ts.get("fg_pct"), "fg3Pct": ts.get("fg3_pct"), "ftPct": ts.get("ft_pct"),
+                "reb": ts.get("reb"), "ast": ts.get("ast"), "stl": ts.get("stl"),
+                "blk": ts.get("blk"), "tov": ts.get("tov"),
+                "offRating": ts.get("off_rating"), "defRating": ts.get("def_rating"),
+                "netRating": ts.get("net_rating"), "pace": ts.get("pace"),
+            }
+        else:
+            # Fallback only when the season isn't in team_season_stats yet.
+            reg = [g for g in games
+                   if g["seasonType"] == "Regular Season" and g["result"] in ("W", "L", "T")
+                   and g["teamScore"] is not None and g["oppScore"] is not None]
+            if reg:
+                gp = len(reg)
+                pf = sum(g["teamScore"] for g in reg)
+                pa = sum(g["oppScore"] for g in reg)
+                stats = {
+                    "gp": gp,
+                    "wins": sum(1 for g in reg if g["result"] == "W"),
+                    "losses": sum(1 for g in reg if g["result"] == "L"),
+                    "ppg": round(pf / gp, 1),
+                    "oppPpg": round(pa / gp, 1),
+                    "diff": round((pf - pa) / gp, 1),
+                }
 
         return jsonify({
             "teamAbbr": abbr, "teamName": srow["team_name"],
