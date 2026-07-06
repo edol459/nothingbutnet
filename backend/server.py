@@ -6188,8 +6188,9 @@ def team_profile(abbr):
         for r in rows:
             by_season.setdefault(r["season"], r)  # first = best-named
 
-        # Union in seasons we only have stats for (NBA team_season_stats reaches
-        # back further than team_seasons; old WNBA is the reverse).
+        # Only show seasons we actually have data to display — stats or games.
+        # (team_seasons alone carries just a W/L record; old WNBA seasons there
+        # predate our stats/games and would render as empty pages.)
         stat_seasons = []
         try:
             cur.execute("""
@@ -6200,7 +6201,16 @@ def team_profile(abbr):
         except Exception:
             conn.rollback()  # table not created yet
 
-        seasons = sorted(set(by_season.keys()) | set(stat_seasons), reverse=True)
+        game_prefix = "game_id LIKE '10%%'" if league == "wnba" else "game_id NOT LIKE '10%%'"
+        cur.execute(f"""
+            SELECT DISTINCT season FROM games
+            WHERE (home_team_abbr = ANY(%s) OR away_team_abbr = ANY(%s)) AND {game_prefix}
+        """, (variants, variants))
+        game_seasons = [r["season"] for r in cur.fetchall()]
+
+        seasons = sorted(set(stat_seasons) | set(game_seasons), reverse=True)
+        if not seasons:  # nothing backfilled yet — fall back to the record list
+            seasons = sorted(by_season.keys(), reverse=True)
         if not seasons:
             return jsonify({"error": "team not found"}), 404
         if not season or season not in seasons:
