@@ -6292,7 +6292,7 @@ def team_profile(abbr):
         ts = None
         try:
             cur.execute("""
-                SELECT gp, pts, plus_minus, fg_pct, fg3_pct, ft_pct,
+                SELECT gp, wins, losses, pts, plus_minus, fg_pct, fg3_pct, ft_pct,
                        reb, ast, stl, blk, tov,
                        off_rating, def_rating, net_rating, pace
                 FROM team_season_stats
@@ -6303,6 +6303,10 @@ def team_profile(abbr):
             ts = cur.fetchone()
         except Exception:
             conn.rollback()  # table not created yet
+
+        # Fill the record from team stats when team_seasons lacks this season.
+        if ts and record["wins"] is None and ts.get("wins") is not None:
+            record = {"wins": ts.get("wins"), "losses": ts.get("losses")}
 
         stats = None
         if ts and ts.get("pts") is not None:

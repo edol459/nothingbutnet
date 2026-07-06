@@ -64,7 +64,7 @@ def ensure_table(conn):
             league       TEXT NOT NULL DEFAULT 'nba',
             season       TEXT NOT NULL,
             season_type  TEXT NOT NULL DEFAULT 'Regular Season',
-            gp           INTEGER,
+            gp           INTEGER, wins INTEGER, losses INTEGER,
             pts          REAL, reb REAL, ast REAL, stl REAL, blk REAL, tov REAL,
             oreb         REAL, dreb REAL, pf REAL, plus_minus REAL,
             fg_pct       REAL, fg3_pct REAL, ft_pct REAL,
@@ -72,6 +72,9 @@ def ensure_table(conn):
             PRIMARY KEY (team_abbr, league, season, season_type)
         )
     """)
+    # ADD COLUMNs for tables created before wins/losses existed.
+    cur.execute("ALTER TABLE team_season_stats ADD COLUMN IF NOT EXISTS wins INTEGER")
+    cur.execute("ALTER TABLE team_season_stats ADD COLUMN IF NOT EXISTS losses INTEGER")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_tss_lookup ON team_season_stats(team_abbr, league, season)")
     conn.commit(); cur.close()
     print("✅ team_season_stats table ready")
@@ -134,6 +137,8 @@ def run_season(conn, league, season, delay):
             "team_abbr": abbr, "team_name": r.get("TEAM_NAME"),
             "league": league, "season": season, "season_type": "Regular Season",
             "gp": int(r.get("GP") or 0),
+            "wins": int(r["W"]) if r.get("W") is not None else None,
+            "losses": int(r["L"]) if r.get("L") is not None else None,
             "pts": _f(r, "PTS"), "reb": _f(r, "REB"), "ast": _f(r, "AST"),
             "stl": _f(r, "STL"), "blk": _f(r, "BLK"), "tov": _f(r, "TOV"),
             "oreb": _f(r, "OREB"), "dreb": _f(r, "DREB"), "pf": _f(r, "PF"),
@@ -151,15 +156,16 @@ def run_season(conn, league, season, delay):
     for d in rows:
         cur.execute("""
             INSERT INTO team_season_stats
-              (team_abbr, team_name, league, season, season_type, gp,
+              (team_abbr, team_name, league, season, season_type, gp, wins, losses,
                pts, reb, ast, stl, blk, tov, oreb, dreb, pf, plus_minus,
                fg_pct, fg3_pct, ft_pct, off_rating, def_rating, net_rating, pace)
             VALUES
-              (%(team_abbr)s, %(team_name)s, %(league)s, %(season)s, %(season_type)s, %(gp)s,
+              (%(team_abbr)s, %(team_name)s, %(league)s, %(season)s, %(season_type)s, %(gp)s, %(wins)s, %(losses)s,
                %(pts)s, %(reb)s, %(ast)s, %(stl)s, %(blk)s, %(tov)s, %(oreb)s, %(dreb)s, %(pf)s, %(plus_minus)s,
                %(fg_pct)s, %(fg3_pct)s, %(ft_pct)s, %(off_rating)s, %(def_rating)s, %(net_rating)s, %(pace)s)
             ON CONFLICT (team_abbr, league, season, season_type) DO UPDATE SET
               team_name=EXCLUDED.team_name, gp=EXCLUDED.gp,
+              wins=EXCLUDED.wins, losses=EXCLUDED.losses,
               pts=EXCLUDED.pts, reb=EXCLUDED.reb, ast=EXCLUDED.ast, stl=EXCLUDED.stl,
               blk=EXCLUDED.blk, tov=EXCLUDED.tov, oreb=EXCLUDED.oreb, dreb=EXCLUDED.dreb,
               pf=EXCLUDED.pf, plus_minus=EXCLUDED.plus_minus,
