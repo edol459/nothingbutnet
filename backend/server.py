@@ -6184,15 +6184,39 @@ def team_profile(abbr):
             ORDER BY season DESC, (team_name = team_abbr) ASC
         """, (variants, league))
         rows = cur.fetchall()
-        if not rows:
-            return jsonify({"error": "team not found"}), 404
         by_season = {}
         for r in rows:
             by_season.setdefault(r["season"], r)  # first = best-named
-        seasons = sorted(by_season.keys(), reverse=True)
-        if not season or season not in by_season:
+
+        # Union in seasons we only have stats for (NBA team_season_stats reaches
+        # back further than team_seasons; old WNBA is the reverse).
+        stat_seasons = []
+        try:
+            cur.execute("""
+                SELECT DISTINCT season FROM team_season_stats
+                WHERE team_abbr = ANY(%s) AND league = %s
+            """, (variants, league))
+            stat_seasons = [r["season"] for r in cur.fetchall()]
+        except Exception:
+            conn.rollback()  # table not created yet
+
+        seasons = sorted(set(by_season.keys()) | set(stat_seasons), reverse=True)
+        if not seasons:
+            return jsonify({"error": "team not found"}), 404
+        if not season or season not in seasons:
             season = seasons[0]
-        srow = by_season[season]
+
+        # Name + record for the selected season (record only exists in
+        # team_seasons; for stats-only seasons fall back to the team's name).
+        real_names = [r["team_name"] for r in rows if r["team_name"] != r["team_abbr"]]
+        fallback_name = real_names[0] if real_names else (rows[0]["team_name"] if rows else abbr)
+        if season in by_season:
+            srow = by_season[season]
+            team_name = srow["team_name"]
+            record = {"wins": srow.get("wins"), "losses": srow.get("losses")}
+        else:
+            team_name = fallback_name
+            record = {"wins": None, "losses": None}
 
         # Roster / season leaders (ordered by scoring)
         roster = []
@@ -6285,7 +6309,7 @@ def team_profile(abbr):
             pts, pm = ts.get("pts"), ts.get("plus_minus")
             stats = {
                 "gp": ts.get("gp"),
-                "wins": srow.get("wins"), "losses": srow.get("losses"),
+                "wins": record["wins"], "losses": record["losses"],
                 "ppg": round(pts, 1),
                 "oppPpg": round(pts - pm, 1) if pm is not None else None,
                 "diff": round(pm, 1) if pm is not None else None,
@@ -6314,9 +6338,9 @@ def team_profile(abbr):
                 }
 
         return jsonify({
-            "teamAbbr": abbr, "teamName": srow["team_name"],
+            "teamAbbr": abbr, "teamName": team_name,
             "league": league, "season": season, "seasons": seasons,
-            "record": {"wins": srow.get("wins"), "losses": srow.get("losses")},
+            "record": record,
             "stats": stats,
             "roster": roster, "games": games,
         })
