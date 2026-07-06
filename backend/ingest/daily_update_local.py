@@ -150,6 +150,12 @@ def main():
             'WoWY lineups (leverage-filtered)',
             ['--season', season, '--recent-only'],
         ),
+        # ── Team season stats (Base+Advanced) for team pages ──
+        (
+            'fetch_team_season_stats.py',
+            'Team season stats (current, NBA+WNBA)',
+            ['--current'],
+        ),
         # ── Compute (runs last, after all stats are fresh) ────
         (
             'compute_pctiles.py',

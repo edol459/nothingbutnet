@@ -52,6 +52,20 @@ a { color:inherit; }
 .season-select { font-family:var(--ff-mono); font-size:13px; color:var(--orange); background:var(--paper2); border:1px solid var(--rule); border-radius:5px; padding:3px 8px; cursor:pointer; }
 .league-tag { font-family:var(--ff-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink4); border:1px solid var(--rule); border-radius:4px; padding:2px 6px; }
 
+/* Season capsules */
+.season-caps { display:flex; gap:8px; overflow-x:auto; padding:16px 0 4px; scrollbar-width:none; }
+.season-caps::-webkit-scrollbar { display:none; }
+.season-cap { font-family:var(--ff-mono); font-size:12px; padding:5px 12px; border-radius:20px; border:1px solid var(--rule); background:var(--paper2); color:var(--ink2); cursor:pointer; white-space:nowrap; }
+.season-cap.active { background:var(--orange); border-color:var(--orange); color:#fff; font-weight:500; }
+
+/* Stat bar */
+.statbar { display:flex; flex-wrap:wrap; border:1px solid var(--rule); border-radius:10px; background:var(--bg-card); margin-top:14px; overflow:hidden; }
+.stat-cell { flex:1; min-width:64px; text-align:center; padding:11px 4px; border-right:1px solid var(--paper3); }
+.stat-cell:last-child { border-right:none; }
+.stat-val { font-family:var(--ff-mono); font-size:16px; font-weight:500; }
+.stat-lab { font-family:var(--ff-mono); font-size:8px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink4); margin-top:2px; }
+.stat-diff-pos { color:var(--green); } .stat-diff-neg { color:var(--red); }
+
 /* Sections */
 .section { margin-top:30px; }
 .section-h { font-family:var(--ff-mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3); margin-bottom:12px; }
@@ -185,12 +199,14 @@ function render(d) {
     ? `<img src="${logo}" alt="${esc(d.teamName)}" onerror="this.outerHTML='<div class=\\'thead-logo-fallback\\'>🏀</div>'">`
     : `<div class="thead-logo-fallback">🏀</div>`;
 
-  const seasonCtl = d.seasons.length > 1
-    ? `<select class="season-select" onchange="load(this.value)">${d.seasons.map(s =>
-        `<option value="${s}" ${s===d.season?'selected':''}>${s}</option>`).join('')}</select>`
-    : `<span>${d.season}</span>`;
-
   const rec = (d.record.wins!=null && d.record.losses!=null) ? `${d.record.wins}–${d.record.losses}` : '—';
+
+  const seasonCaps = d.seasons.length > 1
+    ? `<div class="season-caps">${d.seasons.map(s =>
+        `<button class="season-cap ${s===d.season?'active':''}" onclick="load('${s}')">${s}</button>`).join('')}</div>`
+    : '';
+
+  const statBarHTML = buildStatBar(d.stats);
 
   const roster = d.roster.map(p => `
     <div class="roster-row">
@@ -231,11 +247,13 @@ function render(d) {
         <div class="thead-meta">
           <span class="thead-record">${rec}</span>
           <span>·</span>
-          ${seasonCtl}
+          <span>${d.season}</span>
           <span class="league-tag">${LEAGUE}</span>
         </div>
       </div>
     </div>
+    ${seasonCaps}
+    ${statBarHTML}
     <div class="section">
       <div class="section-h">Roster</div>
       ${roster}
@@ -244,6 +262,36 @@ function render(d) {
       <div class="section-h">Schedule</div>
       ${sched}
     </div>`;
+}
+
+function cell(val, lab, cls) {
+  return `<div class="stat-cell"><div class="stat-val ${cls||''}">${val}</div><div class="stat-lab">${lab}</div></div>`;
+}
+function num(v, d=1) { return v==null ? '—' : v.toFixed(d); }
+function buildStatBar(s) {
+  if (!s) return '';
+  let cells = '';
+  cells += cell(s.gp==null?'—':s.gp, 'GP');
+  cells += cell(num(s.ppg), 'PPG');
+  cells += cell(num(s.oppPpg), 'OPP');
+  const diffCls = s.diff>0 ? 'stat-diff-pos' : s.diff<0 ? 'stat-diff-neg' : '';
+  cells += cell((s.diff>0?'+':'')+num(s.diff), 'DIFF', diffCls);
+  if (s.homeRecord) cells += cell(s.homeRecord, 'HOME');
+  if (s.awayRecord) cells += cell(s.awayRecord, 'AWAY');
+  // Box stats (present once backfilled)
+  if (s.reb!=null || s.fgPct!=null) {
+    cells += cell(num(s.reb), 'REB') + cell(num(s.ast), 'AST')
+           + cell(num(s.stl), 'STL') + cell(num(s.blk), 'BLK') + cell(num(s.tov), 'TOV')
+           + cell(s.fgPct!=null?num(s.fgPct*100):'—', 'FG%')
+           + cell(s.fg3Pct!=null?num(s.fg3Pct*100):'—', '3P%')
+           + cell(s.ftPct!=null?num(s.ftPct*100):'—', 'FT%');
+  }
+  // Advanced (present once backfilled)
+  if (s.offRating!=null || s.pace!=null) {
+    cells += cell(num(s.offRating), 'ORTG') + cell(num(s.defRating), 'DRTG')
+           + cell(num(s.netRating), 'NET') + cell(num(s.pace), 'PACE');
+  }
+  return `<div class="statbar">${cells}</div>`;
 }
 
 load(null);
