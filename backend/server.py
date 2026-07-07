@@ -3119,7 +3119,9 @@ def players_today():
             elif tier == 1:
                 sub, sub2 = -(r["avgMinutes"] or 0.0), 0.0
             else:
-                sub, sub2 = (r["gameTimeUTC"] or "9999"), -(r["avgMinutes"] or 0.0)
+                # Avg minutes first — a tipoff-time-primary sort surfaced
+                # low-usage players just because their game starts earlier.
+                sub, sub2 = -(r["avgMinutes"] or 0.0), (r["gameTimeUTC"] or "9999")
             return (followed, tier, sub, sub2)
 
         rows.sort(key=_sort_key)
