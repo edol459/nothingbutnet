@@ -1580,8 +1580,8 @@ _past_sb_cache: dict = {}   # date -> {"payload": dict, "ts": float}
 # ── Future-date cache (schedule can change — TTL 60 min) ──────────
 _future_sb_cache: dict = {}  # date -> {"payload": dict, "ts": float}
 
-# ── ESPN injury report cache (TTL 30 min) ────────────────────────
-_injury_cache: dict = {"data": {}, "ts": 0.0}
+# ── ESPN injury report cache (TTL 30 min), keyed per league ──────
+_injury_cache: dict = {"nba": {"data": {}, "ts": 0.0}, "wnba": {"data": {}, "ts": 0.0}}
 
 # ── Full season schedule from CDN (cached 2 h — used for future dates) ──
 _schedule_cache: dict = {"data": None, "ts": 0.0}
@@ -2424,14 +2424,17 @@ def _norm_name(name: str) -> str:
     return n.strip()
 
 
-def _fetch_injury_report() -> dict:
-    """Fetch player injury statuses from ESPN. Returns {norm_name: status_lower}.
-    Cached 30 minutes; returns stale data on error."""
+def _fetch_injury_report(league: str = "nba") -> dict:
+    """Fetch player injury statuses from ESPN for a league. Returns
+    {norm_name: status_lower}. Cached 30 minutes per league; returns stale
+    data on error."""
+    league = "wnba" if league == "wnba" else "nba"
+    cache = _injury_cache[league]
     now = _time.time()
-    if now - _injury_cache["ts"] < 1800:
-        return _injury_cache["data"]
+    if now - cache["ts"] < 1800:
+        return cache["data"]
     try:
-        url  = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
+        url  = f"https://site.api.espn.com/apis/site/v2/sports/basketball/{league}/injuries"
         resp = _requests.get(url, timeout=8)
         resp.raise_for_status()
         injured = {}
@@ -2441,11 +2444,11 @@ def _fetch_injury_report() -> dict:
                 status = inj.get("status", "").lower()
                 if name:
                     injured[_norm_name(name)] = status
-        _injury_cache["data"] = injured
-        _injury_cache["ts"]   = now
+        cache["data"] = injured
+        cache["ts"]   = now
         return injured
     except Exception:
-        return _injury_cache["data"]
+        return cache["data"]
 
 
 def _is_out(player_name: str, injury_report: dict) -> bool:
@@ -2879,11 +2882,18 @@ def preview_page():
     return app.send_static_file("preview.html")
 
 
-# ── /api/live/boxscore/<game_id> ──────────────────────────────────
-@app.route("/api/live/boxscore/<game_id>")
-def get_live_boxscore(game_id):
-    """Proxy CDN live boxscore (NBA or WNBA) + auto-upsert completed games.
-    Falls back to nba_api BoxScoreTraditionalV3 for historical NBA games."""
+# Boxscore data never changes once a game is Final — cache indefinitely so
+# repeated internal callers (e.g. /api/players/today) don't re-hit the CDN.
+_final_boxscore_cache: dict = {}  # game_id -> dict
+
+
+def _fetch_live_boxscore_data(game_id: str) -> dict | None:
+    """Core boxscore fetch (NBA or WNBA): CDN first, nba_api fallback for
+    historical NBA games. Returns the normalized game dict, or None if
+    unavailable. Auto-upserts completed games. Cached indefinitely once Final."""
+    if game_id in _final_boxscore_cache:
+        return _final_boxscore_cache[game_id]
+
     is_wnba = str(game_id).startswith("10")
     # Try CDN first (works for current season)
     try:
@@ -2898,13 +2908,14 @@ def get_live_boxscore(game_id):
         game = data.get("game", data)
         if game.get("gameStatus") == 3:
             _upsert_game_from_boxscore(game_id, game, league="wnba" if is_wnba else "nba")
-        return jsonify(game)
+            _final_boxscore_cache[game_id] = game
+        return game
     except Exception:
         pass
 
     # CDN failed — fall back to nba_api for historical NBA games only
     if is_wnba:
-        return jsonify({"error": "boxscore unavailable"}), 404
+        return None
 
     try:
         from nba_api.stats.endpoints import boxscoretraditionalv3
@@ -2953,11 +2964,170 @@ def get_live_boxscore(game_id):
             "period": game_meta.get("period", 4),
             "gameClock": "",
         }
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 404
- 
- 
+        _final_boxscore_cache[game_id] = result
+        return result
+    except Exception:
+        return None
+
+
+# ── /api/live/boxscore/<game_id> ──────────────────────────────────
+@app.route("/api/live/boxscore/<game_id>")
+def get_live_boxscore(game_id):
+    """Proxy CDN live boxscore (NBA or WNBA) + auto-upsert completed games.
+    Falls back to nba_api BoxScoreTraditionalV3 for historical NBA games."""
+    game = _fetch_live_boxscore_data(game_id)
+    if game is None:
+        return jsonify({"error": "boxscore unavailable"}), 404
+    return jsonify(game)
+
+
+def _roster_with_avg_minutes(cur, abbr: str, league: str, season: str) -> list:
+    """Current-season roster (gp > 0) + season avg minutes for one team.
+    WNBA abbr aliasing (team_seasons vs wnba_player_seasons drift) handled here."""
+    if league == "wnba":
+        alt = _WNBA_GAMES_TO_STANDINGS.get(abbr)
+        variants = [abbr] + ([alt] if alt else [])
+        cur.execute("""
+            SELECT player_id, player_name, min AS avg_min
+            FROM wnba_player_seasons
+            WHERE team = ANY(%s) AND season = %s AND season_type = 'Regular Season'
+              AND COALESCE(gp, 0) > 0
+        """, (variants, season))
+    else:
+        cur.execute("""
+            SELECT ps.player_id, p.player_name, ps.min_per_game AS avg_min
+            FROM player_seasons ps
+            JOIN players p ON p.player_id = ps.player_id
+            WHERE ps.team_abbr = %s AND ps.season = %s AND ps.season_type = 'Regular Season'
+              AND COALESCE(ps.gp, 0) > 0
+        """, (abbr, season))
+    return [{"playerId": r["player_id"], "playerName": r["player_name"],
+             "avgMinutes": r["avg_min"]} for r in cur.fetchall()]
+
+
+@app.route("/api/players/today", methods=["POST"])
+def players_today():
+    """
+    "Today's Players" rail: every active player across the day's games,
+    sorted followed-first then by tier (Final > Live > Scheduled). Final uses
+    real minutes played (one-time boxscore fetch, cached forever); Live and
+    Scheduled use season avg minutes (no live-minutes polling needed — cheap
+    and stable while a game is in progress). Scheduled players confirmed OUT
+    (ESPN injury report) are excluded entirely; Live/Final are unaffected
+    since they're built from actual boxscore/roster participants.
+
+    Body: {"date": "YYYY-MM-DD", "games": [{"gameId", "status": "scheduled"|
+    "live"|"final", "gameTimeUTC", "homeAbbr", "awayAbbr"}, ...]}
+    The caller (already polling the scoreboard) supplies the games list so
+    this endpoint never has to re-derive game status itself.
+    """
+    body     = request.get_json(silent=True) or {}
+    date     = (body.get("date") or "").strip()
+    games_in = body.get("games") or []
+    if not games_in:
+        return jsonify({"players": [], "date": date})
+
+    user    = current_user()
+    user_id = user["id"] if user else None
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        followed_ids = set()
+        if user_id:
+            cur.execute("SELECT person_id FROM player_follows WHERE user_id = %s", (user_id,))
+            followed_ids = {r["person_id"] for r in cur.fetchall()}
+
+        final_game_ids = [g["gameId"] for g in games_in if g.get("status") == "final" and g.get("gameId")]
+        my_ratings = {}
+        if user_id and final_game_ids:
+            cur.execute("""
+                SELECT game_id, person_id, rating FROM performance_reviews
+                WHERE user_id = %s AND game_id = ANY(%s)
+            """, (user_id, final_game_ids))
+            for r in cur.fetchall():
+                my_ratings[(r["game_id"], r["person_id"])] = r["rating"]
+
+        nba_season, wnba_season = get_current_season(), _get_wnba_season()
+        injury_by_league: dict = {}
+        rows = []
+
+        for g in games_in:
+            game_id = g.get("gameId", "")
+            status  = g.get("status", "scheduled")
+            if not game_id or status not in ("scheduled", "live", "final"):
+                continue
+            league    = "wnba" if str(game_id).startswith("10") else "nba"
+            home_abbr = (g.get("homeAbbr") or "").upper()
+            away_abbr = (g.get("awayAbbr") or "").upper()
+            tipoff    = g.get("gameTimeUTC", "")
+
+            if status == "final":
+                box = _fetch_live_boxscore_data(game_id)
+                if not box:
+                    continue
+                for side in ("homeTeam", "awayTeam"):
+                    team = box.get(side, {})
+                    abbr = team.get("teamTricode", "")
+                    if league == "wnba":
+                        abbr = _wnba_cdn_abbr(abbr)
+                    for p in team.get("players", []):
+                        pid = p.get("personId")
+                        if not pid:
+                            continue
+                        min_str = (p.get("statistics", {}) or {}).get("minutes", "PT0M0.00S") or "PT0M0.00S"
+                        try:
+                            mins = float(min_str.replace("PT", "").replace("S", "").split("M")[0])
+                        except Exception:
+                            mins = 0.0
+                        if mins <= 0:
+                            continue  # DNP — nothing to rate
+                        rows.append({
+                            "playerId": pid, "playerName": p.get("name", ""),
+                            "teamAbbr": abbr, "league": league,
+                            "gameId": game_id, "gameStatus": "final", "gameTimeUTC": tipoff,
+                            "avgMinutes": None, "finalMinutes": round(mins, 1),
+                            "isFollowed": pid in followed_ids,
+                            "myRating": my_ratings.get((game_id, pid)),
+                        })
+            else:
+                if league not in injury_by_league:
+                    injury_by_league[league] = _fetch_injury_report(league)
+                injury = injury_by_league[league]
+                season = wnba_season if league == "wnba" else nba_season
+                for abbr in (home_abbr, away_abbr):
+                    if not abbr:
+                        continue
+                    for p in _roster_with_avg_minutes(cur, abbr, league, season):
+                        if status == "scheduled" and _is_out(p["playerName"], injury):
+                            continue
+                        rows.append({
+                            "playerId": p["playerId"], "playerName": p["playerName"],
+                            "teamAbbr": abbr, "league": league,
+                            "gameId": game_id, "gameStatus": status, "gameTimeUTC": tipoff,
+                            "avgMinutes": p["avgMinutes"], "finalMinutes": None,
+                            "isFollowed": p["playerId"] in followed_ids,
+                            "myRating": None,
+                        })
+
+        tier_rank = {"final": 0, "live": 1, "scheduled": 2}
+
+        def _sort_key(r):
+            followed = 0 if r["isFollowed"] else 1
+            tier = tier_rank.get(r["gameStatus"], 2)
+            if tier == 0:
+                sub, sub2 = -(r["finalMinutes"] or 0.0), 0.0
+            elif tier == 1:
+                sub, sub2 = -(r["avgMinutes"] or 0.0), 0.0
+            else:
+                sub, sub2 = (r["gameTimeUTC"] or "9999"), -(r["avgMinutes"] or 0.0)
+            return (followed, tier, sub, sub2)
+
+        rows.sort(key=_sort_key)
+        return jsonify({"players": rows, "date": date})
+    finally:
+        cur.close(); conn.close()
+
+
 def _season_type_from_game_id(game_id: str) -> str:
     """
     Derive season type from the NBA game ID.
