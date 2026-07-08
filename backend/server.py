@@ -2426,8 +2426,8 @@ def _norm_name(name: str) -> str:
 
 def _fetch_injury_report(league: str = "nba") -> dict:
     """Fetch player injury statuses from ESPN for a league. Returns
-    {norm_name: status_lower}. Cached 30 minutes per league; returns stale
-    data on error."""
+    {norm_name: {"status": lower, "statusDisplay": original, "reason": short
+    comment}}. Cached 30 minutes per league; returns stale data on error."""
     league = "wnba" if league == "wnba" else "nba"
     cache = _injury_cache[league]
     now = _time.time()
@@ -2440,10 +2440,14 @@ def _fetch_injury_report(league: str = "nba") -> dict:
         injured = {}
         for team_entry in resp.json().get("injuries", []):
             for inj in team_entry.get("injuries", []):
-                name   = inj.get("athlete", {}).get("displayName", "").strip()
-                status = inj.get("status", "").lower()
+                name       = inj.get("athlete", {}).get("displayName", "").strip()
+                status_raw = (inj.get("status") or "").strip()
                 if name:
-                    injured[_norm_name(name)] = status
+                    injured[_norm_name(name)] = {
+                        "status": status_raw.lower(),
+                        "statusDisplay": status_raw,
+                        "reason": inj.get("shortComment", "") or "",
+                    }
         cache["data"] = injured
         cache["ts"]   = now
         return injured
@@ -2455,7 +2459,7 @@ def _is_out(player_name: str, injury_report: dict) -> bool:
     """True if player is Out / Doubtful / Injured Reserve / Suspension."""
     if not injury_report or not player_name:
         return False
-    status = injury_report.get(_norm_name(player_name), "")
+    status = (injury_report.get(_norm_name(player_name)) or {}).get("status", "")
     return status in ("out", "doubtful", "injured reserve", "out for season",
                       "suspension", "not with team", "inactive")
 
@@ -2875,6 +2879,41 @@ def preview_h2h(away, home):
         return jsonify({"games": [], "error": str(e)}), 200
 
 
+# ── /api/preview/injuries/<away>/<home> ──────────────────────────
+@app.route("/api/preview/injuries/<away>/<home>")
+def preview_injuries(away, home):
+    """
+    Injury report for both teams ahead of tipoff — every current-roster
+    player (gp > 0) with an active ESPN injury listing (Out, Doubtful,
+    Questionable, Day-To-Day, etc.), with the status + short reason.
+    """
+    away   = away.upper()
+    home   = home.upper()
+    league = request.args.get("league", "nba").lower()
+    season = _get_wnba_season() if league == "wnba" else get_current_season()
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        injury = _fetch_injury_report(league)
+        out = {"away": [], "home": []}
+        for side, abbr in (("away", away), ("home", home)):
+            for p in _roster_with_avg_minutes(cur, abbr, league, season):
+                info = injury.get(_norm_name(p["playerName"]))
+                if not info or not info.get("statusDisplay"):
+                    continue
+                out[side].append({
+                    "playerId": p["playerId"],
+                    "playerName": p["playerName"],
+                    "status": info["statusDisplay"],
+                    "reason": info.get("reason", ""),
+                })
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({"away": [], "home": [], "error": str(e)}), 200
+    finally:
+        cur.close(); conn.close()
+
+
 # ── Serve preview.html ────────────────────────────────────────────
 @app.route("/preview")
 @app.route("/preview.html")
@@ -2982,27 +3021,27 @@ def get_live_boxscore(game_id):
 
 
 def _roster_with_avg_minutes(cur, abbr: str, league: str, season: str) -> list:
-    """Current-season roster (gp > 0) + season avg minutes for one team.
+    """Current-season roster (gp > 0) + season avg minutes/points for one team.
     WNBA abbr aliasing (team_seasons vs wnba_player_seasons drift) handled here."""
     if league == "wnba":
         alt = _WNBA_GAMES_TO_STANDINGS.get(abbr)
         variants = [abbr] + ([alt] if alt else [])
         cur.execute("""
-            SELECT player_id, player_name, min AS avg_min
+            SELECT player_id, player_name, min AS avg_min, pts AS avg_pts
             FROM wnba_player_seasons
             WHERE team = ANY(%s) AND season = %s AND season_type = 'Regular Season'
               AND COALESCE(gp, 0) > 0
         """, (variants, season))
     else:
         cur.execute("""
-            SELECT ps.player_id, p.player_name, ps.min_per_game AS avg_min
+            SELECT ps.player_id, p.player_name, ps.min_per_game AS avg_min, ps.pts AS avg_pts
             FROM player_seasons ps
             JOIN players p ON p.player_id = ps.player_id
             WHERE ps.team_abbr = %s AND ps.season = %s AND ps.season_type = 'Regular Season'
               AND COALESCE(ps.gp, 0) > 0
         """, (abbr, season))
     return [{"playerId": r["player_id"], "playerName": r["player_name"],
-             "avgMinutes": r["avg_min"]} for r in cur.fetchall()]
+             "avgMinutes": r["avg_min"], "avgPts": r["avg_pts"]} for r in cur.fetchall()]
 
 
 @app.route("/api/players/today", methods=["POST"])
@@ -3010,8 +3049,8 @@ def players_today():
     """
     "Today's Players" rail: every active player across the day's games,
     sorted followed-first then by tier (Final > Live > Scheduled). Final uses
-    real minutes played (one-time boxscore fetch, cached forever); Live and
-    Scheduled use season avg minutes (no live-minutes polling needed — cheap
+    real minutes/points (one-time boxscore fetch, cached forever); Live and
+    Scheduled use season avg minutes/points (no live polling needed — cheap
     and stable while a game is in progress). Scheduled players confirmed OUT
     (ESPN injury report) are excluded entirely; Live/Final are unaffected
     since they're built from actual boxscore/roster participants.
@@ -3081,11 +3120,13 @@ def players_today():
                             mins = 0.0
                         if mins <= 0:
                             continue  # DNP — nothing to rate
+                        pts = (p.get("statistics", {}) or {}).get("points", 0) or 0
                         rows.append({
                             "playerId": pid, "playerName": p.get("name", ""),
                             "teamAbbr": abbr, "league": league,
                             "gameId": game_id, "gameStatus": "final", "gameTimeUTC": tipoff,
                             "avgMinutes": None, "finalMinutes": round(mins, 1),
+                            "avgPts": None, "finalPts": int(pts),
                             "isFollowed": pid in followed_ids,
                             "myRating": my_ratings.get((game_id, pid)),
                         })
@@ -3105,6 +3146,7 @@ def players_today():
                             "teamAbbr": abbr, "league": league,
                             "gameId": game_id, "gameStatus": status, "gameTimeUTC": tipoff,
                             "avgMinutes": p["avgMinutes"], "finalMinutes": None,
+                            "avgPts": p["avgPts"], "finalPts": None,
                             "isFollowed": p["playerId"] in followed_ids,
                             "myRating": None,
                         })
