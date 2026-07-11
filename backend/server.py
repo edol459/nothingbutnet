@@ -3807,7 +3807,7 @@ def search_games():
 
     conn = get_conn(); cur = conn.cursor()
     try:
-        matched_abbrs = []
+        nba_abbrs, wnba_abbrs = [], []
         if team_text:
             pattern = f"%{team_text}%"
             cur.execute("""
@@ -3815,20 +3815,29 @@ def search_games():
                 WHERE team_name ILIKE %s OR team_abbr ILIKE %s
             """, (pattern, pattern))
             for r in cur.fetchall():
-                abbr = r["team_abbr"]
                 if r["league"] == "wnba":
-                    abbr = _WNBA_STANDINGS_TO_GAMES.get(abbr, abbr)
-                matched_abbrs.append(abbr)
+                    wnba_abbrs.append(_WNBA_STANDINGS_TO_GAMES.get(r["team_abbr"], r["team_abbr"]))
+                else:
+                    nba_abbrs.append(r["team_abbr"])
 
-        if not matched_abbrs and not search_date:
+        if not nba_abbrs and not wnba_abbrs and not search_date:
             cur.close(); conn.close()
             return jsonify({"games": []})
 
         filters = ["g.status = 'Final'"]
         params = []
-        if matched_abbrs:
-            filters.append("(g.home_team_abbr = ANY(%s) OR g.away_team_abbr = ANY(%s))")
-            params += [matched_abbrs, matched_abbrs]
+        # NBA/WNBA share some abbreviations (e.g. IND = Pacers/Fever), so a
+        # matched abbr must be tied to the league it was matched in, not
+        # applied across both.
+        if nba_abbrs or wnba_abbrs:
+            team_clauses = []
+            if nba_abbrs:
+                team_clauses.append("(g.league = 'nba' AND (g.home_team_abbr = ANY(%s) OR g.away_team_abbr = ANY(%s)))")
+                params += [nba_abbrs, nba_abbrs]
+            if wnba_abbrs:
+                team_clauses.append("(g.league = 'wnba' AND (g.home_team_abbr = ANY(%s) OR g.away_team_abbr = ANY(%s)))")
+                params += [wnba_abbrs, wnba_abbrs]
+            filters.append(f"({' OR '.join(team_clauses)})")
         if search_date:
             filters.append("g.game_date = %s")
             params.append(search_date)
