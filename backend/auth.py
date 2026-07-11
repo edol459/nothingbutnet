@@ -46,7 +46,10 @@ def init_oauth(app):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def get_conn():
-    """Import lazily to avoid circular imports."""
+    """Fallback: opens a fresh connection per call. server.py replaces this at
+    import time with its pooled thread-local get_conn (see the auth import in
+    server.py) — a fresh TCP+TLS handshake per authenticated request was the
+    main cause of 2-8s response times under concurrent load."""
     import psycopg2, psycopg2.extras
     return psycopg2.connect(os.getenv("DATABASE_URL"),
                             cursor_factory=psycopg2.extras.RealDictCursor)

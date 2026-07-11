@@ -201,6 +201,12 @@ def _fmt_game_time(val) -> str:
 
 
 from auth import auth_bp, init_oauth, login_required, current_user
+# auth.py's own get_conn opens a fresh TCP+TLS connection per call — every
+# authenticated request paid that handshake (2-8s under concurrent load).
+# Swap it for the pooled thread-local get_conn defined above; _PersistentConn
+# makes auth.py's conn.close() calls a no-op rollback instead of a real close.
+import auth as _auth_mod
+_auth_mod.get_conn = get_conn
 from datetime import timedelta
 
 # Survival trivia engine (backend/games/) — explicit path so `import survival_api`
