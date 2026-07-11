@@ -55,22 +55,28 @@ const TEAM_COLORS = {
 };
 
 // ── WNBA colors keyed by our API abbreviations ─────────────────
+// Verified against each team's real branding (was previously several
+// copy-paste duplicates — e.g. ATL had the Lakers/Sparks purple-gold,
+// IND/LA both had Seattle's green, DAL had Phoenix's orange, WSH's
+// secondary was Minnesota's green). POR/TOR are 2026 expansion teams
+// without a published official hex yet — approximated from their named
+// brand colors ("Fire Red"/"Brown", "Bordeaux"/"Borealis Blue").
 const WNBA_TEAM_COLORS = {
-  ATL: { primary: '#552583', secondary: '#FDB927' }, // Atlanta Dream
+  ATL: { primary: '#C8102E', secondary: '#0C2340' }, // Atlanta Dream
   CHI: { primary: '#418FDE', secondary: '#FFCD00' }, // Chicago Sky
   CON: { primary: '#F05023', secondary: '#0A2240' }, // Connecticut Sun
-  DAL: { primary: '#CB6015', secondary: '#201747' }, // Dallas Wings
-  GS:  { primary: '#E31837', secondary: '#002B5C' }, // Golden State Valkyries
-  IND: { primary: '#2C5234', secondary: '#BE3A34' }, // Indiana Fever
-  LA:  { primary: '#2C5234', secondary: '#FEE11A' }, // Los Angeles Sparks
+  DAL: { primary: '#0C2340', secondary: '#C4D600' }, // Dallas Wings
+  GS:  { primary: '#B897D4', secondary: '#000000' }, // Golden State Valkyries
+  IND: { primary: '#C8102E', secondary: '#041E42' }, // Indiana Fever
+  LA:  { primary: '#702F8A', secondary: '#FFC72C' }, // Los Angeles Sparks
   LV:  { primary: '#A6192E', secondary: '#000000' }, // Las Vegas Aces
   MIN: { primary: '#236192', secondary: '#0C2340' }, // Minnesota Lynx
   NY:  { primary: '#6ECEB2', secondary: '#000000' }, // New York Liberty
-  PHX: { primary: '#CB6015', secondary: '#000000' }, // Phoenix Mercury
-  POR: { primary: '#E31837', secondary: '#000000' }, // Portland Fire
+  PHX: { primary: '#CB6015', secondary: '#201747' }, // Phoenix Mercury
+  POR: { primary: '#BB2528', secondary: '#5C4A42' }, // Portland Fire (approx.)
   SEA: { primary: '#2C5234', secondary: '#FFC72C' }, // Seattle Storm
-  TOR: { primary: '#7B1E3C', secondary: '#C5A843' }, // Toronto Tempo
-  WSH: { primary: '#0C2340', secondary: '#78BE20' }, // Washington Mystics
+  TOR: { primary: '#6D1F3F', secondary: '#00A9E0' }, // Toronto Tempo (approx.)
+  WSH: { primary: '#0C2340', secondary: '#C8102E' }, // Washington Mystics
 };
 
 function getWnbaTeamColor(abbr, type = 'primary') {

@@ -162,6 +162,20 @@
         background:var(--orange-lt); border:1px solid #f6d8c8; border-radius:8px; padding:9px 14px;
         text-align:center; margin-bottom:14px}
   .resultlogo{height:46px; width:auto; margin-bottom:10px}
+  .lb-section{margin-top:20px; padding-top:16px; border-top:1px solid var(--rule); text-align:left}
+  .lb-title{font-family:var(--ff-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); margin-bottom:10px; text-align:center}
+  .lb-row{display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--paper3)}
+  .lb-row:last-child{border-bottom:none}
+  .lb-row.lb-you{background:var(--paper3); border-radius:8px; padding:8px; margin:2px 0}
+  .lb-rank{font-family:var(--ff-mono); font-size:12px; color:var(--ink3); width:20px; text-align:right; flex-shrink:0}
+  .lb-avatar{width:26px; height:26px; border-radius:50%; object-fit:cover; border:1.5px solid var(--rule); flex-shrink:0}
+  .lb-avatar-initial{display:flex; align-items:center; justify-content:center; background:var(--paper2); font-size:11px; color:var(--ink3)}
+  .lb-name{flex:1; font-size:13px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .lb-score{font-family:var(--ff-mono); font-size:12px; color:var(--ink2); flex-shrink:0}
+  .lb-sep{text-align:center; color:var(--ink4); font-size:12px; padding:2px 0}
+  .lb-toggle{display:block; width:100%; text-align:center; margin-top:10px; background:none; border:none;
+             font-family:var(--ff-mono); font-size:11px; color:var(--orange); cursor:pointer; text-decoration:underline}
+  .lb-loading{text-align:center; font-family:var(--ff-mono); font-size:11px; color:var(--ink4); padding:10px 0}
   .xpline{font-family:var(--ff-mono); font-size:13px; letter-spacing:.04em; color:var(--orange);
           background:var(--orange-lt); border:1px solid #f6d8c8; border-radius:100px;
           padding:8px 18px; display:inline-block; margin-top:14px; font-weight:500}
@@ -389,12 +403,14 @@ function renderAlreadyPlayed(d){
       </div>
       <button class="btn" id="share">Share result</button>
       <button class="btn ghost" id="unlimited">Unlimited run · Pro</button>
+      <div id="lb-wrap"></div>
     </div>`;
   document.getElementById('share').onclick = ()=>{
     if(navigator.share){ navigator.share({text:shareTxt}); }
     else { navigator.clipboard.writeText(shareTxt); document.getElementById('share').textContent='Copied!'; }
   };
   document.getElementById('unlimited').onclick = startUnlimited;
+  loadLeaderboard();
 }
 
 function startRun(cfg){
@@ -616,12 +632,48 @@ async function gameOver(beat){
       <div class="stats">${statsHTML}</div>
       <button class="btn" id="share">Share result</button>
       ${actionHTML}
+      ${state.mode==='daily' ? '<div id="lb-wrap"></div>' : ''}
     </div>`;
   document.getElementById('share').onclick = ()=>{
     if(navigator.share){ navigator.share({text:shareTxt}); }
     else { navigator.clipboard.writeText(shareTxt); document.getElementById('share').textContent='Copied!'; }
   };
   document.getElementById('again').onclick = startUnlimited;
+  if(state.mode==='daily') loadLeaderboard();
+}
+
+// ── today's leaderboard (daily mode only) ────────────────────────────────
+async function loadLeaderboard(){
+  const wrap = document.getElementById('lb-wrap');
+  if(!wrap) return;
+  wrap.innerHTML = `<div class="lb-loading">Loading today's leaderboard…</div>`;
+  const res = await jfetch('/api/survival/leaderboard');
+  if(!res.ok){ wrap.innerHTML=''; return; }
+  renderLeaderboard(wrap, res.body, false);
+}
+function renderLeaderboard(wrap, data, full){
+  const shown = full ? data.entries : data.entries.slice(0,5);
+  const rows = shown.map(lbRowHTML).join('');
+  const youRow = (!full && data.you && !shown.some(e=>e.is_you)) ? `<div class="lb-sep">···</div>${lbRowHTML(data.you)}` : '';
+  const toggle = (!full && data.total_players > shown.length)
+    ? `<button class="lb-toggle" id="lb-toggle">See full leaderboard (${data.total_players})</button>` : '';
+  wrap.innerHTML = `<div class="lb-section">
+      <div class="lb-title">Today's Leaderboard</div>
+      ${rows}${youRow}${toggle}
+    </div>`;
+  if(toggle) document.getElementById('lb-toggle').onclick = ()=>renderLeaderboard(wrap, data, true);
+}
+function lbRowHTML(e){
+  const initial = e.display_name ? e.display_name.charAt(0).toUpperCase() : '?';
+  const avatar = e.avatar_url
+    ? `<img class="lb-avatar" src="${e.avatar_url}" alt="">`
+    : `<div class="lb-avatar lb-avatar-initial">${initial}</div>`;
+  return `<div class="lb-row ${e.is_you?'lb-you':''}">
+      <div class="lb-rank">${e.rank}</div>
+      ${avatar}
+      <div class="lb-name">${e.display_name}${e.is_you?' (you)':''}</div>
+      <div class="lb-score">${e.score}/${state.total}</div>
+    </div>`;
 }
 
 // ── unlimited: questions generated one at a time, on demand ─────────────────────

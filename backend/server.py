@@ -9910,6 +9910,33 @@ def survival_players():
     return jsonify({"players": survival_api.player_list(get_conn())})
 
 
+_LB_LIMIT = 50  # daily leaderboards: how many ranked rows we return (`you` is always included separately)
+
+
+@app.route("/api/survival/leaderboard")
+@login_required
+def survival_leaderboard():
+    """Today's global daily leaderboard, ranked by score (ties share a rank)."""
+    user  = current_user()
+    today = _survival_today().isoformat()
+    conn  = get_conn(); cur = conn.cursor()
+    cur.execute("""SELECT sr.user_id, sr.score, u.display_name, u.avatar_url
+                   FROM survival_results sr JOIN users u ON u.id = sr.user_id
+                   WHERE sr.mode = 'daily' AND sr.date = %s
+                   ORDER BY sr.score DESC, sr.created_at ASC""", (today,))
+    rows = cur.fetchall()
+    entries, you, prev_score, rank = [], None, None, 0
+    for i, r in enumerate(rows, start=1):
+        if r["score"] != prev_score:
+            rank, prev_score = i, r["score"]
+        entry = {"rank": rank, "user_id": r["user_id"], "display_name": r["display_name"],
+                  "avatar_url": r["avatar_url"], "score": r["score"], "is_you": r["user_id"] == user["id"]}
+        entries.append(entry)
+        if entry["is_you"]:
+            you = entry
+    return jsonify({"date": today, "total_players": len(rows), "entries": entries[:_LB_LIMIT], "you": you})
+
+
 # ── Poeltl: "guess the performance" ──────────────────────────────────────────
 def _poeltl_streak(cur, user_id):
     """Current consecutive-day SOLVED streak (a missed/failed day ends it)."""
@@ -10014,6 +10041,32 @@ def poeltl_unlimited():
         return jsonify({"error": "unavailable"}), 503
     r["players"] = survival_api.player_list(conn)
     return jsonify(r)
+
+
+@app.route("/api/poeltl/leaderboard")
+@login_required
+def poeltl_leaderboard():
+    """Today's global daily leaderboard: solved beats unsolved, then fewest guesses (ties share a rank)."""
+    user  = current_user()
+    today = _survival_today().isoformat()
+    conn  = get_conn(); cur = conn.cursor()
+    cur.execute("""SELECT pr.user_id, pr.solved, pr.guesses, u.display_name, u.avatar_url
+                   FROM poeltl_results pr JOIN users u ON u.id = pr.user_id
+                   WHERE pr.mode = 'daily' AND pr.date = %s
+                   ORDER BY pr.solved DESC, pr.guesses ASC, pr.created_at ASC""", (today,))
+    rows = cur.fetchall()
+    entries, you, prev_key, rank = [], None, None, 0
+    for i, r in enumerate(rows, start=1):
+        key = (r["solved"], r["guesses"])
+        if key != prev_key:
+            rank, prev_key = i, key
+        entry = {"rank": rank, "user_id": r["user_id"], "display_name": r["display_name"],
+                  "avatar_url": r["avatar_url"], "solved": r["solved"], "guesses": r["guesses"],
+                  "is_you": r["user_id"] == user["id"]}
+        entries.append(entry)
+        if entry["is_you"]:
+            you = entry
+    return jsonify({"date": today, "total_players": len(rows), "entries": entries[:_LB_LIMIT], "you": you})
 
 
 @app.route("/games")
