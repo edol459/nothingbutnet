@@ -3776,7 +3776,7 @@ _GAME_SEARCH_DATE_PATTERNS = [
 
 
 def _extract_game_search_date(q: str):
-    """Pull a date out of a free-text query. Returns (date_or_None, remaining_text)."""
+    """Pull a specific calendar date out of a free-text query. Returns (date_or_None, remaining_text)."""
     for pattern, fmts in _GAME_SEARCH_DATE_PATTERNS:
         m = _re.search(pattern, q, _re.IGNORECASE)
         if not m:
@@ -3793,54 +3793,122 @@ def _extract_game_search_date(q: str):
     return None, q
 
 
+def _extract_game_search_year(q: str):
+    """Pull a bare 4-digit year out of a free-text query (e.g. 'pacers 2025').
+    Only called when no full date matched, so this doesn't double-consume one."""
+    m = _re.search(r'\b(19\d{2}|20\d{2})\b', q)
+    if not m:
+        return None, q
+    remainder = (q[:m.start()] + " " + q[m.end():]).strip()
+    return int(m.group(1)), remainder
+
+
+# season_type keywords, checked longest/most-specific pattern first so
+# "play-in"/"playin" doesn't get swallowed by the "playoffs?" pattern.
+_SEASON_TYPE_KEYWORDS = [
+    (r'\bplay-?in\b',   "PlayIn"),
+    (r'\bplayoffs?\b',  "Playoffs"),
+]
+
+
+def _extract_game_search_season_type(q: str):
+    """Pull a 'playoffs' / 'play-in' keyword out of a free-text query."""
+    for pattern, season_type in _SEASON_TYPE_KEYWORDS:
+        m = _re.search(pattern, q, _re.IGNORECASE)
+        if m:
+            remainder = (q[:m.start()] + " " + q[m.end():]).strip()
+            return season_type, remainder
+    return None, q
+
+
+# Fan nicknames that aren't literal substrings of the official team_name
+# (e.g. "Cavaliers" doesn't contain "cavs"), unlike "Warriors"/"blazers"/
+# "wolves" etc. which already ILIKE-match their team_name directly.
+_TEAM_NICKNAME_ALIASES = {
+    "cavs":    "cavaliers",
+    "mavs":    "mavericks",
+    "sixers":  "76ers",
+    "niners":  "76ers",
+    "dubs":    "warriors",
+}
+
+
 @app.route("/api/games/search")
 def search_games():
-    """Free-text game lookup for the Explore search bar: matches team
-    name/abbr and/or a date found in the query. Only Final games (this is
-    for finding a game to read/rate, not tonight's schedule)."""
+    """Free-text game lookup for the Explore search bar. Matches:
+    - one or more teams by name/abbr, splitting on whitespace so a query like
+      "pacers pistons" resolves to two teams and is treated as a matchup
+      (both teams involved) rather than either team's games
+    - a specific date ("1/15/2025", "Dec 25 2025", ...) and/or a bare year
+      ("pacers 2025") as a season/year filter
+    - a "playoffs" / "play-in" keyword to filter to that season_type
+    Only Final games (this is for finding a game to read/rate, not tonight's
+    schedule)."""
     q = request.args.get("q", "").strip()
     if len(q) < 2:
         return jsonify({"games": []})
 
-    search_date, team_text = _extract_game_search_date(q)
-    team_text = team_text.strip()
+    search_date, remainder = _extract_game_search_date(q)
+    search_year = None
+    if not search_date:
+        search_year, remainder = _extract_game_search_year(remainder)
+    search_season_type, remainder = _extract_game_search_season_type(remainder)
+
+    tokens = [t for t in remainder.split() if len(t) >= 2]
 
     conn = get_conn(); cur = conn.cursor()
     try:
-        nba_abbrs, wnba_abbrs = [], []
-        if team_text:
-            pattern = f"%{team_text}%"
+        nba_abbrs, wnba_abbrs = set(), set()
+        for tok in tokens:
+            canonical = _TEAM_NICKNAME_ALIASES.get(tok.lower(), tok)
+            pattern = f"%{canonical}%"
             cur.execute("""
                 SELECT DISTINCT team_abbr, league FROM team_seasons
                 WHERE team_name ILIKE %s OR team_abbr ILIKE %s
             """, (pattern, pattern))
             for r in cur.fetchall():
                 if r["league"] == "wnba":
-                    wnba_abbrs.append(_WNBA_STANDINGS_TO_GAMES.get(r["team_abbr"], r["team_abbr"]))
+                    wnba_abbrs.add(_WNBA_STANDINGS_TO_GAMES.get(r["team_abbr"], r["team_abbr"]))
                 else:
-                    nba_abbrs.append(r["team_abbr"])
+                    nba_abbrs.add(r["team_abbr"])
 
-        if not nba_abbrs and not wnba_abbrs and not search_date:
+        if not nba_abbrs and not wnba_abbrs and not search_date and not search_year and not search_season_type:
             cur.close(); conn.close()
             return jsonify({"games": []})
 
         filters = ["g.status = 'Final'"]
         params = []
         # NBA/WNBA share some abbreviations (e.g. IND = Pacers/Fever), so a
-        # matched abbr must be tied to the league it was matched in, not
-        # applied across both.
-        if nba_abbrs or wnba_abbrs:
-            team_clauses = []
-            if nba_abbrs:
-                team_clauses.append("(g.league = 'nba' AND (g.home_team_abbr = ANY(%s) OR g.away_team_abbr = ANY(%s)))")
-                params += [nba_abbrs, nba_abbrs]
-            if wnba_abbrs:
-                team_clauses.append("(g.league = 'wnba' AND (g.home_team_abbr = ANY(%s) OR g.away_team_abbr = ANY(%s)))")
-                params += [wnba_abbrs, wnba_abbrs]
+        # matched abbr must be tied to the league it was matched in. When two+
+        # teams matched in a league, require both home AND away from that set
+        # (a matchup query) rather than OR (either team's full schedule).
+        team_clauses = []
+        for abbrs, league in ((sorted(nba_abbrs), "nba"), (sorted(wnba_abbrs), "wnba")):
+            if not abbrs:
+                continue
+            if len(abbrs) == 1:
+                team_clauses.append("(g.league = %s AND (g.home_team_abbr = ANY(%s) OR g.away_team_abbr = ANY(%s)))")
+            else:
+                team_clauses.append("(g.league = %s AND g.home_team_abbr = ANY(%s) AND g.away_team_abbr = ANY(%s))")
+            params += [league, abbrs, abbrs]
+        if team_clauses:
             filters.append(f"({' OR '.join(team_clauses)})")
+
         if search_date:
             filters.append("g.game_date = %s")
             params.append(search_date)
+        elif search_year:
+            # NBA seasons are labeled by their start year ("2024-25"; WNBA is
+            # just "2024"), but an NBA season's playoffs are played the
+            # following spring — so "2024" should match both games dated in
+            # calendar 2024 AND any game in the season starting in 2024
+            # (e.g. May 2025 playoff games from season "2024-25").
+            filters.append("(EXTRACT(YEAR FROM g.game_date) = %s OR g.season LIKE %s)")
+            params += [search_year, f"{search_year}%"]
+
+        if search_season_type:
+            filters.append("g.season_type = %s")
+            params.append(search_season_type)
 
         cur.execute(f"""
             SELECT g.* FROM games g
