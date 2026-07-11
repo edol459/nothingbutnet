@@ -3926,6 +3926,9 @@ def search_games():
     if len(q) < 2:
         return jsonify({"games": []})
 
+    limit  = min(int(request.args.get("limit", 10)), 50)
+    offset = int(request.args.get("offset", 0))
+
     search_date, remainder = _extract_game_search_date(q)
     search_year = None
     if not search_date:
@@ -3992,8 +3995,8 @@ def search_games():
             SELECT g.* FROM games g
             WHERE {' AND '.join(filters)}
             ORDER BY g.game_date DESC
-            LIMIT 15
-        """, params)
+            LIMIT %s OFFSET %s
+        """, params + [limit, offset])
         games = [_format_game(dict(r)) for r in cur.fetchall()]
         cur.close(); conn.close()
         return jsonify({"games": games})
