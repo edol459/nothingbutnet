@@ -2680,9 +2680,13 @@ def get_top_performers():
     else:
         actual_date = date
         raw_games = []
-        # DB-first for past dates (ScoreboardV3 is rate-limited on cloud IPs)
         _game_today = _compute_game_today()
         if date < _game_today:
+            # Past date: the DB is authoritative (the daily pipeline ingests every
+            # final game). If it has none, there were none — do NOT fall back to
+            # ScoreboardV3, which hits stats.nba.com and is BLOCKED on Railway's
+            # datacenter IP, hanging the full 30s timeout and stalling the scores
+            # page. See docs/cdn-akamai-bot-manager.md.
             try:
                 conn = get_conn(); cur = conn.cursor()
                 cur.execute("SELECT game_id FROM games WHERE game_date = %s AND status = 'Final'", (date,))
@@ -2690,14 +2694,17 @@ def get_top_performers():
                 cur.close(); conn.close()
             except Exception:
                 pass
-        if not raw_games:
+        else:
+            # Today/future explicitly requested — DB may not have live data yet,
+            # so best-effort ScoreboardV3, but with a short timeout so a blocked
+            # cloud IP fails fast instead of pinning a worker thread for 30s.
             try:
                 from nba_api.stats.endpoints import scoreboardv3
                 dt = _dt.strptime(date, "%Y-%m-%d")
                 board = scoreboardv3.ScoreboardV3(
                     game_date=dt.strftime("%Y-%m-%d"),
                     league_id="00",
-                    timeout=30,
+                    timeout=8,
                 )
                 gh_df = board.game_header.get_data_frame()
                 raw_games = [{"gameId": str(r.get("gameId", "") or r.get("GAME_ID", ""))}
