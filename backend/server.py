@@ -618,6 +618,29 @@ def _init_before_first_request():
     if not _os.path.exists(_SCHEMA_STAMP):
         _run_ensure_tables_once()
 
+# ── slow-request instrumentation ─────────────────────────────────
+# Logs any request the app spent >1s handling. Compare against the time the
+# client saw: if the client waited 30s but nothing is logged here, the time
+# went to queueing for a free gunicorn thread (thread starvation), not to
+# handler code. If a path IS logged here, that handler is the bottleneck.
+from flask import g as _g
+
+@app.before_request
+def _slowlog_start():
+    _g._t0 = _time.perf_counter()
+
+@app.after_request
+def _slowlog_end(resp):
+    try:
+        t0 = getattr(_g, "_t0", None)
+        if t0 is not None:
+            ms = (_time.perf_counter() - t0) * 1000
+            if ms > 1000:
+                print(f"[slow] {ms:.0f}ms {request.method} {request.full_path}", flush=True)
+    except Exception:
+        pass
+    return resp
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Ball Knowledge — XP / rank system
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
