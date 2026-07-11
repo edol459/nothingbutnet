@@ -5082,7 +5082,10 @@ def get_feed():
                 gl.description                       AS list_description,
                 {item_count_expr}                    AS list_item_count,
                 COALESCE(gl.list_type, 'games')      AS list_type,
-                COALESCE(gl.is_ranked, FALSE)        AS list_is_ranked
+                COALESCE(gl.is_ranked, FALSE)        AS list_is_ranked,
+                NULL::integer                        AS pts,
+                NULL::integer                        AS reb,
+                NULL::integer                        AS ast
             FROM game_lists gl
             JOIN users u ON gl.user_id = u.id
             {list_friends_join}
@@ -5125,7 +5128,10 @@ def get_feed():
                 NULL::text     AS list_description,
                 NULL::bigint   AS list_item_count,
                 NULL::text     AS list_type,
-                NULL::boolean  AS list_is_ranked
+                NULL::boolean  AS list_is_ranked,
+                NULL::integer  AS pts,
+                NULL::integer  AS reb,
+                NULL::integer  AS ast
             FROM game_reviews gr
             JOIN users u  ON gr.user_id = u.id
             JOIN games g  ON gr.game_id = g.game_id
@@ -5161,10 +5167,15 @@ def get_feed():
                 NULL::text     AS list_description,
                 NULL::bigint   AS list_item_count,
                 NULL::text     AS list_type,
-                NULL::boolean  AS list_is_ranked
+                NULL::boolean  AS list_is_ranked,
+                COALESCE(pgl.pts, wgs.pts)            AS pts,
+                COALESCE(pgl.reb, wgs.reb)            AS reb,
+                COALESCE(pgl.ast, wgs.ast)            AS ast
             FROM performance_reviews pr
             JOIN users u ON pr.user_id = u.id
             LEFT JOIN games g ON pr.game_id = g.game_id
+            LEFT JOIN player_gamelogs pgl ON pgl.game_id = pr.game_id AND pgl.player_id = pr.person_id
+            LEFT JOIN wnba_player_game_stats wgs ON wgs.game_id = pr.game_id AND wgs.player_id = pr.person_id
             {perf_friends_join}
             WHERE 1=1 {perf_block_where}
             {list_arm}
@@ -5295,7 +5306,10 @@ def get_user_activity(user_id):
                 g.home_score, g.away_score,
                 COUNT(rl.review_id)                  AS like_count,
                 {liked_by_me_col},
-                (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
+                (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count,
+                NULL::integer                         AS pts,
+                NULL::integer                         AS reb,
+                NULL::integer                         AS ast
             FROM game_reviews gr
             JOIN users u  ON gr.user_id = u.id
             JOIN games g  ON gr.game_id = g.game_id
@@ -5325,10 +5339,15 @@ def get_user_activity(user_id):
                 g.home_score, g.away_score,
                 0::bigint                            AS like_count,
                 FALSE                                AS liked_by_me,
-                0::bigint                            AS reply_count
+                0::bigint                            AS reply_count,
+                COALESCE(pgl.pts, wgs.pts)            AS pts,
+                COALESCE(pgl.reb, wgs.reb)            AS reb,
+                COALESCE(pgl.ast, wgs.ast)            AS ast
             FROM performance_reviews pr
             JOIN users u ON pr.user_id = u.id
             LEFT JOIN games g ON pr.game_id = g.game_id
+            LEFT JOIN player_gamelogs pgl ON pgl.game_id = pr.game_id AND pgl.player_id = pr.person_id
+            LEFT JOIN wnba_player_game_stats wgs ON wgs.game_id = pr.game_id AND wgs.player_id = pr.person_id
             WHERE pr.user_id = %s
         )
         SELECT * FROM combined
@@ -5408,6 +5427,9 @@ def _format_feed_rows(rows) -> list:
             "liked_by_me":        bool(d.get("liked_by_me", False)),
             "reply_count":        int(d.get("reply_count", 0)),
             "ball_knowledge_level": _xp_to_level(int(d.get("xp") or 0)),
+            "pts":                d.get("pts"),
+            "reb":                d.get("reb"),
+            "ast":                d.get("ast"),
         })
     return items
 
