@@ -588,7 +588,39 @@ def _ensure_tables():
     except Exception as e:
         print(f"[startup] _ensure_tables warning: {e}")
 
-_ensure_tables()
+# NOTE: _ensure_tables() is intentionally NOT called at module import time.
+#
+# Under gunicorn, multiple worker processes import this module in parallel.
+# If _ensure_tables() (which runs CREATE TABLE / CREATE INDEX / ALTER TABLE
+# statements) runs at import time in every worker simultaneously, the workers
+# can deadlock waiting on each other's table locks, freezing the whole app
+# before it ever binds to a port.
+#
+# Instead, table initialization is deferred to the first incoming request
+# (see _run_ensure_tables_once / _init_before_first_request below), guarded
+# by a lock so it only ever executes once regardless of how many workers or
+# threads are handling requests.
+_ensure_tables_lock = threading.Lock()
+_ensure_tables_done = False
+
+def _run_ensure_tables_once():
+    """Runs _ensure_tables() exactly once, safely, across all workers/threads."""
+    global _ensure_tables_done
+    if _ensure_tables_done:
+        return
+    with _ensure_tables_lock:
+        if _ensure_tables_done:
+            return
+        _ensure_tables()
+        _ensure_tables_done = True
+
+@app.before_request
+def _init_before_first_request():
+    """Lazily runs one-time table initialization on the first request instead
+    of at module import time, so gunicorn workers can start up instantly
+    without racing each other for table locks."""
+    if not _ensure_tables_done:
+        _run_ensure_tables_once()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Ball Knowledge — XP / rank system
