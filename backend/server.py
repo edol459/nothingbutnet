@@ -5197,6 +5197,60 @@ def get_feed():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/lists/browse — all public lists, not just friends' (cold discovery)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/lists/browse")
+def browse_lists():
+    limit  = min(int(request.args.get("limit", 20)), 100)
+    offset = int(request.args.get("offset", 0))
+    user      = current_user()
+    user_id   = user["id"] if user else None
+
+    item_count_expr = (
+        "(  (SELECT COUNT(*) FROM game_list_items   WHERE list_id = gl.id)"
+        " + (SELECT COUNT(*) FROM player_list_items WHERE list_id = gl.id)"
+        " + (SELECT COUNT(*) FROM jersey_list_items WHERE list_id = gl.id)"
+        " + (SELECT COUNT(*) FROM team_list_items   WHERE list_id = gl.id) )"
+    )
+    block_where  = ""
+    block_params = []
+    if user_id:
+        block_where  = "AND gl.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = %s)"
+        block_params = [user_id]
+
+    sql = f"""
+        SELECT
+            'list'::text                    AS type,
+            gl.id, gl.user_id, gl.created_at,
+            gl.title                        AS list_title,
+            gl.description                  AS list_description,
+            COALESCE(gl.list_type, 'games')  AS list_type,
+            COALESCE(gl.is_ranked, FALSE)    AS list_is_ranked,
+            u.display_name, u.avatar_url, u.favorite_team,
+            u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
+            {item_count_expr}                AS list_item_count
+        FROM game_lists gl
+        JOIN users u ON u.id = gl.user_id
+        WHERE gl.is_public = TRUE {block_where}
+          AND {item_count_expr} > 0
+        ORDER BY gl.created_at DESC
+        LIMIT %s OFFSET %s
+    """
+    params = block_params + [limit, offset]
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        items = [_format_list_feed_item(dict(r)) for r in rows]
+        return jsonify({"items": items, "has_more": len(rows) == limit})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # GET /api/users/<user_id>/activity — game + performance reviews for one user
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/users/<int:user_id>/activity")
@@ -5290,30 +5344,34 @@ def get_user_activity(user_id):
         return jsonify({"error": str(e)}), 500
 
 
+def _format_list_feed_item(d: dict) -> dict:
+    return {
+        "type":                 "list",
+        "id":                   d["id"],
+        "user_id":              d["user_id"],
+        "display_name":         d.get("display_name", ""),
+        "avatar_url":           d.get("avatar_url") or "",
+        "favorite_team":        d.get("favorite_team") or "",
+        "is_pro":               bool(d.get("is_pro", False)),
+        "xp":                   d.get("xp"),
+        "equipped_ring":        d.get("equipped_ring"),
+        "equipped_title":       d.get("equipped_title"),
+        "created_at":           str(d["created_at"]),
+        "list_title":           d.get("list_title"),
+        "list_description":     d.get("list_description"),
+        "list_item_count":      int(d.get("list_item_count") or 0),
+        "list_type":            d.get("list_type") or "games",
+        "list_is_ranked":       bool(d.get("list_is_ranked", False)),
+        "ball_knowledge_level": _xp_to_level(int(d.get("xp") or 0)),
+    }
+
+
 def _format_feed_rows(rows) -> list:
     items = []
     for r in rows:
         d = dict(r)
         if d["type"] == "list":
-            items.append({
-                "type":                 "list",
-                "id":                   d["id"],
-                "user_id":              d["user_id"],
-                "display_name":         d.get("display_name", ""),
-                "avatar_url":           d.get("avatar_url") or "",
-                "favorite_team":        d.get("favorite_team") or "",
-                "is_pro":               bool(d.get("is_pro", False)),
-                "xp":                   d.get("xp"),
-                "equipped_ring":        d.get("equipped_ring"),
-                "equipped_title":       d.get("equipped_title"),
-                "created_at":           str(d["created_at"]),
-                "list_title":           d.get("list_title"),
-                "list_description":     d.get("list_description"),
-                "list_item_count":      int(d.get("list_item_count") or 0),
-                "list_type":            d.get("list_type") or "games",
-                "list_is_ranked":       bool(d.get("list_is_ranked", False)),
-                "ball_knowledge_level": _xp_to_level(int(d.get("xp") or 0)),
-            })
+            items.append(_format_list_feed_item(d))
             continue
         items.append({
             "type":               d["type"],
