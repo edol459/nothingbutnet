@@ -591,11 +591,32 @@ def _ensure_tables():
     except Exception as e:
         print(f"[startup] _ensure_tables warning: {e}")
 
-# pg_advisory_xact_lock inside _ensure_tables() prevents concurrent workers
-# from deadlocking on DDL. The lock is transaction-scoped so it auto-releases
-# on commit. Worker 2 simply waits for Worker 1 to finish, then runs through
-# the IF NOT EXISTS no-ops in a fraction of a second.
-_ensure_tables()
+# _ensure_tables() runs lazily on the first request, guarded by a file stamp
+# in /tmp. The stamp persists across worker recycles (same container), so DDL
+# only runs once per deployment regardless of how many times workers restart.
+# pg_advisory_xact_lock inside _ensure_tables() handles the startup race
+# between concurrent workers without deadlocking.
+_SCHEMA_STAMP = '/tmp/_ydkball_schema_ready'
+_ensure_tables_lock = threading.Lock()
+
+def _run_ensure_tables_once():
+    import os as _os
+    if _os.path.exists(_SCHEMA_STAMP):
+        return
+    with _ensure_tables_lock:
+        if _os.path.exists(_SCHEMA_STAMP):
+            return
+        _ensure_tables()
+        try:
+            open(_SCHEMA_STAMP, 'w').close()
+        except Exception:
+            pass
+
+@app.before_request
+def _init_before_first_request():
+    import os as _os
+    if not _os.path.exists(_SCHEMA_STAMP):
+        _run_ensure_tables_once()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Ball Knowledge — XP / rank system
