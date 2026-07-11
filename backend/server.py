@@ -5189,7 +5189,10 @@ def get_feed():
         conn = get_conn()
         cur  = conn.cursor()
         cur.execute(sql, params)
-        rows = cur.fetchall()
+        rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            if r["type"] == "list":
+                r["cover_items"] = _list_cover_items(cur, r["id"], r["list_type"], r["list_is_ranked"])
         cur.close(); conn.close()
         return jsonify({"items": _format_feed_rows(rows), "has_more": len(rows) == limit})
     except Exception as e:
@@ -5242,9 +5245,11 @@ def browse_lists():
         conn = get_conn()
         cur  = conn.cursor()
         cur.execute(sql, params)
-        rows = cur.fetchall()
+        rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            r["cover_items"] = _list_cover_items(cur, r["id"], r["list_type"], r["list_is_ranked"])
         cur.close(); conn.close()
-        items = [_format_list_feed_item(dict(r)) for r in rows]
+        items = [_format_list_feed_item(r) for r in rows]
         return jsonify({"items": items, "has_more": len(rows) == limit})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -5363,6 +5368,7 @@ def _format_list_feed_item(d: dict) -> dict:
         "list_type":            d.get("list_type") or "games",
         "list_is_ranked":       bool(d.get("list_is_ranked", False)),
         "ball_knowledge_level": _xp_to_level(int(d.get("xp") or 0)),
+        "cover_items":          d.get("cover_items") or [],
     }
 
 
@@ -5804,7 +5810,50 @@ def _list_is_owner(list_id: int, user_id: int, cur) -> bool:
     return row is not None and row["user_id"] == user_id
 
 
-def _format_list(row: dict, game_count: int = 0) -> dict:
+def _list_cover_items(cur, list_id: int, list_type: str, is_ranked: bool, limit: int = 4) -> list:
+    """First few items of a list, shaped for a cover-art collage (not display rows).
+    Ordering mirrors _list_preview so covers and OG images agree on 'first'."""
+    items = []
+    if list_type == "games":
+        order = "gli.sort_order ASC NULLS LAST, gli.added_at DESC" if is_ranked else "gli.added_at DESC"
+        cur.execute(f"""
+            SELECT g.home_team_abbr, g.away_team_abbr, g.league
+            FROM game_list_items gli LEFT JOIN games g ON g.game_id = gli.game_id
+            WHERE gli.list_id = %s ORDER BY {order} LIMIT %s
+        """, (list_id, limit))
+        for r in cur.fetchall():
+            items.append({"kind": "game", "homeTeamAbbr": r.get("home_team_abbr"),
+                          "awayTeamAbbr": r.get("away_team_abbr"), "league": r.get("league") or "nba"})
+    elif list_type in ("players", "player_seasons"):
+        order = "sort_order ASC NULLS LAST, added_at ASC" if is_ranked else "added_at ASC"
+        cur.execute(f"""
+            SELECT player_id, player_name, team, league FROM player_list_items
+            WHERE list_id = %s ORDER BY {order} LIMIT %s
+        """, (list_id, limit))
+        for r in cur.fetchall():
+            items.append({"kind": "player", "playerId": r.get("player_id"), "playerName": r["player_name"],
+                          "team": r.get("team"), "league": r.get("league") or "nba"})
+    elif list_type in ("teams", "team_seasons"):
+        order = "sort_order ASC NULLS LAST, added_at ASC" if is_ranked else "added_at ASC"
+        cur.execute(f"""
+            SELECT team_abbr, team_name, league FROM team_list_items
+            WHERE list_id = %s ORDER BY {order} LIMIT %s
+        """, (list_id, limit))
+        for r in cur.fetchall():
+            items.append({"kind": "team", "team": r.get("team_abbr"), "teamName": r.get("team_name"),
+                          "league": r.get("league") or "nba"})
+    elif list_type == "jerseys":
+        order = "sort_order ASC NULLS LAST, added_at ASC" if is_ranked else "added_at ASC"
+        cur.execute(f"""
+            SELECT image_url, label FROM jersey_list_items
+            WHERE list_id = %s ORDER BY {order} LIMIT %s
+        """, (list_id, limit))
+        for r in cur.fetchall():
+            items.append({"kind": "jersey", "imageUrl": r.get("image_url"), "label": r.get("label")})
+    return items
+
+
+def _format_list(row: dict, game_count: int = 0, cover_items: list = None) -> dict:
     return {
         "id":          row["id"],
         "userId":      row["user_id"],
@@ -5815,6 +5864,7 @@ def _format_list(row: dict, game_count: int = 0) -> dict:
         "listType":    row.get("list_type", "games") or "games",
         "gameCount":   game_count,
         "createdAt":   str(row.get("created_at", "")),
+        "coverItems":  cover_items or [],
     }
 
 
@@ -5860,7 +5910,10 @@ def get_my_lists():
         GROUP BY gl.id
         ORDER BY gl.updated_at DESC
     """, (user["id"],))
-    lists = [_format_list(r, r["game_count"]) for r in cur.fetchall()]
+    rows = cur.fetchall()
+    lists = [_format_list(r, r["game_count"],
+                           _list_cover_items(cur, r["id"], r.get("list_type") or "games", bool(r.get("is_ranked"))))
+             for r in rows]
     cur.close(); conn.close()
     return jsonify({"lists": lists})
 
@@ -5886,7 +5939,10 @@ def get_user_lists(user_id):
             WHERE gl.user_id = %s AND gl.is_public = TRUE
             GROUP BY gl.id ORDER BY gl.updated_at DESC
         """, (user_id,))
-    lists = [_format_list(r, r["game_count"]) for r in cur.fetchall()]
+    rows = cur.fetchall()
+    lists = [_format_list(r, r["game_count"],
+                           _list_cover_items(cur, r["id"], r.get("list_type") or "games", bool(r.get("is_ranked"))))
+             for r in rows]
     cur.close(); conn.close()
     return jsonify({"lists": lists})
 
@@ -6501,7 +6557,9 @@ def add_player_to_list(list_id):
 @app.route("/api/lists/<int:list_id>/players/<int:item_id>", methods=["PATCH"])
 @login_required
 def update_player_item(list_id, item_id):
-    """Set the creator-attached stat tags on a player list item (snapshot strings)."""
+    """Set the creator-attached stat tags on a player list item (snapshot strings).
+    Stat tags need an explicit season to be unambiguous, so only player_seasons
+    lists (where every item already has a season) may set them."""
     user = current_user()
     body = request.get_json(force=True, silent=True) or {}
     stats = body.get("stats")
@@ -6509,9 +6567,14 @@ def update_player_item(list_id, item_id):
         return jsonify({"error": "stats must be an array"}), 400
     stats = [str(s)[:24] for s in stats][:3]   # cap: 3 tags, short strings
     conn = get_conn(); cur = conn.cursor()
-    if not _list_is_owner(list_id, user["id"], cur):
+    cur.execute("SELECT user_id, list_type FROM game_lists WHERE id = %s", (list_id,))
+    lst = cur.fetchone()
+    if not lst or lst["user_id"] != user["id"]:
         cur.close(); conn.close()
         return jsonify({"error": "not found"}), 404
+    if (lst.get("list_type") or "games") != "player_seasons":
+        cur.close(); conn.close()
+        return jsonify({"error": "stat tags require a player_seasons list"}), 400
     cur.execute("UPDATE player_list_items SET stats = %s WHERE id = %s AND list_id = %s",
                 (json.dumps(stats), item_id, list_id))
     cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))

@@ -47,16 +47,22 @@ body{font-family:var(--ff-sans);background:var(--paper);color:var(--ink);min-hei
 .btn.primary{background:var(--orange);border-color:var(--orange);color:#fff;}
 .btn.primary:hover{opacity:.9;}
 
-/* podium */
-.podium{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:22px;}
+/* podium — 2nd/1st/3rd medal order, #1 raised (matches the native app's podium) */
+.podium{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:22px;align-items:end;}
 .face{background:var(--paper);border:1px solid var(--rule);border-radius:12px;padding:22px 14px 18px;text-align:center;}
 .face .rnk{font-family:var(--ff-serif);font-size:40px;line-height:1;color:var(--orange);margin-bottom:12px;}
 .face .nm{font-size:16px;font-weight:600;color:var(--ink);line-height:1.2;}
 .face .mt{font-family:var(--ff-mono);font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink3);margin-top:4px;}
+.face.first{border-color:var(--orange);box-shadow:0 14px 32px rgba(0,0,0,.12);transform:translateY(-14px);padding:28px 14px 22px;}
+.face.first .rnk{font-size:52px;}
+.face.first .nm{font-size:18px;}
 .pic{width:92px;height:92px;border-radius:50%;border:2px solid var(--rule);margin:0 auto 12px;background:var(--paper3) center/cover no-repeat;background-position:top center;}
 .pic.contain{border-radius:12px;background-size:contain;background-position:center;border:1px solid var(--rule);}
+.face.first .pic{width:116px;height:116px;}
 .duo{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:12px;height:92px;}
 .duo .lg{width:52px;height:52px;background:center/contain no-repeat;}
+.face.first .duo{height:116px;}
+.face.first .duo .lg{width:64px;height:64px;}
 
 /* rows */
 .rows{list-style:none;border-top:1px solid var(--rule);}
@@ -83,6 +89,9 @@ body{font-family:var(--ff-sans);background:var(--paper);color:var(--ink);min-hei
   .card{padding:28px 20px 26px;} .title{font-size:30px;} .wrap{padding:20px 14px 80px;}
   .podium{gap:8px;} .pic{width:66px;height:66px;} .face{padding:16px 8px 14px;} .face .rnk{font-size:30px;}
   .face .nm{font-size:14px;} .duo{height:66px;} .duo .lg{width:38px;height:38px;}
+  .face.first{padding:20px 8px 18px;transform:translateY(-8px);}
+  .face.first .rnk{font-size:38px;} .face.first .pic{width:82px;height:82px;} .face.first .nm{font-size:15px;}
+  .face.first .duo{height:82px;} .face.first .duo .lg{width:46px;height:46px;}
 }
 </style>
 <link rel="stylesheet" href="/site-nav.css">
@@ -130,9 +139,11 @@ function shape(it, type){
   }
   if(type==='players'||type==='player_seasons'){
     const statLine=(it.stats&&it.stats.length)?it.stats.join(' · '):'';
-    const sub=[it.team,type==='player_seasons'?it.season:null].filter(Boolean).join(' · ');
+    const season=type==='player_seasons'?it.season:null;
+    const sub=[it.team,season].filter(Boolean).join(' · ');
+    const meta=statLine?[statLine,season].filter(Boolean).join(' · '):sub;
     return {picBig:picHead(it.playerId,lg), picRow:picHead(it.playerId,lg),
-      nameHtml:esc(it.playerName), meta:(statLine||sub), sub:sub,
+      nameHtml:esc(it.playerName), meta:meta, sub:sub,
       right: statLine?`<span class="stat">${esc(statLine)}</span>`:rlogo(it.team,lg)};
   }
   if(type==='teams'||type==='team_seasons'){
@@ -195,9 +206,15 @@ async function load(){
     const top = usePodium ? items.slice(0,3) : [];
     const rest = usePodium ? items.slice(3) : items;
 
-    const podiumHtml = usePodium ? `<div class="podium">${top.map((it,i)=>{
+    // 2nd–1st–3rd medal order, #1 raised — matches the native app's podium
+    const medalOrder = usePodium ? [
+      {it: top[1], rank: 2, first: false},
+      {it: top[0], rank: 1, first: true},
+      {it: top[2], rank: 3, first: false},
+    ] : [];
+    const podiumHtml = usePodium ? `<div class="podium">${medalOrder.map(({it,rank,first})=>{
       const s=shape(it,type);
-      return `<div class="face"><div class="rnk">${i+1}</div>${s.picBig}<div class="nm">${s.nameHtml}</div>${s.meta?`<div class="mt">${esc(s.meta)}</div>`:''}</div>`;
+      return `<div class="face${first?' first':''}"><div class="rnk">${rank}</div>${s.picBig}<div class="nm">${s.nameHtml}</div>${s.meta?`<div class="mt">${esc(s.meta)}</div>`:''}</div>`;
     }).join('')}</div>` : '';
 
     const rowsHtml = rest.length ? `<ul class="rows">${rest.map((it,i)=>{
