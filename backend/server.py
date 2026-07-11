@@ -219,6 +219,9 @@ def _ensure_tables():
     try:
         conn = get_conn()
         cur  = conn.cursor()
+        # DB-level lock so concurrent gunicorn workers queue here instead of deadlocking.
+        # pg_advisory_xact_lock is transaction-scoped and auto-released on conn.commit().
+        cur.execute("SELECT pg_advisory_xact_lock(191823)")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS review_likes (
                 user_id    INTEGER REFERENCES users(id)        ON DELETE CASCADE,
