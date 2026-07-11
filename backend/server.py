@@ -215,6 +215,22 @@ app.permanent_session_lifetime = timedelta(days=60)
 init_oauth(app)
 app.register_blueprint(auth_bp)
 
+_PERF_TABLE = """
+    CREATE TABLE IF NOT EXISTS performance_reviews (
+        id          SERIAL PRIMARY KEY,
+        game_id     TEXT    NOT NULL,
+        person_id   INTEGER NOT NULL,
+        user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        rating      INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 10),
+        player_name TEXT,
+        review_text TEXT,
+        created_at  TIMESTAMPTZ DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(user_id, game_id, person_id)
+    )
+"""
+_PERF_MIGRATE = "ALTER TABLE performance_reviews ADD COLUMN IF NOT EXISTS player_name TEXT"
+
 def _ensure_tables():
     try:
         conn = get_conn()
@@ -598,32 +614,18 @@ def _ensure_tables():
     except Exception as e:
         print(f"[startup] _ensure_tables warning: {e}")
 
-# _ensure_tables() runs lazily on the first request, guarded by a file stamp
-# in /tmp. The stamp persists across worker recycles (same container), so DDL
-# only runs once per deployment regardless of how many times workers restart.
-# pg_advisory_xact_lock inside _ensure_tables() handles the startup race
-# between concurrent workers without deadlocking.
-_SCHEMA_STAMP = '/tmp/_ydkball_schema_ready'
-_ensure_tables_lock = threading.Lock()
-
-def _run_ensure_tables_once():
-    import os as _os
-    if _os.path.exists(_SCHEMA_STAMP):
-        return
-    with _ensure_tables_lock:
-        if _os.path.exists(_SCHEMA_STAMP):
-            return
-        _ensure_tables()
-        try:
-            open(_SCHEMA_STAMP, 'w').close()
-        except Exception:
-            pass
-
-@app.before_request
-def _init_before_first_request():
-    import os as _os
-    if not _os.path.exists(_SCHEMA_STAMP):
-        _run_ensure_tables_once()
+# Schema init runs at worker boot (module import), NOT on the first user
+# request — with Railway's healthcheck gating the traffic switch, users never
+# see this delay. A /tmp stamp (keyed by deployment) makes worker recycles
+# skip it entirely, so DDL runs once per deployment. The pg_advisory_xact_lock
+# inside _ensure_tables() serializes the two workers racing at initial boot.
+_SCHEMA_STAMP = "/tmp/_ydkball_schema_ready_" + os.environ.get("RAILWAY_DEPLOYMENT_ID", "dev")
+if not os.path.exists(_SCHEMA_STAMP):
+    _ensure_tables()
+    try:
+        open(_SCHEMA_STAMP, "w").close()
+    except Exception:
+        pass
 
 # ── slow-request instrumentation ─────────────────────────────────
 # Logs any request the app spent >1s handling. Compare against the time the
@@ -4243,22 +4245,6 @@ def unwatch_game(game_id):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Performance reviews
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-_PERF_TABLE = """
-    CREATE TABLE IF NOT EXISTS performance_reviews (
-        id          SERIAL PRIMARY KEY,
-        game_id     TEXT    NOT NULL,
-        person_id   INTEGER NOT NULL,
-        user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        rating      INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 10),
-        player_name TEXT,
-        review_text TEXT,
-        created_at  TIMESTAMPTZ DEFAULT NOW(),
-        updated_at  TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE(user_id, game_id, person_id)
-    )
-"""
-_PERF_MIGRATE = "ALTER TABLE performance_reviews ADD COLUMN IF NOT EXISTS player_name TEXT"
 
 def _format_perf_review(r: dict) -> dict:
     return {
@@ -9143,6 +9129,16 @@ def _wnba_cdn_ingest_game_bg(game_id: str, home_abbr: str, away_abbr: str):
     if not str(game_id).startswith("10"):
         return  # ESPN game IDs — CDN boxscore not available
     try:
+        # Cross-process dedup: the in-memory set is per gunicorn worker, so
+        # check the DB before paying for a CDN fetch another worker already did.
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("SELECT 1 FROM wnba_player_game_stats WHERE game_id = %s LIMIT 1", (game_id,))
+        already = cur.fetchone() is not None
+        cur.close(); conn.close()
+        if already:
+            return
+
         url  = f"https://cdn.wnba.com/static/json/liveData/boxscore/boxscore_{game_id}.json"
         resp = _cdn_get(url, headers=_WNBA_CDN_HEADERS, timeout=12)
         resp.raise_for_status()
