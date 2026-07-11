@@ -109,7 +109,12 @@ class _PersistentConn:
 _tl = threading.local()
 
 import time as _time            # noqa: E402 — needed here; also imported later
-_CONN_MAX_AGE = 180.0          # recycle a thread-local connection after this long
+_CONN_MAX_AGE = 900.0          # recycle a thread-local connection after this long.
+                               # Kept high so connections stay warm between the
+                               # bursty app-open request fans — a fresh handshake
+                               # (esp. over a public DB proxy) costs 1-2s, and
+                               # get_conn already detects/replaces dead conns via
+                               # the rollback health-check + TCP keepalives.
 
 def _new_raw_conn():
     return psycopg2.connect(

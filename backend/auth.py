@@ -16,7 +16,7 @@ Usage in server.py:
 import os
 import secrets
 import requests as _requests
-from flask import Blueprint, redirect, url_for, session, jsonify, request
+from flask import Blueprint, redirect, url_for, session, jsonify, request, g
 from authlib.integrations.flask_client import OAuth
 from authlib.jose import JsonWebToken, JsonWebKey
 
@@ -106,14 +106,21 @@ def _get_user_from_mobile_token(token: str) -> dict | None:
 
 
 def current_user() -> dict | None:
-    """Return the user dict from the session or mobile Bearer token, or None."""
+    """Return the user dict from the session or mobile Bearer token, or None.
+
+    Memoized on flask.g for the duration of the request: login_required and the
+    handler both call this, and for Bearer-token (mobile) requests each call
+    otherwise hit the DB to resolve the token. Caching halves auth DB round
+    trips on every authenticated request."""
+    if "cached_current_user" in g:
+        return g.cached_current_user
     user = session.get("user")
-    if user:
-        return user
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        return _get_user_from_mobile_token(auth_header[7:].strip())
-    return None
+    if not user:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            user = _get_user_from_mobile_token(auth_header[7:].strip())
+    g.cached_current_user = user
+    return user
 
 
 def login_required(f):
