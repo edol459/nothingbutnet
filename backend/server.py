@@ -3763,6 +3763,90 @@ def get_games():
         return jsonify({"error": str(e)}), 500
 
 
+# Best-effort date extraction for free-text game search (no dateutil dep in
+# this repo — just try a handful of common formats against a regex match).
+_GAME_SEARCH_DATE_PATTERNS = [
+    (r'\d{4}-\d{1,2}-\d{1,2}',  ["%Y-%m-%d"]),
+    (r'\d{1,2}/\d{1,2}/\d{4}',  ["%m/%d/%Y"]),
+    (r'\d{1,2}/\d{1,2}/\d{2}\b', ["%m/%d/%y"]),
+    (r'\d{1,2}/\d{1,2}\b',      ["%m/%d"]),
+    (r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:,\s*\d{4}|\s+\d{4})?',
+     ["%B %d, %Y", "%B %d %Y", "%b %d, %Y", "%b %d %Y", "%B %d", "%b %d"]),
+]
+
+
+def _extract_game_search_date(q: str):
+    """Pull a date out of a free-text query. Returns (date_or_None, remaining_text)."""
+    for pattern, fmts in _GAME_SEARCH_DATE_PATTERNS:
+        m = _re.search(pattern, q, _re.IGNORECASE)
+        if not m:
+            continue
+        for fmt in fmts:
+            try:
+                parsed = _dt.strptime(m.group(0), fmt)
+            except ValueError:
+                continue
+            if parsed.year == 1900:   # strptime's placeholder when %Y/%y is absent
+                parsed = parsed.replace(year=date.today().year)
+            remainder = (q[:m.start()] + " " + q[m.end():]).strip()
+            return parsed.date(), remainder
+    return None, q
+
+
+@app.route("/api/games/search")
+def search_games():
+    """Free-text game lookup for the Explore search bar: matches team
+    name/abbr and/or a date found in the query. Only Final games (this is
+    for finding a game to read/rate, not tonight's schedule)."""
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify({"games": []})
+
+    search_date, team_text = _extract_game_search_date(q)
+    team_text = team_text.strip()
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        matched_abbrs = []
+        if team_text:
+            pattern = f"%{team_text}%"
+            cur.execute("""
+                SELECT DISTINCT team_abbr, league FROM team_seasons
+                WHERE team_name ILIKE %s OR team_abbr ILIKE %s
+            """, (pattern, pattern))
+            for r in cur.fetchall():
+                abbr = r["team_abbr"]
+                if r["league"] == "wnba":
+                    abbr = _WNBA_STANDINGS_TO_GAMES.get(abbr, abbr)
+                matched_abbrs.append(abbr)
+
+        if not matched_abbrs and not search_date:
+            cur.close(); conn.close()
+            return jsonify({"games": []})
+
+        filters = ["g.status = 'Final'"]
+        params = []
+        if matched_abbrs:
+            filters.append("(g.home_team_abbr = ANY(%s) OR g.away_team_abbr = ANY(%s))")
+            params += [matched_abbrs, matched_abbrs]
+        if search_date:
+            filters.append("g.game_date = %s")
+            params.append(search_date)
+
+        cur.execute(f"""
+            SELECT g.* FROM games g
+            WHERE {' AND '.join(filters)}
+            ORDER BY g.game_date DESC
+            LIMIT 15
+        """, params)
+        games = [_format_game(dict(r)) for r in cur.fetchall()]
+        cur.close(); conn.close()
+        return jsonify({"games": games})
+    except Exception as e:
+        cur.close(); conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # GET /api/games/<game_id>
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -6339,25 +6423,34 @@ def search_teams():
                     "losses":   r.get("losses"),
                 })
         else:
-            conditions = ["league = %s"]
-            params = [league]
-            if q:
-                conditions.append("(team_name ILIKE %s OR team_abbr ILIKE %s)")
-                params.extend([f"%{q}%", f"%{q}%"])
-            cur.execute(f"""
-                SELECT DISTINCT ON (team_abbr) team_abbr, team_name,
-                       MAX(season) OVER (PARTITION BY team_abbr) AS latest_season
-                FROM team_seasons
-                WHERE {' AND '.join(conditions)}
-                ORDER BY team_abbr, season DESC
-                LIMIT 60
-            """, params)
-            for r in cur.fetchall():
-                results.append({
+            def _teams_for(lg: str) -> list:
+                conditions = ["league = %s"]
+                params = [lg]
+                if q:
+                    conditions.append("(team_name ILIKE %s OR team_abbr ILIKE %s)")
+                    params.extend([f"%{q}%", f"%{q}%"])
+                cur.execute(f"""
+                    SELECT DISTINCT ON (team_abbr) team_abbr, team_name,
+                           MAX(season) OVER (PARTITION BY team_abbr) AS latest_season
+                    FROM team_seasons
+                    WHERE {' AND '.join(conditions)}
+                    ORDER BY team_abbr, season DESC
+                    LIMIT 60
+                """, params)
+                return [{
                     "teamAbbr":     r["team_abbr"],
                     "teamName":     r["team_name"],
                     "latestSeason": r.get("latest_season"),
-                })
+                    "league":       lg,
+                } for r in cur.fetchall()]
+
+            if league == "all":
+                nba, wnba = _teams_for("nba"), _teams_for("wnba")
+                for i in range(max(len(nba), len(wnba))):   # interleave so both leagues surface
+                    if i < len(nba):  results.append(nba[i])
+                    if i < len(wnba): results.append(wnba[i])
+            else:
+                results = _teams_for(league)
     except Exception as e:
         pass
     cur.close(); conn.close()
