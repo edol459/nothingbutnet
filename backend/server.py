@@ -586,6 +586,13 @@ def _ensure_tables():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_game_watches_user ON game_watches(user_id)")
+        # performance_reviews DDL (definitions live further down the module;
+        # resolved at call time since _ensure_tables runs on first request).
+        # This must ONLY run here: ALTER TABLE takes an ACCESS EXCLUSIVE lock
+        # even when the column already exists, so running it per-request made
+        # concurrent /api/feed calls queue on each other until statement_timeout.
+        cur.execute(_PERF_TABLE)
+        cur.execute(_PERF_MIGRATE)
         conn.commit()
         cur.close(); conn.close()
     except Exception as e:
@@ -4279,7 +4286,6 @@ def get_performance_reviews(game_id, person_id):
     try:
         conn = get_conn()
         cur  = conn.cursor()
-        cur.execute(_PERF_TABLE); cur.execute(_PERF_MIGRATE); conn.commit()
 
         cur.execute("""
             SELECT COUNT(*) AS review_count,
@@ -4337,7 +4343,6 @@ def get_performance_summary(game_id):
     try:
         conn = get_conn()
         cur  = conn.cursor()
-        cur.execute(_PERF_TABLE); cur.execute(_PERF_MIGRATE); conn.commit()
 
         cur.execute("""
             SELECT person_id,
@@ -4395,7 +4400,6 @@ def submit_performance_review(game_id, person_id):
     try:
         conn = get_conn()
         cur  = conn.cursor()
-        cur.execute(_PERF_TABLE); cur.execute(_PERF_MIGRATE); conn.commit()
         cur.execute("""
             INSERT INTO performance_reviews (user_id, game_id, person_id, rating, player_name, review_text)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -5171,7 +5175,6 @@ def get_feed():
     try:
         conn = get_conn()
         cur  = conn.cursor()
-        cur.execute(_PERF_TABLE); cur.execute(_PERF_MIGRATE); conn.commit()
         cur.execute(sql, params)
         rows = cur.fetchall()
         cur.close(); conn.close()
@@ -5266,7 +5269,6 @@ def get_user_activity(user_id):
     try:
         conn = get_conn()
         cur  = conn.cursor()
-        cur.execute(_PERF_TABLE); cur.execute(_PERF_MIGRATE); conn.commit()
         cur.execute(sql, params)
         rows = cur.fetchall()
         cur.close(); conn.close()
