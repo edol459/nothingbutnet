@@ -7016,11 +7016,13 @@ def team_profile(abbr):
         except Exception:
             conn.rollback()  # table not created yet
 
-        game_prefix = "game_id LIKE '10%%'" if league == "wnba" else "game_id NOT LIKE '10%%'"
-        cur.execute(f"""
+        # Filter by the league column, not a game_id prefix: recent WNBA games
+        # use ESPN-style ids (4017…) that don't start with '10', so the old
+        # heuristic leaked WNBA seasons onto NBA team pages (and vice-versa).
+        cur.execute("""
             SELECT DISTINCT season FROM games
-            WHERE (home_team_abbr = ANY(%s) OR away_team_abbr = ANY(%s)) AND {game_prefix}
-        """, (variants, variants))
+            WHERE (home_team_abbr = ANY(%s) OR away_team_abbr = ANY(%s)) AND league = %s
+        """, (variants, variants, league))
         game_seasons = [r["season"] for r in cur.fetchall()]
 
         seasons = sorted(set(stat_seasons) | set(game_seasons), reverse=True)
@@ -7078,17 +7080,16 @@ def team_profile(abbr):
                 })
 
         # Schedule / results for this season (crowd ratings included)
-        prefix_cond = "AND game_id LIKE '10%%'" if league == "wnba" else "AND game_id NOT LIKE '10%%'"
-        cur.execute(f"""
+        cur.execute("""
             SELECT game_id, game_date, season_type,
                    home_team_abbr, away_team_abbr, home_score, away_score,
                    status, bayesian_rating, review_count
             FROM games
             WHERE season = %s
               AND (home_team_abbr = ANY(%s) OR away_team_abbr = ANY(%s))
-              {prefix_cond}
+              AND league = %s
             ORDER BY game_date
-        """, (season, variants, variants))
+        """, (season, variants, variants, league))
         games = []
         for r in cur.fetchall():
             is_home = r["home_team_abbr"] in variants
@@ -11305,6 +11306,120 @@ def get_player_profile(person_id):
             "recentReviews":      recent_reviews,
             "followerCount":      follower_count,
             "isFollowing":        is_following,
+        })
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Full-season gamelogs  GET /api/players/<person_id>/gamelogs
+#   ?season=<s>&league=<nba|wnba>&sort=<key>
+# Powers the "See All" screen on a player profile: every game the
+# player played in one season, sorted. One player-season is bounded
+# (~82 reg + playoffs), so this is a small, single-table read.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Whitelist sort keys → ORDER BY clause. Never interpolate raw input.
+_GAMELOG_SORTS = {
+    "recent":   "game_date DESC",
+    "earliest": "game_date ASC",
+    "opponent": "opp_abbr ASC, game_date DESC",
+    "pts":      "pts DESC NULLS LAST, game_date DESC",
+    "reb":      "reb DESC NULLS LAST, game_date DESC",
+    "ast":      "ast DESC NULLS LAST, game_date DESC",
+    "fg3m":     "fg3m DESC NULLS LAST, game_date DESC",
+    "min":      "min DESC NULLS LAST, game_date DESC",
+}
+
+
+@app.route("/api/players/<int:person_id>/gamelogs")
+def get_player_gamelogs(person_id):
+    season  = request.args.get("season") or None
+    league  = request.args.get("league", "nba").lower()
+    is_wnba = league == "wnba"
+    sort    = request.args.get("sort", "recent").lower()
+    order_by = _GAMELOG_SORTS.get(sort, _GAMELOG_SORTS["recent"])
+
+    def _int(v): return int(round(float(v))) if v is not None else None
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+
+        # Resolve season: use given one if the player has games there, else newest.
+        if is_wnba:
+            cur.execute("""
+                SELECT DISTINCT season FROM wnba_player_game_stats
+                WHERE player_id = %s AND season IS NOT NULL ORDER BY season DESC
+            """, (person_id,))
+        else:
+            cur.execute("""
+                SELECT DISTINCT season FROM player_gamelogs
+                WHERE player_id = %s AND season IS NOT NULL ORDER BY season DESC
+            """, (person_id,))
+        seasons = [r["season"] for r in cur.fetchall()]
+        active_season = season if season in seasons else (seasons[0] if seasons else season)
+
+        if is_wnba:
+            cur.execute(f"""
+                SELECT g.game_id, gm.game_date,
+                       CASE WHEN gm.home_team_abbr = g.team THEN g.team || ' vs. ' || gm.away_team_abbr
+                            ELSE g.team || ' @ ' || gm.home_team_abbr END AS matchup,
+                       CASE WHEN gm.home_team_abbr = g.team THEN gm.away_team_abbr
+                            ELSE gm.home_team_abbr END AS opp_abbr,
+                       CASE WHEN gm.home_team_abbr = g.team THEN
+                                CASE WHEN gm.home_score > gm.away_score THEN 'W' ELSE 'L' END
+                            ELSE
+                                CASE WHEN gm.away_score > gm.home_score THEN 'W' ELSE 'L' END
+                       END AS wl,
+                       g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga, NULL::int AS min,
+                       COUNT(pr.id) AS rating_count,
+                       COALESCE(AVG(pr.rating::float), 0) AS avg_r
+                FROM wnba_player_game_stats g
+                LEFT JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
+                LEFT JOIN games gm ON gm.game_id = g.game_id
+                WHERE g.player_id = %s AND g.season = %s
+                GROUP BY g.game_id, gm.game_date, g.team, gm.home_team_abbr, gm.away_team_abbr,
+                         gm.home_score, gm.away_score, g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga
+                ORDER BY {order_by} NULLS LAST
+            """, (person_id, active_season))
+        else:
+            cur.execute(f"""
+                SELECT g.game_id, g.game_date, g.matchup, RIGHT(g.matchup, 3) AS opp_abbr, g.wl,
+                       g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga, g.min,
+                       COUNT(pr.id) AS rating_count,
+                       COALESCE(AVG(pr.rating::float), 0) AS avg_r
+                FROM player_gamelogs g
+                LEFT JOIN performance_reviews pr ON pr.game_id = g.game_id AND pr.person_id = g.player_id
+                WHERE g.player_id = %s AND g.season = %s
+                GROUP BY g.game_id, g.game_date, g.matchup, g.wl,
+                         g.pts, g.reb, g.ast, g.fg3m, g.fgm, g.fga, g.min
+                ORDER BY {order_by}
+            """, (person_id, active_season))
+
+        games = [
+            {
+                "gameId":      r["game_id"],
+                "gameDate":    str(r["game_date"])[:10] if r["game_date"] else None,
+                "matchup":     r["matchup"],
+                "wl":          r.get("wl"),
+                "pts":  _int(r["pts"]),  "reb":  _int(r["reb"]),  "ast":  _int(r["ast"]),
+                "fg3m": _int(r.get("fg3m")), "fgm": _int(r.get("fgm")), "fga": _int(r.get("fga")),
+                "min":  _int(r.get("min")),
+                "ratingCount": int(r["rating_count"]),
+                "avgStars":    round(r["avg_r"] / 2, 2) if int(r["rating_count"]) > 0 else None,
+            }
+            for r in cur.fetchall()
+        ]
+
+        cur.close(); conn.close()
+        return jsonify({
+            "season":     active_season,
+            "seasons":    seasons,
+            "sort":       sort if sort in _GAMELOG_SORTS else "recent",
+            "count":      len(games),
+            "games":      games,
         })
     except Exception as e:
         import traceback; traceback.print_exc()
