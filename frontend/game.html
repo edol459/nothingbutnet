@@ -370,6 +370,17 @@ table.box-table tfoot td:first-child{text-align:left;}
   font-family: var(--ff-mono); font-size: 11px; color: var(--ink3);
 }
 .attended-badge svg { width: 11px; height: 11px; flex-shrink: 0; }
+/* Mark-as-watched toggle (orange = action, per the app's colour system) */
+.btn-watch {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1.5px solid var(--rule); background: none; cursor: pointer;
+  color: var(--ink3); border-radius: 20px; padding: 7px 14px;
+  font-family: var(--ff-sans); font-size: 13px; font-weight: 600;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.btn-watch svg { width: 15px; height: 15px; }
+.btn-watch:hover { border-color: var(--ink3); color: var(--ink2); }
+.btn-watch.on { border-color: var(--orange); color: var(--orange); }
 /* Tag picker popover */
 .tag-picker {
   position: fixed; z-index: 9000; width: 272px;
@@ -1060,6 +1071,8 @@ let _reviewUser    = null;
 let _reviewUserLoaded = false;
 let _currentTags   = [];
 let _attended      = false;
+let _watched       = false;
+const _EYE_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`;
 let _boxscoreData  = null;
 let _pickerEl      = null;
 let _pickerPlayers = [];
@@ -1223,6 +1236,7 @@ function renderReviewsContent(g, reviews, hasMore) {
         <textarea class="review-write-textarea" id="review-textarea" placeholder="Write a review (optional)…"></textarea>
         <div class="write-tags-row" id="write-tags-row"></div>
         <div class="reviews-write-actions">
+          <button class="btn-watch${g.is_watched ? ' on' : ''}" id="btn-watch" type="button">${_EYE_SVG}<span id="btn-watch-label">${g.is_watched ? 'Watched' : 'Mark watched'}</span></button>
           <button class="btn-review-submit" id="btn-review-submit">Submit</button>
         </div>
       </div>`
@@ -1414,6 +1428,31 @@ function wireWriteSection() {
   // Submit
   const submitBtn = document.getElementById('btn-review-submit');
   if (submitBtn) submitBtn.addEventListener('click', submitReview);
+
+  // Watched toggle
+  const watchBtn = document.getElementById('btn-watch');
+  if (watchBtn) watchBtn.addEventListener('click', toggleWatch);
+}
+
+// ── Mark as watched ────────────────────────────────────────
+async function toggleWatch() {
+  const btn = document.getElementById('btn-watch');
+  if (!btn) return;
+  const label = document.getElementById('btn-watch-label');
+  const wasOn = btn.classList.contains('on');
+  // Optimistic flip
+  btn.classList.toggle('on', !wasOn);
+  if (label) label.textContent = !wasOn ? 'Watched' : 'Mark watched';
+  _watched = !wasOn;
+  try {
+    const r = await fetch(`/api/games/${GAME_ID}/watch`, { method: wasOn ? 'DELETE' : 'POST' });
+    if (!r.ok) throw new Error();
+  } catch(e) {
+    btn.classList.toggle('on', wasOn);
+    if (label) label.textContent = wasOn ? 'Watched' : 'Mark watched';
+    _watched = wasOn;
+    showReviewToast('Could not update watched status.');
+  }
 }
 
 // ── Star picker ───────────────────────────────────────────

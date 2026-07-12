@@ -4175,6 +4175,12 @@ def submit_review(game_id):
             WHERE game_id = %s
         """, (game_id, game_id, game_id))
 
+        # Rating a game implies you watched it — keep the diary invariant true.
+        cur.execute("""
+            INSERT INTO game_watches (user_id, game_id)
+            VALUES (%s, %s) ON CONFLICT DO NOTHING
+        """, (user["id"], game_id))
+
         # Invalidate scoreboard caches so home page reflects the new review
         cur.execute("SELECT game_date FROM games WHERE game_id = %s", (game_id,))
         date_row = cur.fetchone()
@@ -4428,6 +4434,11 @@ def submit_performance_review(game_id, person_id):
         cur.execute("SELECT avatar_url FROM users WHERE id = %s", (user["id"],))
         u = cur.fetchone()
         row["avatar_url"] = (u["avatar_url"] if u else None) or ""
+        # Rating a player's game implies you watched that game.
+        cur.execute("""
+            INSERT INTO game_watches (user_id, game_id)
+            VALUES (%s, %s) ON CONFLICT DO NOTHING
+        """, (user["id"], game_id))
         conn.commit(); cur.close(); conn.close()
         return jsonify({"review": _format_perf_review(row)}), 201
     except Exception as e:
@@ -5596,6 +5607,136 @@ def get_user_reviews(user_id):
                 "season_type":    d["season_type"],
             })
         return jsonify({"reviews": result, "total": total})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/users/<user_id>/games  — watch-based diary log
+# Every game the user marked watched, with a rating overlaid when present.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/users/<int:user_id>/games")
+def get_user_games(user_id):
+    limit       = min(int(request.args.get("limit", 20)), 100)
+    offset      = int(request.args.get("offset", 0))
+    sort        = request.args.get("sort", "date_desc")
+    log_filter  = request.args.get("filter", "all").lower().strip()
+    team        = request.args.get("team", "").strip()
+    season      = request.args.get("season", "").strip()
+    season_type = request.args.get("season_type", "").strip()
+    attended    = request.args.get("attended", "")
+
+    conditions = ["gw.user_id = %s"]
+    params: list = [user_id]
+
+    if log_filter == "rated":
+        conditions.append("gr.id IS NOT NULL")
+    elif log_filter == "reviewed":
+        conditions.append("gr.review_text IS NOT NULL AND gr.review_text <> ''")
+    if attended == "true":
+        conditions.append("gr.attended = TRUE")
+    if team:
+        conditions.append("(g.home_team_abbr = %s OR g.away_team_abbr = %s)")
+        params += [team, team]
+    if season:
+        conditions.append("g.season = %s")
+        params.append(season)
+    if season_type:
+        conditions.append("g.season_type = %s")
+        params.append(season_type)
+
+    where = " AND ".join(conditions)
+
+    # Unrated (watched-only) games have no rating; keep them last on rating sorts.
+    order_map = {
+        "date_desc":   "g.game_date DESC",
+        "date_asc":    "g.game_date ASC",
+        "logged_desc": "gw.created_at DESC",
+        "rating_desc": "gr.rating DESC NULLS LAST, g.game_date DESC",
+        "rating_asc":  "gr.rating ASC NULLS LAST, g.game_date DESC",
+    }
+    order = order_map.get(sort, "g.game_date DESC")
+
+    viewer    = current_user()
+    viewer_id = viewer["id"] if viewer else -1
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute(f"""
+            SELECT
+                gw.game_id, gw.created_at AS watched_at,
+                gr.id AS review_id, gr.rating, gr.review_text, gr.attended,
+                COALESCE(gr.tags, '[]'::jsonb) AS tags,
+                gr.created_at AS reviewed_at, gr.updated_at,
+                u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp,
+                u.equipped_ring, u.equipped_title,
+                g.game_date, g.home_team_abbr, g.away_team_abbr,
+                g.home_score, g.away_score, g.season, g.season_type,
+                (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count,
+                (SELECT COUNT(*) FROM review_likes  rl WHERE rl.review_id = gr.id) AS like_count,
+                EXISTS(SELECT 1 FROM review_likes rl WHERE rl.review_id = gr.id AND rl.user_id = %s) AS liked_by_me
+            FROM game_watches gw
+            JOIN users u ON u.id = gw.user_id
+            JOIN games g ON g.game_id = gw.game_id
+            LEFT JOIN game_reviews gr ON gr.user_id = gw.user_id AND gr.game_id = gw.game_id
+            WHERE {where}
+            ORDER BY {order}
+            LIMIT %s OFFSET %s
+        """, [viewer_id] + params + [limit, offset])
+        rows = cur.fetchall()
+        cur.execute(f"""
+            SELECT COUNT(*)
+            FROM game_watches gw
+            JOIN games g ON g.game_id = gw.game_id
+            LEFT JOIN game_reviews gr ON gr.user_id = gw.user_id AND gr.game_id = gw.game_id
+            WHERE {where}
+        """, params)
+        total = cur.fetchone()["count"]
+        cur.close(); conn.close()
+
+        result = []
+        for r in rows:
+            d = dict(r)
+            is_rated    = d["review_id"] is not None
+            is_reviewed = is_rated and bool((d.get("review_text") or "").strip())
+            entry = {
+                "game_id":        d["game_id"],
+                "watched_at":     str(d["watched_at"]),
+                "game_date":      str(d["game_date"]),
+                "home_team_abbr": d["home_team_abbr"],
+                "away_team_abbr": d["away_team_abbr"],
+                "home_score":     d["home_score"],
+                "away_score":     d["away_score"],
+                "season":         d["season"],
+                "season_type":    d["season_type"],
+                "display_name":   d.get("display_name", ""),
+                "avatar_url":     d.get("avatar_url") or "",
+                "favorite_team":  d.get("favorite_team") or "",
+                "is_pro":         bool(d.get("is_pro", False)),
+                "ball_knowledge_level": _xp_to_level(int(d.get("xp") or 0)),
+                "equipped_ring":  d.get("equipped_ring"),
+                "equipped_title": d.get("equipped_title"),
+                "is_rated":       is_rated,
+                "is_reviewed":    is_reviewed,
+                "user_id":        user_id,
+            }
+            if is_rated:
+                entry.update({
+                    "review_id":   d["review_id"],
+                    "rating":      d["rating"],
+                    "stars":       d["rating"] / 2,
+                    "review_text": d.get("review_text"),
+                    "attended":    bool(d.get("attended", False)),
+                    "tags":        d.get("tags") or [],
+                    "created_at":  str(d.get("reviewed_at", "")),
+                    "updated_at":  str(d.get("updated_at", "")),
+                    "like_count":  int(d.get("like_count", 0)),
+                    "liked_by_me": bool(d.get("liked_by_me", False)),
+                    "reply_count": int(d.get("reply_count", 0)),
+                })
+            result.append(entry)
+        return jsonify({"games": result, "total": total})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -7731,6 +7872,9 @@ def get_user_profile(user_id):
         """, (user_id,))
         stats = dict(cur.fetchone())
 
+        cur.execute("SELECT COUNT(*) AS n FROM game_watches WHERE user_id = %s", (user_id,))
+        games_watched = int(cur.fetchone()["n"] or 0)
+
         # Rating distribution (1–10 buckets → displayed as ½–5 stars)
         cur.execute("""
             SELECT rating, COUNT(*) AS cnt
@@ -7800,6 +7944,7 @@ def get_user_profile(user_id):
             },
             "stats": {
                 "total_reviews":   int(stats["total_reviews"] or 0),
+                "games_watched":   games_watched,
                 "avg_rating":      round(float(stats["avg_rating"] or 0) / 2, 2),
                 "five_star_count": int(stats["five_star_count"] or 0),
                 "half_star_count": int(stats["half_star_count"] or 0),

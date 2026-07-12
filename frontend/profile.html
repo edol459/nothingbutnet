@@ -198,6 +198,7 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .ri-text { font-size: 12.5px; color: var(--ink3); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ri-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
 .ri-stars { font-size: 14px; color: var(--green); letter-spacing: -1px; white-space: nowrap; }
+.ri-stars.ri-watched { font-size: 11px; color: var(--ink3); letter-spacing: 0; font-family: var(--ff-mono); }
 .ri-date { font-family: var(--ff-mono); font-size: 10px; color: var(--ink4); white-space: nowrap; }
 .btn-load-more { display: block; width: 100%; margin-top: 16px; padding: 10px; font-family: var(--ff-mono); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink3); background: none; border: 1px solid var(--rule); border-radius: 4px; cursor: pointer; transition: border-color 0.15s, color 0.15s; }
 .btn-load-more:hover { border-color: var(--orange); color: var(--orange); }
@@ -627,6 +628,7 @@ let pendingRequestCount = 0;  // incoming friend requests awaiting response
 let reviewTotal  = 0;
 
 // ── Game log filter state ─────────────────────────────────────
+let glFilter      = 'all';   // all | rated | reviewed
 let glSort        = 'date_desc';
 let glTeam        = '';
 let glSeason      = '';
@@ -801,6 +803,10 @@ function renderProfile() {
 
     <div class="stats-row">
       <div class="stat-block">
+        <div class="stat-val">${s.games_watched ?? 0}</div>
+        <div class="stat-lbl">Watched</div>
+      </div>
+      <div class="stat-block">
         <div class="stat-val">${s.total_reviews}</div>
         <div class="stat-lbl">Reviews</div>
       </div>
@@ -827,6 +833,11 @@ function renderProfile() {
 
     <div id="tab-reviews">
       <div class="game-log-filters" id="game-log-filters">
+        <select class="gl-select" id="gl-filter" onchange="applyGlFilters()">
+          <option value="all">All watched</option>
+          <option value="rated">Rated</option>
+          <option value="reviewed">Reviewed</option>
+        </select>
         <select class="gl-select" id="gl-sort" onchange="applyGlFilters()">
           <option value="date_desc">Date (newest)</option>
           <option value="date_asc">Date (oldest)</option>
@@ -896,6 +907,7 @@ function renderProfile() {
 
 // ── Game log filters ──────────────────────────────────────────
 function applyGlFilters() {
+  glFilter     = document.getElementById('gl-filter').value;
   glSort       = document.getElementById('gl-sort').value;
   glTeam       = document.getElementById('gl-team').value;
   glSeason     = document.getElementById('gl-season').value;
@@ -968,35 +980,50 @@ async function loadReviews(reset = false) {
   if (!container) return;
   if (reset) container.innerHTML = '<div class="loading-state">Loading…</div>';
 
-  const params = new URLSearchParams({ limit: 15, offset: reviewOffset, sort: glSort });
+  const params = new URLSearchParams({ limit: 15, offset: reviewOffset, sort: glSort, filter: glFilter });
   if (glTeam)       params.set('team', glTeam);
   if (glSeason)     params.set('season', glSeason);
   if (glSeasonType) params.set('season_type', glSeasonType);
   if (glAttended)   params.set('attended', 'true');
 
-  const res  = await fetch(`/api/users/${PROFILE_ID}/reviews?${params}`);
+  const res  = await fetch(`/api/users/${PROFILE_ID}/games?${params}`);
   const data = await res.json();
-  const reviews = data.reviews || [];
+  const games = data.games || [];
   reviewTotal = data.total || 0;
-  reviewOffset += reviews.length;
+  reviewOffset += games.length;
 
   if (reset) container.innerHTML = '';
 
   const countEl = document.getElementById('gl-filters-count');
   if (countEl) countEl.textContent = reviewTotal === 1 ? '1 game' : `${reviewTotal} games`;
 
-  if (reviews.length === 0 && reset) {
-    container.innerHTML = '<div class="empty-state">No reviews match these filters.</div>';
+  if (games.length === 0 && reset) {
+    container.innerHTML = '<div class="empty-state">No games match these filters.</div>';
     return;
   }
 
-  reviews.forEach(r => {
+  games.forEach(r => {
     const awayWin = r.away_score > r.home_score;
     const winner  = awayWin ? r.away_score : r.home_score;
     const loser   = awayWin ? r.home_score : r.away_score;
+    const rated   = !!r.is_rated;
     const div = document.createElement('div');
     div.className = 'review-item';
     div.onclick = () => window.location.href = `/game?gameId=${r.game_id}&tab=reviews`;
+    const actionsHtml = rated ? `
+        <button class="ri-reply-btn" data-review-id="${r.review_id}" title="Reply">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2 4h16v10H6l-4 4V4z"/></svg>
+          ${r.reply_count > 0 ? `<span>${r.reply_count}</span>` : ''}
+        </button>
+        <button class="ri-share-btn" title="Copy screenshot">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="9" width="14" height="9" rx="1.5"/><path d="M10 1v10M7 4l3-3 3 3"/></svg>
+        </button>` : '';
+    const starsSlot = rated
+      ? `<div class="ri-stars">${starsText(r.rating)}</div>`
+      : `<div class="ri-stars ri-watched">👁 Watched</div>`;
+    const replyRow = rated
+      ? `<div class="review-item-reply-row"><div class="ri-reply-section" id="ri-reply-section-${r.review_id}" data-review-id="${r.review_id}"></div></div>`
+      : '';
     div.innerHTML = `
       <div class="ri-logos">
         ${riLogo(r.away_team_abbr, r.game_id)}
@@ -1007,30 +1034,24 @@ async function loadReviews(reset = false) {
         <div class="ri-matchup">${r.away_team_abbr} @ ${r.home_team_abbr}</div>
         <div class="ri-meta"><b>${winner}</b>–${loser} · ${fmtDate(r.game_date)} · ${r.season}${r.attended ? ' · <span class="ri-attended">In person</span>' : ''}</div>
         ${r.review_text ? `<div class="ri-text">${r.review_text}</div>` : ''}
-        <button class="ri-reply-btn" data-review-id="${r.id}" title="Reply">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M2 4h16v10H6l-4 4V4z"/></svg>
-          ${r.reply_count > 0 ? `<span>${r.reply_count}</span>` : ''}
-        </button>
-        <button class="ri-share-btn" title="Copy screenshot">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="9" width="14" height="9" rx="1.5"/><path d="M10 1v10M7 4l3-3 3 3"/></svg>
-        </button>
+        ${actionsHtml}
       </div>
       <div class="ri-right">
-        <div class="ri-stars">${starsText(r.rating)}</div>
-        <div class="ri-date">${fmtShortDate(r.created_at)}</div>
+        ${starsSlot}
+        <div class="ri-date">${fmtShortDate(r.created_at || r.watched_at)}</div>
       </div>
-      <div class="review-item-reply-row">
-        <div class="ri-reply-section" id="ri-reply-section-${r.id}" data-review-id="${r.id}"></div>
-      </div>
+      ${replyRow}
     `;
-    div.querySelector('.ri-reply-btn').addEventListener('click', e => {
-      e.stopPropagation();
-      toggleProfileReplies(r.id);
-    });
-    div.querySelector('.ri-share-btn').addEventListener('click', e => {
-      e.stopPropagation();
-      shareProfileReview(div, e.currentTarget, r);
-    });
+    if (rated) {
+      div.querySelector('.ri-reply-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        toggleProfileReplies(r.review_id);
+      });
+      div.querySelector('.ri-share-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        shareProfileReview(div, e.currentTarget, r);
+      });
+    }
     container.appendChild(div);
   });
 
