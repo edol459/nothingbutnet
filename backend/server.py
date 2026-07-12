@@ -5289,6 +5289,7 @@ def get_feed():
 def browse_lists():
     limit  = min(int(request.args.get("limit", 20)), 100)
     offset = int(request.args.get("offset", 0))
+    sort   = request.args.get("sort", "popular").lower().strip()
     user      = current_user()
     user_id   = user["id"] if user else None
 
@@ -5298,11 +5299,17 @@ def browse_lists():
         " + (SELECT COUNT(*) FROM jersey_list_items WHERE list_id = gl.id)"
         " + (SELECT COUNT(*) FROM team_list_items   WHERE list_id = gl.id) )"
     )
+    like_count_expr = "(SELECT COUNT(*) FROM list_likes WHERE list_id = gl.id)"
     block_where  = ""
     block_params = []
     if user_id:
         block_where  = "AND gl.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = %s)"
         block_params = [user_id]
+
+    # "popular" ranks by like count (most-liked first), recency as tiebreaker;
+    # "recent" is the original recency-only ordering.
+    order_by = ("list_like_count DESC, gl.created_at DESC" if sort == "popular"
+                else "gl.created_at DESC")
 
     sql = f"""
         SELECT
@@ -5314,12 +5321,13 @@ def browse_lists():
             COALESCE(gl.is_ranked, FALSE)    AS list_is_ranked,
             u.display_name, u.avatar_url, u.favorite_team,
             u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
-            {item_count_expr}                AS list_item_count
+            {item_count_expr}                AS list_item_count,
+            {like_count_expr}                AS list_like_count
         FROM game_lists gl
         JOIN users u ON u.id = gl.user_id
         WHERE gl.is_public = TRUE {block_where}
           AND {item_count_expr} > 0
-        ORDER BY gl.created_at DESC
+        ORDER BY {order_by}
         LIMIT %s OFFSET %s
     """
     params = block_params + [limit, offset]
@@ -5456,6 +5464,7 @@ def _format_list_feed_item(d: dict) -> dict:
         "list_title":           d.get("list_title"),
         "list_description":     d.get("list_description"),
         "list_item_count":      int(d.get("list_item_count") or 0),
+        "list_like_count":      int(d.get("list_like_count") or 0),
         "list_type":            d.get("list_type") or "games",
         "list_is_ranked":       bool(d.get("list_is_ranked", False)),
         "ball_knowledge_level": _xp_to_level(int(d.get("xp") or 0)),
