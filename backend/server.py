@@ -4808,13 +4808,18 @@ def get_top_rated_games():
 def get_most_liked_reviews():
     limit   = min(int(request.args.get("limit", 20)), 100)
     offset  = int(request.args.get("offset", 0))
+    days    = request.args.get("days")
     user    = current_user()
     user_id = user["id"] if user else None
+
+    d_filter = "AND gr.created_at >= CURRENT_DATE - INTERVAL '%s days'" if days else ""
+    d_params = [int(days)] if days else []
+
     try:
         conn = get_conn()
         cur  = conn.cursor()
         if user_id:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT
                     gr.id, gr.game_id, gr.rating, gr.review_text,
                     gr.created_at, gr.updated_at,
@@ -4832,12 +4837,13 @@ def get_most_liked_reviews():
                 LEFT JOIN review_likes rl    ON rl.review_id    = gr.id
                 LEFT JOIN review_likes rl_me ON rl_me.review_id = gr.id
                                             AND rl_me.user_id   = %s
+                WHERE 1=1 {d_filter}
                 GROUP BY gr.id, u.id, g.game_id
                 ORDER BY like_count DESC, gr.created_at DESC
                 LIMIT %s OFFSET %s
-            """, (user_id, limit, offset))
+            """, [user_id] + d_params + [limit, offset])
         else:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT
                     gr.id, gr.game_id, gr.rating, gr.review_text,
                     gr.created_at, gr.updated_at,
@@ -4853,12 +4859,13 @@ def get_most_liked_reviews():
                 JOIN users u  ON gr.user_id = u.id
                 JOIN games g  ON gr.game_id = g.game_id
                 LEFT JOIN review_likes rl ON rl.review_id = gr.id
+                WHERE 1=1 {d_filter}
                 GROUP BY gr.id, u.id, g.game_id
                 ORDER BY like_count DESC, gr.created_at DESC
                 LIMIT %s OFFSET %s
-            """, (limit, offset))
+            """, d_params + [limit, offset])
         rows = cur.fetchall()
-        cur.execute("SELECT COUNT(*) FROM game_reviews")
+        cur.execute(f"SELECT COUNT(*) FROM game_reviews gr WHERE 1=1 {d_filter}", d_params)
         total = cur.fetchone()["count"]
         cur.close(); conn.close()
         result = []
@@ -4874,6 +4881,71 @@ def get_most_liked_reviews():
             })
         return jsonify({"reviews": result, "total": total,
                         "has_more": offset + len(result) < total})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/performances/top-rated
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/performances/top-rated")
+def get_top_rated_performances():
+    limit       = min(int(request.args.get("limit", 20)), 100)
+    offset      = int(request.args.get("offset", 0))
+    days        = request.args.get("days")
+    min_reviews = int(request.args.get("min_reviews", 1))
+
+    d_filter = "AND pr.created_at >= CURRENT_DATE - INTERVAL '%s days'" if days else ""
+    d_params = [int(days)] if days else []
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute(f"""
+            SELECT
+                pr.game_id, pr.person_id,
+                MAX(pr.player_name)                  AS player_name,
+                AVG(pr.rating)::float                 AS avg_rating,
+                COUNT(*)                              AS review_count,
+                g.game_date, g.league, g.home_team_abbr, g.away_team_abbr,
+                g.home_score, g.away_score,
+                COALESCE(MAX(pgl.pts), MAX(wgs.pts))  AS pts,
+                COALESCE(MAX(pgl.reb), MAX(wgs.reb))  AS reb,
+                COALESCE(MAX(pgl.ast), MAX(wgs.ast))  AS ast
+            FROM performance_reviews pr
+            LEFT JOIN games g ON pr.game_id = g.game_id
+            LEFT JOIN player_gamelogs pgl      ON pgl.game_id = pr.game_id AND pgl.player_id = pr.person_id
+            LEFT JOIN wnba_player_game_stats wgs ON wgs.game_id = pr.game_id AND wgs.player_id = pr.person_id
+            WHERE 1=1 {d_filter}
+            GROUP BY pr.game_id, pr.person_id, g.game_date, g.league,
+                     g.home_team_abbr, g.away_team_abbr, g.home_score, g.away_score
+            HAVING COUNT(*) >= %s
+            ORDER BY avg_rating DESC, review_count DESC
+            LIMIT %s OFFSET %s
+        """, d_params + [min_reviews, limit, offset])
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        result = []
+        for r in rows:
+            d = dict(r)
+            result.append({
+                "game_id":        d["game_id"],
+                "person_id":      d["person_id"],
+                "player_name":    d.get("player_name") or "",
+                "league":         d.get("league"),
+                "avg_rating":     round(d["avg_rating"], 2),
+                "stars":          round(d["avg_rating"] / 2, 1),
+                "review_count":   d["review_count"],
+                "game_date":      str(d["game_date"]) if d.get("game_date") else None,
+                "home_team_abbr": d.get("home_team_abbr"),
+                "away_team_abbr": d.get("away_team_abbr"),
+                "home_score":     d.get("home_score"),
+                "away_score":     d.get("away_score"),
+                "pts":            d.get("pts"),
+                "reb":            d.get("reb"),
+                "ast":            d.get("ast"),
+            })
+        return jsonify({"performances": result, "has_more": len(result) == limit})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
