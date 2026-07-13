@@ -115,7 +115,7 @@ body{font-family:var(--ff-sans);background:var(--paper);color:var(--ink);min-hei
 <script>
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2200);}
-const TYPES={games:'Games',players:'Players',player_seasons:'Player Seasons',teams:'Teams',team_seasons:'Team Seasons',jerseys:'Jerseys'};
+const TYPES={games:'Games',performances:'Performances',players:'Players',player_seasons:'Player Seasons',teams:'Teams',team_seasons:'Team Seasons',jerseys:'Jerseys'};
 const m=location.pathname.match(/\/lists?\/(\d+)/); const listId=m?m[1]:null;
 
 function bg(url){return url?`background-image:url('${url}')`:'';}
@@ -157,12 +157,21 @@ function shape(it, type){
     return {picBig:picJersey(it.imageUrl), picRow:picJersey(it.imageUrl),
       nameHtml:esc(it.label), meta:sub, sub:sub, right:''};
   }
+  if(type==='performances'){
+    const statLine=it.statLine||'';
+    const mk=(it.awayTeamAbbr&&it.homeTeamAbbr)?`${it.awayTeamAbbr} @ ${it.homeTeamAbbr}`:'';
+    const sub=[mk,it.gameDate].filter(Boolean).join(' · ');
+    return {picBig:picHead(it.personId,lg), picRow:picHead(it.personId,lg),
+      nameHtml:esc(it.playerName), meta:statLine||sub, sub:sub,
+      right: statLine?`<span class="stat">${esc(statLine)}</span>`:''};
+  }
   return {picBig:'',picRow:'',nameHtml:esc(it.name||''),meta:'',sub:'',right:''};
 }
 
 function itemsOf(list){
   const t=list.listType||'games';
   if(t==='games')return list.games||[];
+  if(t==='performances')return list.performanceItems||[];
   if(t==='players'||t==='player_seasons')return list.playerItems||[];
   if(t==='teams'||t==='team_seasons')return list.teamItems||[];
   if(t==='jerseys')return list.jerseyItems||[];

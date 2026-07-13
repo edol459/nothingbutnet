@@ -129,7 +129,7 @@ function imgLogo(abbr,league){const u=window.ydkTeamLogo&&ydkTeamLogo(abbr,leagu
 function imgHead(pid,league){const u=window.ydkHeadshot&&ydkHeadshot(pid,league);return u?`<img class="av" src="${u}" onerror="this.style.visibility='hidden'" alt="">`:'<span class="av"></span>';}
 function imgGame(it){const lg=it.league||'nba';return `<span class="duo">${imgLogo(it.awayTeamAbbr,lg)}${imgLogo(it.homeTeamAbbr,lg)}</span>`;}
 
-const TYPES={games:'Games',players:'Players',player_seasons:'Player Seasons',teams:'Teams',team_seasons:'Team Seasons',jerseys:'Jerseys'};
+const TYPES={games:'Games',performances:'Performances',players:'Players',player_seasons:'Player Seasons',teams:'Teams',team_seasons:'Team Seasons',jerseys:'Jerseys'};
 
 const CFG={
   games:{items:l=>l.games||[], idField:'gameId', add:addGamesUI, img:it=>imgGame(it),
@@ -137,6 +137,11 @@ const CFG={
     sub:it=>[it.gameDate,(it.awayScore!=null&&it.homeScore!=null)?`${it.awayScore}–${it.homeScore}`:''].filter(Boolean).join(' · '),
     rm:(lid,k)=>`/api/lists/${lid}/games/${k}`,
     reorder:(lid,ids)=>api(`/api/lists/${lid}/games/reorder`,{method:'PATCH',body:JSON.stringify({gameIds:ids})})},
+  performances:{items:l=>l.performanceItems||[], idField:'id', add:addPerformancesUI, img:it=>imgHead(it.personId,it.league),
+    name:it=>it.playerName,
+    sub:it=>[it.statLine, (it.awayTeamAbbr&&it.homeTeamAbbr)?`${it.awayTeamAbbr} @ ${it.homeTeamAbbr}`:'', it.gameDate].filter(Boolean).join(' · '),
+    rm:(lid,k)=>`/api/lists/${lid}/performances/${k}`,
+    reorder:(lid,ids)=>api(`/api/lists/${lid}/performances/reorder`,{method:'PATCH',body:JSON.stringify({itemIds:ids})})},
   players:{items:l=>l.playerItems||[], idField:'id', add:addPlayersUI, img:it=>imgHead(it.playerId,it.league),
     name:it=>it.playerName, sub:it=>it.team||'',
     rm:(lid,k)=>`/api/lists/${lid}/players/${k}`,
@@ -353,6 +358,13 @@ function addPlayersUI(list){
     search:async(q,lg)=>(await api(`/api/lists/players/search?q=${encodeURIComponent(q)}&type=${type}&league=${lg}`)).players,
     row:(p,lg)=>`${imgHead(p.playerId,lg)}<div class="grow"><b>${esc(p.playerName)}</b> <span class="muted">${esc([p.team,type==='player_seasons'?p.season:null].filter(Boolean).join(' · '))}</span></div>`,
     add:(p,lg)=>api(`/api/lists/${list.id}/players`,{method:'POST',body:JSON.stringify({playerId:p.playerId,playerName:p.playerName,team:p.team,season:p.season,league:lg})}) });
+}
+function addPerformancesUI(list){
+  // Source: performances YOU'VE rated (all leagues). League shows via the matchup.
+  searchAdd(list,CFG.performances,{ placeholder:'Search performances you’ve rated…', minLen:0, immediate:true,
+    search:async(q)=>(await api(`/api/lists/performances/search?q=${encodeURIComponent(q)}`)).performances,
+    row:p=>`${imgHead(p.personId,p.league)}<div class="grow"><b>${esc(p.playerName)}</b> <span class="muted">${esc([p.statLine,(p.awayTeamAbbr&&p.homeTeamAbbr)?`${p.awayTeamAbbr} @ ${p.homeTeamAbbr}`:'',p.gameDate].filter(Boolean).join(' · '))}</span></div>`,
+    add:p=>api(`/api/lists/${list.id}/performances`,{method:'POST',body:JSON.stringify({gameId:p.gameId,personId:p.personId,playerName:p.playerName,league:p.league})}) });
 }
 function addTeamsUI(list){
   const type=list.listType;

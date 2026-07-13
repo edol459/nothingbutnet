@@ -268,6 +268,19 @@ def _ensure_tables():
             )
         """)
         cur.execute("""
+            CREATE TABLE IF NOT EXISTS favorite_players (
+                user_id     INTEGER  REFERENCES users(id) ON DELETE CASCADE,
+                person_id   INTEGER  NOT NULL,
+                player_name TEXT     NOT NULL,
+                team        TEXT,
+                league      TEXT     NOT NULL DEFAULT 'nba',
+                position    SMALLINT NOT NULL CHECK (position BETWEEN 1 AND 4),
+                created_at  TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (user_id, person_id),
+                UNIQUE (user_id, position)
+            )
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS review_replies (
                 id          SERIAL  PRIMARY KEY,
                 review_id   INTEGER REFERENCES game_reviews(id) ON DELETE CASCADE,
@@ -415,6 +428,22 @@ def _ensure_tables():
         """)
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_team_list_items_list_id ON team_list_items(list_id)
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS performance_list_items (
+                id          SERIAL PRIMARY KEY,
+                list_id     INTEGER REFERENCES game_lists(id) ON DELETE CASCADE,
+                game_id     TEXT    NOT NULL,
+                person_id   INTEGER NOT NULL,
+                player_name TEXT    NOT NULL,
+                league      TEXT    NOT NULL DEFAULT 'nba',
+                sort_order  INTEGER,
+                added_at    TIMESTAMP DEFAULT NOW(),
+                UNIQUE (list_id, game_id, person_id)
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_perf_list_items_list_id ON performance_list_items(list_id)
         """)
         cur.execute("""
             ALTER TABLE games ADD COLUMN IF NOT EXISTS league TEXT NOT NULL DEFAULT 'nba'
@@ -5308,6 +5337,7 @@ def browse_lists():
         "(  (SELECT COUNT(*) FROM game_list_items   WHERE list_id = gl.id)"
         " + (SELECT COUNT(*) FROM player_list_items WHERE list_id = gl.id)"
         " + (SELECT COUNT(*) FROM jersey_list_items WHERE list_id = gl.id)"
+        " + (SELECT COUNT(*) FROM performance_list_items WHERE list_id = gl.id)"
         " + (SELECT COUNT(*) FROM team_list_items   WHERE list_id = gl.id) )"
     )
     like_count_expr = "(SELECT COUNT(*) FROM list_likes WHERE list_id = gl.id)"
@@ -6054,6 +6084,57 @@ def _list_is_owner(list_id: int, user_id: int, cur) -> bool:
     return row is not None and row["user_id"] == user_id
 
 
+def _perf_stat_line(d: dict) -> str:
+    """"73 PTS · 10 REB · 7 AST" from a row carrying pts/reb/ast (any may be None)."""
+    parts = []
+    for col, lbl in (("pts", "PTS"), ("reb", "REB"), ("ast", "AST")):
+        v = d.get(col)
+        if v is not None:
+            parts.append(f"{int(round(float(v)))} {lbl}")
+    return " · ".join(parts)
+
+
+def _fetch_perf_items(cur, list_id: int, ranked: bool) -> list:
+    """Performance list items, enriched with the box-score stat line + game context.
+    Stats come from player_gamelogs (NBA) / wnba_player_game_stats (WNBA)."""
+    order = "pli.sort_order ASC NULLS LAST, pli.added_at ASC" if ranked else "pli.added_at ASC"
+    cur.execute(f"""
+        SELECT pli.id, pli.game_id, pli.person_id, pli.player_name, pli.league,
+               pli.sort_order, pli.added_at,
+               g.game_date, g.home_team_abbr, g.away_team_abbr, g.home_score, g.away_score,
+               COALESCE(pgl.pts, wgs.pts) AS pts,
+               COALESCE(pgl.reb, wgs.reb) AS reb,
+               COALESCE(pgl.ast, wgs.ast) AS ast
+        FROM performance_list_items pli
+        LEFT JOIN games g ON g.game_id = pli.game_id
+        LEFT JOIN player_gamelogs pgl        ON pgl.game_id = pli.game_id AND pgl.player_id = pli.person_id
+        LEFT JOIN wnba_player_game_stats wgs ON wgs.game_id = pli.game_id AND wgs.player_id = pli.person_id
+        WHERE pli.list_id = %s ORDER BY {order}
+    """, (list_id,))
+    items = []
+    for r in cur.fetchall():
+        d = dict(r)
+        items.append({
+            "id":           d["id"],
+            "gameId":       d["game_id"],
+            "personId":     d["person_id"],
+            "playerName":   d.get("player_name") or "",
+            "league":       d.get("league") or "nba",
+            "sortOrder":    d.get("sort_order"),
+            "addedAt":      str(d["added_at"]),
+            "gameDate":     str(d["game_date"]) if d.get("game_date") else None,
+            "homeTeamAbbr": d.get("home_team_abbr"),
+            "awayTeamAbbr": d.get("away_team_abbr"),
+            "homeScore":    d.get("home_score"),
+            "awayScore":    d.get("away_score"),
+            "pts":          d.get("pts"),
+            "reb":          d.get("reb"),
+            "ast":          d.get("ast"),
+            "statLine":     _perf_stat_line(d),
+        })
+    return items
+
+
 def _list_cover_items(cur, list_id: int, list_type: str, is_ranked: bool, limit: int = 4) -> list:
     """First few items of a list, shaped for a cover-art collage (not display rows).
     Ordering mirrors _list_preview so covers and OG images agree on 'first'."""
@@ -6094,6 +6175,18 @@ def _list_cover_items(cur, list_id: int, list_type: str, is_ranked: bool, limit:
         """, (list_id, limit))
         for r in cur.fetchall():
             items.append({"kind": "jersey", "imageUrl": r.get("image_url"), "label": r.get("label")})
+    elif list_type == "performances":
+        order = "pli.sort_order ASC NULLS LAST, pli.added_at ASC" if is_ranked else "pli.added_at ASC"
+        cur.execute(f"""
+            SELECT pli.person_id, pli.player_name, pli.league,
+                   g.home_team_abbr, g.away_team_abbr
+            FROM performance_list_items pli LEFT JOIN games g ON g.game_id = pli.game_id
+            WHERE pli.list_id = %s ORDER BY {order} LIMIT %s
+        """, (list_id, limit))
+        for r in cur.fetchall():
+            items.append({"kind": "performance", "personId": r.get("person_id"),
+                          "playerName": r["player_name"], "league": r.get("league") or "nba",
+                          "homeTeamAbbr": r.get("home_team_abbr"), "awayTeamAbbr": r.get("away_team_abbr")})
     return items
 
 
@@ -6205,7 +6298,7 @@ def create_list():
     desc      = (body.get("description") or "").strip() or None
     is_ranked = bool(body.get("isRanked", False))
     list_type = (body.get("listType") or "games").strip()
-    if list_type not in ("games", "players", "player_seasons", "jerseys", "teams", "team_seasons"):
+    if list_type not in ("games", "players", "player_seasons", "jerseys", "teams", "team_seasons", "performances"):
         list_type = "games"
     conn = get_conn(); cur = conn.cursor()
     cur.execute("""
@@ -6325,6 +6418,11 @@ def get_list_detail(list_id):
                 "league":    r.get("league") or "nba",
             })
 
+    # Fetch performance items (for performances lists)
+    performance_items = []
+    if list_type == "performances":
+        performance_items = _fetch_perf_items(cur, list_id, bool(lst.get("is_ranked")))
+
     # ── Social: likes + comment count ──
     cur.execute(_LIST_SOCIAL_TABLES); conn.commit()
     cur.execute("SELECT COUNT(*) AS n FROM list_likes WHERE list_id = %s", (list_id,))
@@ -6344,6 +6442,7 @@ def get_list_detail(list_id):
     result["playerItems"] = player_items
     result["jerseyItems"] = jersey_items
     result["teamItems"] = team_items
+    result["performanceItems"] = performance_items
     result["likeCount"] = like_count
     result["likedByMe"] = liked_by_me
     result["commentCount"] = comment_count
@@ -6495,6 +6594,16 @@ def _list_preview(cur, list_id: int, lst: dict):
         cur.execute(f"""SELECT label FROM jersey_list_items
                         WHERE list_id=%s ORDER BY {order} LIMIT 6""", (list_id,))
         labels = [r["label"] for r in cur.fetchall()]
+    elif lt == "performances":
+        cur.execute("SELECT COUNT(*) AS n FROM performance_list_items WHERE list_id=%s", (list_id,))
+        total = cur.fetchone()["n"]
+        order = "sort_order ASC NULLS LAST, added_at ASC" if ranked else "added_at ASC"
+        cur.execute(f"""SELECT pli.player_name, g.away_team_abbr AS a, g.home_team_abbr AS h
+                        FROM performance_list_items pli LEFT JOIN games g ON g.game_id=pli.game_id
+                        WHERE pli.list_id=%s ORDER BY {order} LIMIT 6""", (list_id,))
+        for r in cur.fetchall():
+            mk = f"{r['a'] or '?'} @ {r['h'] or '?'}"
+            labels.append(f"{r['player_name']}  ·  {mk}")
     return labels, total
 
 
@@ -6895,6 +7004,132 @@ def reorder_player_items(list_id):
         return jsonify({"error": "not found"}), 404
     for i, iid in enumerate(item_ids):
         cur.execute("UPDATE player_list_items SET sort_order=%s WHERE id=%s AND list_id=%s",
+                    (i + 1, iid, list_id))
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True})
+
+
+# ━━━ Performance list items ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# A "performance" = one player's box score in one game. The pickable source is
+# the current user's own rated performances (performance_reviews), mirroring how
+# favorite games are chosen from games you've reviewed.
+
+@app.route("/api/lists/performances/search")
+@login_required
+def search_list_performances():
+    user   = current_user()
+    q      = (request.args.get("q") or "").strip()
+    league = (request.args.get("league") or "").strip().lower()
+    conn = get_conn(); cur = conn.cursor()
+    where  = "pr.user_id = %s"
+    params = [user["id"]]
+    if q:
+        where += " AND pr.player_name ILIKE %s"; params.append(f"%{q}%")
+    if league in ("nba", "wnba"):
+        where += " AND g.league = %s"; params.append(league)
+    cur.execute(f"""
+        SELECT pr.game_id, pr.person_id,
+               MAX(pr.player_name)                  AS player_name,
+               MAX(pr.rating)                       AS my_rating,
+               g.game_date, g.league, g.home_team_abbr, g.away_team_abbr,
+               g.home_score, g.away_score,
+               COALESCE(MAX(pgl.pts), MAX(wgs.pts)) AS pts,
+               COALESCE(MAX(pgl.reb), MAX(wgs.reb)) AS reb,
+               COALESCE(MAX(pgl.ast), MAX(wgs.ast)) AS ast
+        FROM performance_reviews pr
+        LEFT JOIN games g ON g.game_id = pr.game_id
+        LEFT JOIN player_gamelogs pgl        ON pgl.game_id = pr.game_id AND pgl.player_id = pr.person_id
+        LEFT JOIN wnba_player_game_stats wgs ON wgs.game_id = pr.game_id AND wgs.player_id = pr.person_id
+        WHERE {where}
+        GROUP BY pr.game_id, pr.person_id, g.game_date, g.league,
+                 g.home_team_abbr, g.away_team_abbr, g.home_score, g.away_score
+        ORDER BY MAX(pr.created_at) DESC
+        LIMIT 40
+    """, params)
+    perfs = []
+    for r in cur.fetchall():
+        d = dict(r)
+        perfs.append({
+            "gameId":       d["game_id"],
+            "personId":     d["person_id"],
+            "playerName":   d.get("player_name") or "",
+            "league":       d.get("league") or "nba",
+            "gameDate":     str(d["game_date"]) if d.get("game_date") else None,
+            "homeTeamAbbr": d.get("home_team_abbr"),
+            "awayTeamAbbr": d.get("away_team_abbr"),
+            "homeScore":    d.get("home_score"),
+            "awayScore":    d.get("away_score"),
+            "pts":          d.get("pts"), "reb": d.get("reb"), "ast": d.get("ast"),
+            "statLine":     _perf_stat_line(d),
+            "myRating":     d.get("my_rating"),
+        })
+    cur.close(); conn.close()
+    return jsonify({"performances": perfs})
+
+
+@app.route("/api/lists/<int:list_id>/performances", methods=["POST"])
+@login_required
+def add_performance_to_list(list_id):
+    user        = current_user()
+    body        = request.get_json(force=True, silent=True) or {}
+    game_id     = (body.get("gameId") or "").strip()
+    person_id   = body.get("personId")
+    player_name = (body.get("playerName") or "").strip()
+    league      = (body.get("league") or "nba").strip().lower()
+    if not game_id or person_id is None or not player_name:
+        return jsonify({"error": "gameId, personId and playerName are required"}), 400
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    cur.execute("SELECT is_ranked FROM game_lists WHERE id = %s", (list_id,))
+    lst_row    = cur.fetchone()
+    ranked     = bool(lst_row and lst_row["is_ranked"])
+    sort_order = None
+    if ranked:
+        cur.execute("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM performance_list_items WHERE list_id=%s", (list_id,))
+        sort_order = cur.fetchone()["n"]
+    cur.execute("""
+        INSERT INTO performance_list_items (list_id, game_id, person_id, player_name, league, sort_order)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON CONFLICT (list_id, game_id, person_id) DO NOTHING
+    """, (list_id, game_id, int(person_id), player_name, league, sort_order))
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit()
+    items = _fetch_perf_items(cur, list_id, ranked)
+    cur.close(); conn.close()
+    return jsonify({"ok": True, "items": items}), 201
+
+
+@app.route("/api/lists/<int:list_id>/performances/<int:item_id>", methods=["DELETE"])
+@login_required
+def remove_performance_from_list(list_id, item_id):
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    cur.execute("DELETE FROM performance_list_items WHERE id = %s AND list_id = %s", (item_id, list_id))
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/lists/<int:list_id>/performances/reorder", methods=["PATCH"])
+@login_required
+def reorder_performance_items(list_id):
+    user     = current_user()
+    body     = request.get_json(force=True, silent=True) or {}
+    item_ids = body.get("itemIds", [])
+    if not isinstance(item_ids, list):
+        return jsonify({"error": "itemIds must be an array"}), 400
+    conn = get_conn(); cur = conn.cursor()
+    if not _list_is_owner(list_id, user["id"], cur):
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    for i, iid in enumerate(item_ids):
+        cur.execute("UPDATE performance_list_items SET sort_order=%s WHERE id=%s AND list_id=%s",
                     (i + 1, iid, list_id))
     cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
     conn.commit(); cur.close(); conn.close()
@@ -7699,6 +7934,61 @@ def remove_favorite(game_id):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PUT /api/me/favorite-players  — pin a player at a position (1–4)
+# The pinned identity element on the profile. NBA or WNBA.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/me/favorite-players", methods=["PUT"])
+@login_required
+def set_favorite_player():
+    me   = current_user()
+    body = request.get_json() or {}
+    person_id   = body.get("person_id")
+    player_name = (body.get("player_name") or "").strip()
+    team        = (body.get("team") or "").strip() or None
+    league      = (body.get("league") or "nba").strip().lower()
+    position    = body.get("position")
+
+    if person_id is None or not player_name:
+        return jsonify({"error": "person_id and player_name are required"}), 400
+    if position not in (1, 2, 3, 4):
+        return jsonify({"error": "position must be 1–4"}), 400
+
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        # Drop any existing pin for this player, and whatever sits at this slot,
+        # so a player can be moved between slots without violating uniqueness.
+        cur.execute("DELETE FROM favorite_players WHERE user_id = %s AND person_id = %s",
+                    (me["id"], int(person_id)))
+        cur.execute("DELETE FROM favorite_players WHERE user_id = %s AND position = %s",
+                    (me["id"], position))
+        cur.execute("""
+            INSERT INTO favorite_players (user_id, person_id, player_name, team, league, position)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (me["id"], int(person_id), player_name, team, league, position))
+        conn.commit(); cur.close(); conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# DELETE /api/me/favorite-players/<person_id>  — unpin a player
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/me/favorite-players/<int:person_id>", methods=["DELETE"])
+@login_required
+def remove_favorite_player(person_id):
+    me = current_user()
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("DELETE FROM favorite_players WHERE user_id = %s AND person_id = %s",
+                    (me["id"], person_id))
+        conn.commit(); cur.close(); conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # GET /api/notifications
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/notifications")
@@ -7744,6 +8034,7 @@ def get_notifications():
                   AND (  (SELECT COUNT(*) FROM game_list_items   WHERE list_id = gl.id)
                        + (SELECT COUNT(*) FROM player_list_items WHERE list_id = gl.id)
                        + (SELECT COUNT(*) FROM jersey_list_items WHERE list_id = gl.id)
+                       + (SELECT COUNT(*) FROM performance_list_items WHERE list_id = gl.id)
                        + (SELECT COUNT(*) FROM team_list_items   WHERE list_id = gl.id) ) > 0
             """
             list_params = [uid, uid]
@@ -7921,6 +8212,16 @@ def get_user_profile(user_id):
         """, (user_id,))
         favorites = [dict(r) for r in cur.fetchall()]
 
+        # Favorite players (up to 4, ordered by position) — the pinned identity row
+        cur.execute("""
+            SELECT position, person_id, player_name, team,
+                   COALESCE(league, 'nba') AS league
+            FROM favorite_players
+            WHERE user_id = %s
+            ORDER BY position
+        """, (user_id,))
+        favorite_players = [dict(r) for r in cur.fetchall()]
+
         # Block status relative to viewer
         is_blocked = False
         if viewer and viewer["id"] != user_id:
@@ -7953,6 +8254,7 @@ def get_user_profile(user_id):
             },
             "ball_knowledge":  {**get_rank_info(xp), "equipped_ring": user.get("equipped_ring"), "equipped_title": user.get("equipped_title")},
             "favorites":       favorites,
+            "favorite_players": favorite_players,
             "friend_count":    friend_count,
             "friend_status":   friend_status,
             "is_own":          viewer and viewer["id"] == user_id,

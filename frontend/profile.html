@@ -22,6 +22,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/night-mode.css">
 <script src="/team-colors.js"></script>
+<script src="/nba-assets.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -422,6 +423,54 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .fav-slot:hover { border-color: var(--orange); color: var(--orange); background: var(--orange-lt); }
 .fav-slot-plus { font-size: 22px; line-height: 1; }
 
+/* ── Favorite players pin ── */
+.ppin { margin-bottom: 32px; }
+.ppin-head {
+  font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink4); margin-bottom: 14px;
+  display: flex; align-items: center; gap: 12px;
+}
+.ppin-edit {
+  font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink4); background: none;
+  border: 1px solid var(--rule); border-radius: 3px; padding: 2px 8px;
+  cursor: pointer; transition: color 0.15s, border-color 0.15s;
+}
+.ppin-edit:hover, .ppin-edit.active { color: var(--orange); border-color: var(--orange); }
+.ppin-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.ppin-card { display: flex; flex-direction: column; align-items: center; text-align: center; cursor: pointer; position: relative; transition: transform 0.15s; }
+.ppin-card:hover { transform: translateY(-3px); }
+.ppin-face {
+  width: 100%; aspect-ratio: 1; border-radius: 14px; overflow: hidden;
+  background: var(--paper3); border: 1px solid var(--rule); position: relative;
+}
+.ppin-mono {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-family: var(--ff-serif); font-size: 34px; color: var(--ink4);
+}
+.ppin-face img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center top; }
+.ppin-nm { font-family: var(--ff-serif); font-size: 15px; line-height: 1.1; margin-top: 9px; color: var(--ink); }
+.ppin-tm { font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.04em; color: var(--ink3); margin-top: 3px; text-transform: uppercase; }
+.ppin-remove {
+  position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--paper); border: 1px solid var(--rule); display: flex; align-items: center;
+  justify-content: center; cursor: pointer; font-size: 13px; color: var(--ink3); line-height: 1; z-index: 3;
+}
+.ppin-remove:hover { border-color: var(--red); color: var(--red); }
+.ppin-slot {
+  aspect-ratio: 1; border-radius: 14px; border: 1.5px dashed var(--rule);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  color: var(--ink4); transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.ppin-slot:hover { border-color: var(--orange); color: var(--orange); background: var(--orange-lt); }
+.ppin-slot-plus { font-size: 22px; line-height: 1; }
+.ppin-slot-lbl { font-family: var(--ff-mono); font-size: 9px; letter-spacing: 0.05em; text-transform: uppercase; margin-top: 4px; }
+/* player picker rows */
+.pp-avatar { width: 34px; height: 34px; border-radius: 50%; overflow: hidden; background: var(--paper3); display: flex; align-items: center; justify-content: center; flex-shrink: 0; position: relative; }
+.pp-avatar img { width: 100%; height: 100%; object-fit: cover; object-position: center top; position: relative; z-index: 1; }
+.pp-avatar span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--ff-serif); font-size: 13px; color: var(--ink4); }
+@media (max-width: 640px) { .ppin-grid { grid-template-columns: repeat(2, 1fr); } }
+
 /* Favorites picker modal */
 .fav-picker-list { max-height: 320px; overflow-y: auto; margin-top: 12px; }
 .fav-picker-item {
@@ -583,6 +632,19 @@ nav {
     <div class="fav-picker-list" id="fav-picker-list"><div class="loading-state">Loading…</div></div>
     <div class="modal-actions" style="margin-top:14px">
       <button class="btn" onclick="document.getElementById('fav-picker-modal').style.display='none'">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Favorite player picker modal -->
+<div class="modal-overlay" id="player-picker-modal" style="display:none" onclick="closePlayerPicker(event)">
+  <div class="modal" style="max-width:480px" onclick="event.stopPropagation()">
+    <h2 style="margin-bottom:6px">Pin a favorite player</h2>
+    <p style="font-size:13px;color:var(--ink3);margin-bottom:0">NBA or WNBA — search by name.</p>
+    <input class="search-input" id="player-picker-input" placeholder="Search players…" style="margin-top:12px" autocomplete="off" oninput="playerPickerSearch(this.value)">
+    <div class="fav-picker-list" id="player-picker-list" style="margin-top:10px"><div class="loading-state">Type a name to search…</div></div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn" onclick="document.getElementById('player-picker-modal').style.display='none'">Cancel</button>
     </div>
   </div>
 </div>
@@ -787,6 +849,7 @@ function renderProfile() {
     </div>`;
   }).join('');
 
+  const playersPinHtml = buildPlayersPinHtml(PROFILE.favorite_players || [], isOwn);
   const favHtml = buildFavoritesHtml(PROFILE.favorites || [], isOwn);
 
   document.getElementById('page').innerHTML = `
@@ -798,6 +861,8 @@ function renderProfile() {
         <div class="profile-actions">${actionsHtml}</div>
       </div>
     </div>
+
+    ${playersPinHtml}
 
     ${favHtml}
 
@@ -947,7 +1012,7 @@ async function loadLists() {
   box.innerHTML = '<div class="loading-state">Loading…</div>';
   const own = PROFILE.is_own;
   const esc = s => (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const TYPE = {games:'Games', players:'Players', player_seasons:'Player Seasons', teams:'Teams', team_seasons:'Team Seasons', jerseys:'Jerseys'};
+  const TYPE = {games:'Games', performances:'Performances', players:'Players', player_seasons:'Player Seasons', teams:'Teams', team_seasons:'Team Seasons', jerseys:'Jerseys'};
   try {
     const url = own ? '/api/me/lists' : `/api/users/${PROFILE_ID}/lists`;
     const data = await (await fetch(url, { credentials: 'include' })).json();
@@ -1409,6 +1474,133 @@ async function loadFavPosters(favorites) {
       });
     });
   } catch(e) { /* silent — gradient fallback already showing */ }
+}
+
+// ── Favorite players pin ──────────────────────────────────────
+let _playerEditMode   = false;
+let _playerPickingSlot = null;
+let _ppSearchTimer     = null;
+
+function _escH(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function _initials(name) { return (name || '').trim().split(/\s+/).map(w => w[0] || '').slice(0, 2).join('').toUpperCase(); }
+
+function playersPinCards(players, isOwn) {
+  const slots = {};
+  (players || []).forEach(p => { slots[p.position] = p; });
+  let html = '';
+  for (let pos = 1; pos <= 4; pos++) {
+    const p = slots[pos];
+    if (p) {
+      const url  = window.ydkHeadshot ? ydkHeadshot(p.person_id, p.league) : '';
+      const rm   = (isOwn && _playerEditMode) ? `<div class="ppin-remove" onclick="event.stopPropagation();removeFavPlayer(${p.person_id})">×</div>` : '';
+      const tm   = _escH([p.team, p.league === 'wnba' ? 'WNBA' : ''].filter(Boolean).join(' · '));
+      const open = isOwn ? `onclick="openPlayerPicker(${pos})"` : '';
+      html += `<div class="ppin-card" ${open}>
+        ${rm}
+        <div class="ppin-face"><span class="ppin-mono">${_escH(_initials(p.player_name))}</span>${url ? `<img src="${url}" alt="" onerror="this.remove()">` : ''}</div>
+        <div class="ppin-nm">${_escH(p.player_name)}</div>
+        <div class="ppin-tm">${tm}</div>
+      </div>`;
+    } else if (isOwn) {
+      html += `<div class="ppin-slot" onclick="openPlayerPicker(${pos})"><div style="text-align:center"><div class="ppin-slot-plus">+</div><div class="ppin-slot-lbl">Add</div></div></div>`;
+    }
+  }
+  return html;
+}
+
+function buildPlayersPinHtml(players, isOwn) {
+  if (!isOwn && (!players || !players.length)) return '';
+  const editBtn = isOwn
+    ? `<button class="ppin-edit${_playerEditMode ? ' active' : ''}" id="ppin-edit-btn" onclick="togglePlayerEdit()">Edit</button>`
+    : '';
+  return `
+    <div class="ppin" id="ppin-section">
+      <div class="ppin-head">Favorite Players ${editBtn}</div>
+      <div class="ppin-grid" id="ppin-grid">${playersPinCards(players, isOwn)}</div>
+    </div>`;
+}
+
+function refreshPlayersPin() {
+  const grid = document.getElementById('ppin-grid');
+  if (grid) grid.innerHTML = playersPinCards(PROFILE.favorite_players || [], PROFILE.is_own);
+}
+
+function togglePlayerEdit() {
+  _playerEditMode = !_playerEditMode;
+  const btn = document.getElementById('ppin-edit-btn');
+  if (btn) btn.classList.toggle('active', _playerEditMode);
+  refreshPlayersPin();
+}
+
+function openPlayerPicker(slot) {
+  _playerPickingSlot = slot;
+  const modal = document.getElementById('player-picker-modal');
+  const input = document.getElementById('player-picker-input');
+  const list  = document.getElementById('player-picker-list');
+  modal.style.display = 'flex';
+  input.value = '';
+  list.innerHTML = '<div class="loading-state">Type a name to search…</div>';
+  setTimeout(() => input.focus(), 50);
+}
+function closePlayerPicker(e) {
+  if (e && e.target !== e.currentTarget) return;
+  document.getElementById('player-picker-modal').style.display = 'none';
+}
+
+function playerPickerSearch(q) {
+  clearTimeout(_ppSearchTimer);
+  const list = document.getElementById('player-picker-list');
+  if (q.trim().length < 2) { list.innerHTML = '<div class="loading-state">Type a name to search…</div>'; return; }
+  _ppSearchTimer = setTimeout(async () => {
+    list.innerHTML = '<div class="loading-state">Searching…</div>';
+    try {
+      const data    = await (await fetch(`/api/lists/players/search?q=${encodeURIComponent(q.trim())}&type=players&league=all`)).json();
+      const players = data.players || [];
+      const pinned  = new Set((PROFILE.favorite_players || []).map(p => p.person_id));
+      if (!players.length) { list.innerHTML = '<div class="empty-state">No players found.</div>'; return; }
+      list.innerHTML = players.map(p => {
+        const url  = window.ydkHeadshot ? ydkHeadshot(p.playerId, p.league) : '';
+        const dis  = pinned.has(p.playerId);
+        const init = _escH(_initials(p.playerName));
+        const meta = _escH([p.team, p.league === 'wnba' ? 'WNBA' : ''].filter(Boolean).join(' · '));
+        return `<div class="fav-picker-item" ${dis ? 'style="opacity:.4;cursor:not-allowed"' : ''}
+            data-pid="${p.playerId}" data-name="${_escH(p.playerName)}" data-team="${_escH(p.team || '')}" data-league="${_escH(p.league || 'nba')}" data-dis="${dis ? 1 : 0}">
+          <div class="pp-avatar"><span>${init}</span>${url ? `<img src="${url}" alt="" onerror="this.style.display='none'">` : ''}</div>
+          <div class="fav-picker-game">${_escH(p.playerName)}</div>
+          <div class="fav-picker-meta">${meta}</div>
+        </div>`;
+      }).join('');
+      list.querySelectorAll('.fav-picker-item').forEach(el => {
+        if (el.dataset.dis === '1') return;
+        el.addEventListener('click', () => pickFavPlayer({
+          personId: parseInt(el.dataset.pid), playerName: el.dataset.name,
+          team: el.dataset.team, league: el.dataset.league,
+        }));
+      });
+    } catch (e) { list.innerHTML = '<div class="empty-state">Search failed.</div>'; }
+  }, 250);
+}
+
+async function pickFavPlayer(p) {
+  try {
+    const res = await fetch('/api/me/favorite-players', {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ person_id: p.personId, player_name: p.playerName, team: p.team || null, league: p.league, position: _playerPickingSlot }),
+    });
+    if (!res.ok) throw new Error('save failed');
+    PROFILE.favorite_players = (PROFILE.favorite_players || []).filter(x => x.person_id !== p.personId && x.position !== _playerPickingSlot);
+    PROFILE.favorite_players.push({ position: _playerPickingSlot, person_id: p.personId, player_name: p.playerName, team: p.team || null, league: p.league });
+    document.getElementById('player-picker-modal').style.display = 'none';
+    refreshPlayersPin();
+  } catch (e) { alert('Could not save that pick — try again.'); }
+}
+
+async function removeFavPlayer(personId) {
+  try {
+    await fetch(`/api/me/favorite-players/${personId}`, { method: 'DELETE' });
+    PROFILE.favorite_players = (PROFILE.favorite_players || []).filter(p => p.person_id !== personId);
+    refreshPlayersPin();
+  } catch (e) { /* silent */ }
 }
 
 let _favEditMode = false;
