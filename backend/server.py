@@ -5399,6 +5399,25 @@ def get_user_activity(user_id):
     viewer    = current_user()
     viewer_id = viewer["id"] if viewer else None
 
+    # Diary sort/filter (all optional — defaults preserve the original feed order)
+    _ORDER = {
+        "recent":      "COALESCE(game_date, created_at::date) DESC, created_at DESC",
+        "oldest":      "COALESCE(game_date, created_at::date) ASC,  created_at ASC",
+        "rating_desc": "rating DESC, COALESCE(game_date, created_at::date) DESC",
+        "rating_asc":  "rating ASC,  COALESCE(game_date, created_at::date) DESC",
+    }
+    order_by = _ORDER.get(request.args.get("sort", "recent"), _ORDER["recent"])
+    _filter  = request.args.get("filter", "all")
+    team     = (request.args.get("team") or "").strip().upper()
+    diary_where, diary_params = [], []
+    if _filter == "games":            diary_where.append("type = 'game_review'")
+    elif _filter == "performances":   diary_where.append("type = 'performance_review'")
+    elif _filter == "attended":       diary_where.append("attended = TRUE")
+    if team:
+        diary_where.append("(home_team_abbr = %s OR away_team_abbr = %s)")
+        diary_params += [team, team]
+    diary_where_sql = ("WHERE " + " AND ".join(diary_where)) if diary_where else ""
+
     if viewer_id:
         rl_me_join      = "LEFT JOIN review_likes rl_me ON rl_me.review_id = gr.id AND rl_me.user_id = %s"
         liked_by_me_col = "BOOL_OR(rl_me.user_id IS NOT NULL) AS liked_by_me"
@@ -5474,11 +5493,12 @@ def get_user_activity(user_id):
             WHERE pr.user_id = %s
         )
         SELECT * FROM combined
-        ORDER BY COALESCE(game_date, created_at::date) DESC, created_at DESC
+        {diary_where_sql}
+        ORDER BY {order_by}
         LIMIT %s OFFSET %s
     """
 
-    params = rl_me_params + [user_id, user_id, limit, offset]
+    params = rl_me_params + [user_id, user_id] + diary_params + [limit, offset]
 
     try:
         conn = get_conn()
@@ -5556,6 +5576,71 @@ def _format_feed_rows(rows) -> list:
             "ast":                d.get("ast"),
         })
     return items
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/users/<user_id>/insights — "By the Numbers" for the diary page
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/users/<int:user_id>/insights")
+def get_user_insights(user_id):
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        out = {}
+
+        # Most-watched team — across games you've reviewed (home + away).
+        cur.execute("""
+            SELECT team, MAX(league) AS league, COUNT(*) AS n FROM (
+                SELECT g.home_team_abbr AS team, g.league
+                FROM game_reviews gr JOIN games g ON g.game_id = gr.game_id WHERE gr.user_id = %s
+                UNION ALL
+                SELECT g.away_team_abbr AS team, g.league
+                FROM game_reviews gr JOIN games g ON g.game_id = gr.game_id WHERE gr.user_id = %s
+            ) t WHERE team IS NOT NULL AND team <> ''
+            GROUP BY team ORDER BY n DESC LIMIT 1
+        """, (user_id, user_id))
+        r = cur.fetchone()
+        out["most_watched_team"] = ({"abbr": r["team"], "league": r["league"] or "nba", "count": int(r["n"])} if r else None)
+
+        # Most-rated player, with your average rating for them.
+        cur.execute("""
+            SELECT pr.person_id, MAX(pr.player_name) AS name, COUNT(*) AS n,
+                   round(AVG(pr.rating) / 2.0, 1) AS avg_stars, MAX(g.league) AS league
+            FROM performance_reviews pr LEFT JOIN games g ON g.game_id = pr.game_id
+            WHERE pr.user_id = %s
+            GROUP BY pr.person_id ORDER BY n DESC, avg_stars DESC LIMIT 1
+        """, (user_id,))
+        r = cur.fetchone()
+        out["top_player"] = ({"person_id": r["person_id"], "name": r["name"] or "",
+                              "league": r["league"] or "nba", "count": int(r["n"]),
+                              "avg_stars": float(r["avg_stars"] or 0)} if r else None)
+
+        # Games reviewed by season — latest + previous (for the "vs last" delta).
+        cur.execute("""
+            SELECT g.season AS season, COUNT(*) AS n
+            FROM game_reviews gr JOIN games g ON g.game_id = gr.game_id
+            WHERE gr.user_id = %s AND g.season IS NOT NULL
+            GROUP BY g.season ORDER BY g.season DESC LIMIT 2
+        """, (user_id,))
+        seasons = cur.fetchall()
+        if seasons:
+            prev = seasons[1] if len(seasons) > 1 else None
+            out["games_this_season"] = {"season": seasons[0]["season"], "count": int(seasons[0]["n"]),
+                                        "prev_count": int(prev["n"]) if prev else None}
+        else:
+            out["games_this_season"] = None
+
+        # Your average vs the crowd.
+        cur.execute("SELECT round(AVG(rating) / 2.0, 2) AS a FROM game_reviews WHERE user_id = %s", (user_id,))
+        your_avg = cur.fetchone()["a"]
+        cur.execute("SELECT round(AVG(rating) / 2.0, 2) AS a FROM game_reviews")
+        crowd_avg = cur.fetchone()["a"]
+        out["your_avg"] = {"avg_stars": float(your_avg) if your_avg is not None else None,
+                           "crowd_avg_stars": float(crowd_avg) if crowd_avg is not None else None}
+
+        cur.close(); conn.close()
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
