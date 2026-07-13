@@ -538,6 +538,8 @@ def _ensure_tables():
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS xp INTEGER NOT NULL DEFAULT 0")
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS equipped_ring   INTEGER DEFAULT NULL")
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS equipped_title INTEGER DEFAULT NULL")
+        # A list the user pins as the hero "Featured" banner on their profile.
+        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS featured_list_id INTEGER DEFAULT NULL")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS xp_events (
                 id           SERIAL  PRIMARY KEY,
@@ -7989,6 +7991,33 @@ def remove_favorite_player(person_id):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PATCH /api/me/featured-list  — pin one of your lists as the profile hero
+# Body: {"list_id": <id>} to set, or {"list_id": null} to clear.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/me/featured-list", methods=["PATCH"])
+@login_required
+def set_featured_list():
+    me   = current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    list_id = body.get("list_id")
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        if list_id is None:
+            cur.execute("UPDATE users SET featured_list_id = NULL WHERE id = %s", (me["id"],))
+        else:
+            # Only your own list may be featured.
+            cur.execute("SELECT 1 FROM game_lists WHERE id = %s AND user_id = %s", (int(list_id), me["id"]))
+            if not cur.fetchone():
+                cur.close(); conn.close()
+                return jsonify({"error": "list not found"}), 404
+            cur.execute("UPDATE users SET featured_list_id = %s WHERE id = %s", (int(list_id), me["id"]))
+        conn.commit(); cur.close(); conn.close()
+        return jsonify({"ok": True, "featured_list_id": list_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # GET /api/notifications
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @app.route("/api/notifications")
@@ -8146,7 +8175,7 @@ def get_user_profile(user_id):
         cur  = conn.cursor()
 
         cur.execute("""
-            SELECT id, display_name, avatar_url, favorite_team, display_name_set, created_at, is_pro, xp, equipped_ring, equipped_title
+            SELECT id, display_name, avatar_url, favorite_team, display_name_set, created_at, is_pro, xp, equipped_ring, equipped_title, featured_list_id
             FROM users WHERE id = %s
         """, (user_id,))
         user = cur.fetchone()
@@ -8222,6 +8251,23 @@ def get_user_profile(user_id):
         """, (user_id,))
         favorite_players = [dict(r) for r in cur.fetchall()]
 
+        # Featured list — the hero banner. Only surfaced if it still exists and
+        # is visible to the viewer (public, or the owner viewing their own).
+        featured_list = None
+        if user.get("featured_list_id"):
+            cur.execute("""
+                SELECT gl.*, COUNT(gli.game_id) AS game_count
+                FROM game_lists gl
+                LEFT JOIN game_list_items gli ON gli.list_id = gl.id
+                WHERE gl.id = %s AND gl.user_id = %s
+                GROUP BY gl.id
+            """, (user["featured_list_id"], user_id))
+            fl = cur.fetchone()
+            if fl and (fl["is_public"] or (viewer and viewer["id"] == user_id)):
+                featured_list = _format_list(
+                    fl, fl["game_count"],
+                    _list_cover_items(cur, fl["id"], fl.get("list_type") or "games", bool(fl.get("is_ranked")), limit=6))
+
         # Block status relative to viewer
         is_blocked = False
         if viewer and viewer["id"] != user_id:
@@ -8255,6 +8301,7 @@ def get_user_profile(user_id):
             "ball_knowledge":  {**get_rank_info(xp), "equipped_ring": user.get("equipped_ring"), "equipped_title": user.get("equipped_title")},
             "favorites":       favorites,
             "favorite_players": favorite_players,
+            "featured_list":   featured_list,
             "friend_count":    friend_count,
             "friend_status":   friend_status,
             "is_own":          viewer and viewer["id"] == user_id,

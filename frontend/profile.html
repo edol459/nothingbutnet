@@ -471,6 +471,35 @@ nav { position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h); backgrou
 .pp-avatar span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--ff-serif); font-size: 13px; color: var(--ink4); }
 @media (max-width: 640px) { .ppin-grid { grid-template-columns: repeat(2, 1fr); } }
 
+/* ── Visual list cards (Lists tab) ── */
+.plist-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.plist-card {
+  display: block; background: var(--paper2); border: 1px solid var(--rule);
+  border-radius: 12px; padding: 12px; text-decoration: none; color: inherit;
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+.plist-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.08); border-color: var(--orange); }
+.plist-covers { display: flex; margin-bottom: 11px; height: 56px; align-items: center; }
+.plist-covers .ct { margin-left: -12px; }
+.plist-covers .ct:first-child { margin-left: 0; }
+.plist-covers .plist-empty { font-family: var(--ff-mono); font-size: 11px; color: var(--ink4); letter-spacing: 0.03em; }
+.plist-title { font-family: var(--ff-serif); font-size: 16px; line-height: 1.15; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plist-meta { font-family: var(--ff-mono); font-size: 10px; letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink3); margin-top: 5px; }
+.plist-meta .auto { color: var(--gold); }
+/* cover thumbnails */
+.ct {
+  width: 44px; height: 54px; border-radius: 8px; overflow: hidden; flex-shrink: 0;
+  background: var(--paper3); border: 1px solid var(--rule); box-shadow: -3px 0 8px rgba(0,0,0,0.06);
+  display: flex; align-items: center; justify-content: center; position: relative;
+}
+.ct.face img { width: 100%; height: 100%; object-fit: cover; object-position: center top; }
+.ct .ct-mono { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--ff-serif); font-size: 16px; color: var(--ink4); }
+.ct.game { flex-direction: column; gap: 2px; }
+.ct.game img { width: 22px; height: 22px; object-fit: contain; }
+.ct.team img { width: 30px; height: 30px; object-fit: contain; }
+.ct.jersey img { width: 100%; height: 100%; object-fit: contain; }
+@media (max-width: 640px) { .plist-grid { grid-template-columns: 1fr; } }
+
 /* Favorites picker modal */
 .fav-picker-list { max-height: 320px; overflow-y: auto; margin-top: 12px; }
 .fav-picker-item {
@@ -1024,14 +1053,43 @@ async function loadLists() {
       box.innerHTML = html + `<div class="loading-state">${own ? 'No lists yet — create your first above.' : 'No public lists.'}</div>`;
       return;
     }
-    html += lists.map(l => `
-      <a href="/list/${l.id}" style="display:flex;align-items:center;gap:12px;padding:13px 4px;border-bottom:1px solid var(--paper3);text-decoration:none;color:inherit">
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:15px">${esc(l.title)}</div>
-          <div style="font-family:var(--ff-mono);font-size:11px;color:var(--ink3);margin-top:3px">${TYPE[l.listType] || l.listType}${l.isRanked ? ' · ranked' : ''}${own ? ` · ${l.isPublic ? 'public' : 'private'}` : ''}</div>
-        </div>
-        <span style="font-family:var(--ff-mono);font-size:11px;color:var(--ink3)">View →</span>
-      </a>`).join('');
+
+    // One cover thumbnail for a list's auto-collage, by item kind.
+    const coverThumb = (it) => {
+      const lg = it.league || 'nba';
+      if (it.kind === 'player' || it.kind === 'performance') {
+        const pid  = (it.playerId != null) ? it.playerId : it.personId;
+        const url  = window.ydkHeadshot ? ydkHeadshot(pid, lg) : '';
+        const init = (it.playerName || '').split(/\s+/).map(w => w[0] || '').slice(0, 2).join('').toUpperCase();
+        return `<div class="ct face"><span class="ct-mono">${esc(init)}</span>${url ? `<img src="${url}" alt="" onerror="this.remove()">` : ''}</div>`;
+      }
+      if (it.kind === 'game') {
+        const a = window.ydkTeamLogo ? ydkTeamLogo(it.awayTeamAbbr, lg) : '';
+        const h = window.ydkTeamLogo ? ydkTeamLogo(it.homeTeamAbbr, lg) : '';
+        return `<div class="ct game">${a ? `<img src="${a}" alt="" onerror="this.style.visibility='hidden'">` : ''}${h ? `<img src="${h}" alt="" onerror="this.style.visibility='hidden'">` : ''}</div>`;
+      }
+      if (it.kind === 'team') {
+        const u = window.ydkTeamLogo ? ydkTeamLogo(it.team, lg) : '';
+        return `<div class="ct team">${u ? `<img src="${u}" alt="" onerror="this.style.visibility='hidden'">` : ''}</div>`;
+      }
+      if (it.kind === 'jersey') {
+        return `<div class="ct jersey">${it.imageUrl ? `<img src="${esc(it.imageUrl)}" alt="" onerror="this.remove()">` : ''}</div>`;
+      }
+      return `<div class="ct"></div>`;
+    };
+
+    html += '<div class="plist-grid">' + lists.map(l => {
+      const covers = (l.coverItems || []).slice(0, 4).map(coverThumb).join('')
+        || '<div class="plist-empty">Empty list</div>';
+      const bits = [TYPE[l.listType] || l.listType];
+      if (l.isRanked) bits.push('ranked');
+      if (own) bits.push(l.isPublic ? 'public' : 'private');
+      return `<a class="plist-card" href="/list/${l.id}">
+        <div class="plist-covers">${covers}</div>
+        <div class="plist-title">${esc(l.title)}</div>
+        <div class="plist-meta">${esc(bits.join(' · '))}</div>
+      </a>`;
+    }).join('') + '</div>';
     box.innerHTML = html;
   } catch (e) {
     box.innerHTML = '<div class="loading-state">Couldn\'t load lists.</div>';
