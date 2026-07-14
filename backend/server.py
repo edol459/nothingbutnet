@@ -3180,11 +3180,18 @@ def players_today():
     body     = request.get_json(silent=True) or {}
     date     = (body.get("date") or "").strip()
     games_in = body.get("games") or []
+    # followedOnly powers the home-screen "My Players Today" rail: restrict to
+    # the caller's followed players and — crucially — only touch games that
+    # involve a team one of them plays for, so a full slate doesn't fetch a
+    # boxscore per final game just to surface a handful of follows.
+    followed_only = bool(body.get("followedOnly"))
     if not games_in:
         return jsonify({"players": [], "date": date})
 
     user    = current_user()
     user_id = user["id"] if user else None
+    if followed_only and not user_id:
+        return jsonify({"players": [], "date": date})
 
     conn = get_conn(); cur = conn.cursor()
     try:
@@ -3192,6 +3199,8 @@ def players_today():
         if user_id:
             cur.execute("SELECT person_id FROM player_follows WHERE user_id = %s", (user_id,))
             followed_ids = {r["person_id"] for r in cur.fetchall()}
+        if followed_only and not followed_ids:
+            return jsonify({"players": [], "date": date})
 
         final_game_ids = [g["gameId"] for g in games_in if g.get("status") == "final" and g.get("gameId")]
         my_ratings = {}
@@ -3204,6 +3213,26 @@ def players_today():
                 my_ratings[(r["game_id"], r["person_id"])] = r["rating"]
 
         nba_season, wnba_season = get_current_season(), _get_wnba_season()
+
+        # For followedOnly, resolve which teams the followed players are on so
+        # we can skip every game that involves none of them (standings-side
+        # abbrs; WNBA games-side abbrs are mapped to these before comparing).
+        followed_team_abbrs = {"nba": set(), "wnba": set()}
+        if followed_only:
+            fid_list = list(followed_ids)
+            cur.execute("""
+                SELECT DISTINCT ps.team_abbr FROM player_seasons ps
+                WHERE ps.player_id = ANY(%s) AND ps.season = %s
+                  AND ps.season_type = 'Regular Season' AND COALESCE(ps.gp, 0) > 0
+            """, (fid_list, nba_season))
+            followed_team_abbrs["nba"] = {r["team_abbr"] for r in cur.fetchall() if r["team_abbr"]}
+            cur.execute("""
+                SELECT DISTINCT team FROM wnba_player_seasons
+                WHERE player_id = ANY(%s) AND season = %s
+                  AND season_type = 'Regular Season' AND COALESCE(gp, 0) > 0
+            """, (fid_list, wnba_season))
+            followed_team_abbrs["wnba"] = {r["team"] for r in cur.fetchall() if r["team"]}
+
         injury_by_league: dict = {}
         rows = []
 
@@ -3216,6 +3245,20 @@ def players_today():
             home_abbr = (g.get("homeAbbr") or "").upper()
             away_abbr = (g.get("awayAbbr") or "").upper()
             tipoff    = g.get("gameTimeUTC", "")
+
+            if followed_only:
+                # Standings-side abbrs the game could match on. WNBA games-side
+                # abbrs (LA/LV/NY/…) differ from wnba_player_seasons.team, so
+                # map through _WNBA_GAMES_TO_STANDINGS the same way the roster
+                # query does; NBA abbrs already agree.
+                if league == "wnba":
+                    game_abbrs = {home_abbr, away_abbr,
+                                  _WNBA_GAMES_TO_STANDINGS.get(home_abbr),
+                                  _WNBA_GAMES_TO_STANDINGS.get(away_abbr)}
+                else:
+                    game_abbrs = {home_abbr, away_abbr}
+                if not (game_abbrs & followed_team_abbrs[league]):
+                    continue
 
             if status == "final":
                 box = _fetch_live_boxscore_data(game_id)
@@ -3283,8 +3326,16 @@ def players_today():
                 sub, sub2 = -(r["avgMinutes"] or 0.0), (r["gameTimeUTC"] or "9999")
             return (followed, tier, sub, sub2)
 
+        if followed_only:
+            # A gated game can still contribute non-followed teammates (from the
+            # roster/boxscore build); keep only the follows themselves.
+            rows = [r for r in rows if r["isFollowed"]]
+
         rows.sort(key=_sort_key)
-        return jsonify({"players": rows, "date": date})
+        # followCount lets the "My Players Today" rail tell "you follow nobody"
+        # (show the follow prompt) apart from "your players just aren't playing
+        # today" (show nothing) — both otherwise return an empty players list.
+        return jsonify({"players": rows, "date": date, "followCount": len(followed_ids)})
     finally:
         cur.close(); conn.close()
 
