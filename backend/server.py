@@ -540,6 +540,8 @@ def _ensure_tables():
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS equipped_title INTEGER DEFAULT NULL")
         # A list the user pins as the hero "Featured" banner on their profile.
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS featured_list_id INTEGER DEFAULT NULL")
+        # Profile customizer: which sections are hidden, etc. {"hidden_sections": [...]}
+        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_config JSONB DEFAULT '{}'::jsonb")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS xp_events (
                 id           SERIAL  PRIMARY KEY,
@@ -8076,6 +8078,31 @@ def remove_favorite_player(person_id):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PATCH /api/me/profile-config  — profile customizer (section visibility, etc.)
+# Body: {"hidden_sections": ["ratings", ...]}  (whitelisted keys only)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+_PROFILE_SECTIONS = {"players", "featured", "lists", "ratings", "recent"}
+
+@app.route("/api/me/profile-config", methods=["PATCH"])
+@login_required
+def update_profile_config():
+    me   = current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    hidden = body.get("hidden_sections")
+    if not isinstance(hidden, list):
+        return jsonify({"error": "hidden_sections must be an array"}), 400
+    hidden = [s for s in hidden if s in _PROFILE_SECTIONS][:len(_PROFILE_SECTIONS)]
+    config = {"hidden_sections": hidden}
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("UPDATE users SET profile_config = %s WHERE id = %s", (json.dumps(config), me["id"]))
+        conn.commit(); cur.close(); conn.close()
+        return jsonify({"ok": True, "profile_config": config})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # PATCH /api/me/featured-list  — pin one of your lists as the profile hero
 # Body: {"list_id": <id>} to set, or {"list_id": null} to clear.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -8260,7 +8287,7 @@ def get_user_profile(user_id):
         cur  = conn.cursor()
 
         cur.execute("""
-            SELECT id, display_name, avatar_url, favorite_team, display_name_set, created_at, is_pro, xp, equipped_ring, equipped_title, featured_list_id
+            SELECT id, display_name, avatar_url, favorite_team, display_name_set, created_at, is_pro, xp, equipped_ring, equipped_title, featured_list_id, profile_config
             FROM users WHERE id = %s
         """, (user_id,))
         user = cur.fetchone()
@@ -8387,6 +8414,7 @@ def get_user_profile(user_id):
             "favorites":       favorites,
             "favorite_players": favorite_players,
             "featured_list":   featured_list,
+            "profile_config":  user.get("profile_config") or {},
             "friend_count":    friend_count,
             "friend_status":   friend_status,
             "is_own":          viewer and viewer["id"] == user_id,
