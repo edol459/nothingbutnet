@@ -3185,13 +3185,14 @@ def players_today():
     # involve a team one of them plays for, so a full slate doesn't fetch a
     # boxscore per final game just to surface a handful of follows.
     followed_only = bool(body.get("followedOnly"))
-    if not games_in:
-        return jsonify({"players": [], "date": date})
 
     user    = current_user()
     user_id = user["id"] if user else None
+    # followedOnly always reports followCount (even for an empty slate) so the
+    # rail can tell "you follow nobody" (show the prompt) from "your players
+    # just aren't playing in this scope today" (show nothing).
     if followed_only and not user_id:
-        return jsonify({"players": [], "date": date})
+        return jsonify({"players": [], "date": date, "followCount": 0})
 
     conn = get_conn(); cur = conn.cursor()
     try:
@@ -3199,8 +3200,10 @@ def players_today():
         if user_id:
             cur.execute("SELECT person_id FROM player_follows WHERE user_id = %s", (user_id,))
             followed_ids = {r["person_id"] for r in cur.fetchall()}
-        if followed_only and not followed_ids:
-            return jsonify({"players": [], "date": date})
+        # Nothing to build from: no games in scope, or a followedOnly caller who
+        # follows nobody. Still surface followCount for the followedOnly rail.
+        if not games_in or (followed_only and not followed_ids):
+            return jsonify({"players": [], "date": date, "followCount": len(followed_ids)})
 
         final_game_ids = [g["gameId"] for g in games_in if g.get("status") == "final" and g.get("gameId")]
         my_ratings = {}
@@ -7986,6 +7989,12 @@ def update_avatar():
     # Must be a data URL with an image MIME type
     if not data.startswith("data:image/"):
         return jsonify({"error": "Invalid image format"}), 400
+
+    # Must actually carry image bytes — an empty payload ("data:image/jpeg;base64,")
+    # would otherwise pass through and blank out the avatar.
+    _, _, _b64 = data.partition(",")
+    if len(_b64.strip()) < 100:
+        return jsonify({"error": "Invalid image data"}), 400
 
     # Limit size: base64-encoded ~200 KB image → ~270 KB string
     if len(data) > 300_000:
