@@ -1888,6 +1888,15 @@ def _sb_poller_loop():
             has_live, cdn_ok, has_upcoming = _sb_poller_tick()
         except Exception:
             has_live, cdn_ok, has_upcoming = False, False, False
+        # Keep the WNBA today cache warm too (in-season this is the only live
+        # league, so without it every /api/wnba/scoreboard request pays the full
+        # CDN fetch + tipoff crosscheck). Its live/upcoming games drive the cadence.
+        try:
+            w_live, w_upcoming = _wnba_sb_poller_tick()
+        except Exception:
+            w_live, w_upcoming = False, False
+        has_live     = has_live or w_live
+        has_upcoming = has_upcoming or w_upcoming
         # 30 s when live, 60 s when games are upcoming today, 5 min when truly idle
         if has_live:
             interval = _POLL_LIVE_S
@@ -9981,6 +9990,29 @@ def _wnba_cdn_scoreboard_today(game_today: str) -> list | None:
         return None
 
 
+def _wnba_sb_poller_tick() -> tuple[bool, bool]:
+    """One WNBA poll iteration, run by the shared scoreboard poller so the
+    /api/wnba/scoreboard endpoint never blocks on the live CDN + per-game
+    tipoff crosscheck (NBA has the same treatment via _sb_poller_tick).
+
+    Refreshes _wnba_cdn_today_cache with enriched games. Returns
+    (has_live, has_upcoming); both False when there are no WNBA games today
+    (offseason / CDN still on prior date), which lets the loop go idle."""
+    game_today = _compute_game_today()
+    try:
+        games = _wnba_cdn_scoreboard_today(game_today)
+        if games is not None:
+            _enrich_wnba_games(games)
+            _wnba_cdn_today_cache.update(
+                {"games": games, "date": game_today, "ts": _time.time()})
+            has_live     = any(g["gameStatus"] == 2 for g in games)
+            has_upcoming = any(g["gameStatus"] == 1 for g in games)
+            return has_live, has_upcoming
+    except Exception as e:
+        print(f"[wnba-cdn] poller tick error: {e}", flush=True)
+    return False, False
+
+
 def _espn_wnba_scoreboard(date_str: str) -> list | None:
     """Fetch WNBA scoreboard from ESPN for YYYY-MM-DD (fallback for pre-2026 dates).
     Returns list of game dicts (same shape as CDN) or None on failure."""
@@ -10253,10 +10285,12 @@ def get_wnba_scoreboard():
         except Exception:
             pass
 
-    # Today — try WNBA CDN live scoreboard first (2-min cache), then ESPN fallback
+    # Today — serve from the poller-warmed cache (refreshed every 30 s when live,
+    # 5 min when idle, mirroring NBA). The 300 s ceiling means a live 30 s poll
+    # cadence always satisfies it, so the request never blocks on the CDN.
     if is_today:
         c = _wnba_cdn_today_cache
-        if c.get("date") == _game_today and _time.time() - c.get("ts", 0) < 30:
+        if c.get("date") == _game_today and _time.time() - c.get("ts", 0) < 300:
             return jsonify({"games": c["games"], "date": date_str})
         games = _wnba_cdn_scoreboard_today(_game_today)
         if games is not None:
