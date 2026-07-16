@@ -9962,10 +9962,15 @@ def _wnba_cdn_schedule() -> dict:
         return cached.get("dates", {})
 
 
-def _wnba_cdn_scoreboard_today(game_today: str) -> list | None:
-    """Fetch today's WNBA games from the live CDN. Returns game-list or None."""
+def _wnba_cdn_scoreboard_today(game_today: str, force: bool = False) -> list | None:
+    """Fetch today's WNBA games from the live CDN. Returns game-list or None.
+
+    `force=True` skips the 30 s cache guard — the poller must use it, otherwise
+    its own timestamp bumps keep this read inside the 30 s window forever and the
+    data freezes (e.g. an upcoming game never flips to live). The 30 s guard still
+    protects on-demand endpoint calls from CDN request bursts."""
     c = _wnba_cdn_today_cache
-    if c.get("date") == game_today and _time.time() - c.get("ts", 0) < 30:
+    if not force and c.get("date") == game_today and _time.time() - c.get("ts", 0) < 30:
         return c["games"]
     try:
         resp = _cdn_get(
@@ -10000,7 +10005,10 @@ def _wnba_sb_poller_tick() -> tuple[bool, bool]:
     (offseason / CDN still on prior date), which lets the loop go idle."""
     game_today = _compute_game_today()
     try:
-        games = _wnba_cdn_scoreboard_today(game_today)
+        # force=True: the poller is the refresh mechanism, so it must bypass the
+        # 30 s cache guard — otherwise its 20 s (pregame) cadence keeps every read
+        # inside that window and the scoreboard freezes at its first status.
+        games = _wnba_cdn_scoreboard_today(game_today, force=True)
         if games is not None:
             _enrich_wnba_games(games)
             _wnba_cdn_today_cache.update(

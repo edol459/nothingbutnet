@@ -459,6 +459,7 @@ function teamColor(a,lg){ return (lg==='wnba'?WNBA_COLOR:NBA_COLOR)[(a||'').toUp
 const SB = { today:todayStr(), date:null, league:'all', loading:false, timer:null };
 let _games = [];
 let _boardRendered = false;
+let _posters = {};   // gameId -> {away, home} player ids; cached so re-renders (e.g. league switch) re-apply headshots without refetching
 let _revealObs = null;
 
 // ── Date helpers ───────────────────────────────────────────────
@@ -654,6 +655,7 @@ function renderBoard() {
         : `/game?gameId=${gid}`;
     });
   });
+  applyPosters();  // restore headshots from cache on every re-render (e.g. league switch)
 }
 
 function buildCard(g) {
@@ -734,11 +736,46 @@ function updRating(gid, g) {
 }
 
 // ── Game Posters (headshots) ────────────────────────────────────
+// Apply cached posters (_posters) to whatever cards are currently rendered.
+// Called after every renderBoard() so a league switch / re-render restores
+// headshots instantly instead of falling back to team logos.
+function applyPosters() {
+  Object.entries(_posters).forEach(([gid, ids]) => {
+    const el = document.getElementById(`poster-${gid}`);
+    if (!el) return;
+    // Skip if this freshly-rendered card already has headshots applied.
+    if (el.querySelector('img[data-headshot]')) return;
+    const g = _games.find(x => x.gameId === gid);
+    if (!g) return;
+    const hsUrl = id => g.league === 'wnba'
+      ? `https://ak-static.cms.nba.com/wp-content/uploads/headshots/wnba/latest/260x190/${id}.png`
+      : `https://cdn.nba.com/headshots/nba/latest/260x190/${id}.png`;
+    const addHs = (id, side) => {
+      if (!id) return;
+      const img = document.createElement('img');
+      img.alt = '';
+      img.dataset.headshot = side;
+      img.style.cssText = `position:absolute;width:85px;height:75px;${side==='away'?'left:0px':'right:0px'};top:0;object-fit:cover;object-position:top center;opacity:.95;`;
+      img.onload = function() {
+        el.querySelectorAll(`img[data-team-logo][data-side="${side}"]`).forEach(i => i.remove());
+      };
+      img.onerror = function() { this.remove(); };
+      img.src = hsUrl(id);
+      el.appendChild(img);
+    };
+    addHs(ids.away, 'away');
+    addHs(ids.home, 'home');
+  });
+}
+
 async function loadPosters(games) {
-  if (!games || !games.length) return;
+  if (!games || !games.length) { applyPosters(); return; }
   try {
-    const nbaGames  = games.filter(g => g.league === 'nba');
-    const wnbaGames = games.filter(g => g.league === 'wnba');
+    // Only fetch games we don't already have cached (league switches reuse the cache).
+    const need = games.filter(g => !(g.gameId in _posters));
+    if (!need.length) { applyPosters(); return; }
+    const nbaGames  = need.filter(g => g.league === 'nba');
+    const wnbaGames = need.filter(g => g.league === 'wnba');
     const toBody = arr => arr.map(g => ({
       gameId: g.gameId,
       away: (g.away||{}).abbr,
@@ -756,30 +793,8 @@ async function loadPosters(games) {
     if (wnbaGames.length) reqs.push(post('/api/wnba/game-posters', wnbaGames));
     const results = await Promise.all(reqs);
     const allPosters = Object.assign({}, ...results.map(r => r.posters||{}));
-
-    Object.entries(allPosters).forEach(([gid, ids]) => {
-      const el = document.getElementById(`poster-${gid}`);
-      if (!el) return;
-      const g = _games.find(x => x.gameId === gid);
-      if (!g) return;
-      const hsUrl = id => g.league === 'wnba'
-        ? `https://ak-static.cms.nba.com/wp-content/uploads/headshots/wnba/latest/260x190/${id}.png`
-        : `https://cdn.nba.com/headshots/nba/latest/260x190/${id}.png`;
-      const addHs = (id, side) => {
-        if (!id) return;
-        const img = document.createElement('img');
-        img.alt = '';
-        img.style.cssText = `position:absolute;width:85px;height:75px;${side==='away'?'left:0px':'right:0px'};top:0;object-fit:cover;object-position:top center;opacity:.95;`;
-        img.onload = function() {
-          el.querySelectorAll(`img[data-team-logo][data-side="${side}"]`).forEach(i => i.remove());
-        };
-        img.onerror = function() { this.remove(); };
-        img.src = hsUrl(id);
-        el.appendChild(img);
-      };
-      addHs(ids.away, 'away');
-      addHs(ids.home, 'home');
-    });
+    Object.assign(_posters, allPosters);
+    applyPosters();
   } catch(e) {}
 }
 
