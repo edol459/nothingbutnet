@@ -382,6 +382,10 @@ def _ensure_tables():
         cur.execute("""
             ALTER TABLE game_lists ADD COLUMN IF NOT EXISTS list_type TEXT DEFAULT 'games'
         """)
+        # Whether others may duplicate this list into their own account.
+        cur.execute("""
+            ALTER TABLE game_lists ADD COLUMN IF NOT EXISTS allow_copy BOOLEAN DEFAULT TRUE
+        """)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS player_list_items (
                 id          SERIAL PRIMARY KEY,
@@ -6382,6 +6386,7 @@ def _format_list(row: dict, game_count: int = 0, cover_items: list = None) -> di
         "isPublic":    row["is_public"],
         "isRanked":    bool(row.get("is_ranked", False)),
         "listType":    row.get("list_type", "games") or "games",
+        "allowCopy":   bool(row.get("allow_copy", True)),
         "gameCount":   game_count,
         "createdAt":   str(row.get("created_at", "")),
         "coverItems":  cover_items or [],
@@ -6480,14 +6485,15 @@ def create_list():
         return jsonify({"error": "title must be 100 characters or fewer"}), 400
     desc      = (body.get("description") or "").strip() or None
     is_ranked = bool(body.get("isRanked", False))
+    allow_copy = bool(body.get("allowCopy", True))
     list_type = (body.get("listType") or "games").strip()
     if list_type not in ("games", "players", "player_seasons", "jerseys", "teams", "team_seasons", "performances"):
         list_type = "games"
     conn = get_conn(); cur = conn.cursor()
     cur.execute("""
-        INSERT INTO game_lists (user_id, title, description, is_ranked, list_type)
-        VALUES (%s, %s, %s, %s, %s) RETURNING *
-    """, (user["id"], title, desc, is_ranked, list_type))
+        INSERT INTO game_lists (user_id, title, description, is_ranked, list_type, allow_copy)
+        VALUES (%s, %s, %s, %s, %s, %s) RETURNING *
+    """, (user["id"], title, desc, is_ranked, list_type, allow_copy))
     row = cur.fetchone()
     conn.commit(); cur.close(); conn.close()
     return jsonify({"list": _format_list(row, 0)}), 201
@@ -6871,20 +6877,79 @@ def update_list(list_id):
         return jsonify({"error": "title must be 100 characters or fewer"}), 400
     desc      = (body.get("description") or "").strip() or None
     is_public = body.get("isPublic", True)
-    is_ranked = body.get("isRanked")  # None means don't change
+    is_ranked = body.get("isRanked")   # None means don't change
+    allow_copy = body.get("allowCopy")  # None means don't change
     cur.execute("""
         UPDATE game_lists
         SET title = COALESCE(NULLIF(%s,''), title),
             description = %s,
             is_public = %s,
             is_ranked = CASE WHEN %s IS NULL THEN is_ranked ELSE %s::boolean END,
+            allow_copy = CASE WHEN %s IS NULL THEN allow_copy ELSE %s::boolean END,
             updated_at = NOW()
         WHERE id = %s
         RETURNING *
-    """, (title, desc, bool(is_public), is_ranked, is_ranked, list_id))
+    """, (title, desc, bool(is_public), is_ranked, is_ranked, allow_copy, allow_copy, list_id))
     row = cur.fetchone()
     conn.commit(); cur.close(); conn.close()
     return jsonify({"list": _format_list(row)})
+
+
+# Per-list-type item table + the columns to carry over on a duplicate. Column
+# strings are hardcoded (never user input), so it's safe to interpolate.
+_LIST_ITEM_COPY = {
+    "games":          ("game_list_items",        "game_id, sort_order"),
+    "players":        ("player_list_items",       "player_id, player_name, team, season, sort_order, league, stats"),
+    "player_seasons": ("player_list_items",       "player_id, player_name, team, season, sort_order, league, stats"),
+    "jerseys":        ("jersey_list_items",       "jersey_id, label, image_url, sort_order"),
+    "teams":          ("team_list_items",         "team_abbr, team_name, season, wins, losses, sort_order, league"),
+    "team_seasons":   ("team_list_items",         "team_abbr, team_name, season, wins, losses, sort_order, league"),
+    "performances":   ("performance_list_items",  "game_id, person_id, player_name, league, sort_order"),
+}
+
+
+@app.route("/api/lists/<int:list_id>/duplicate", methods=["POST"])
+@login_required
+def duplicate_list(list_id):
+    """Deep-copy a list (and all its items) into the current user's account so
+    they can edit/reorder their own version. Others may only copy a list that is
+    public AND has allow_copy on; owners can always copy their own."""
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("SELECT * FROM game_lists WHERE id = %s", (list_id,))
+    src = cur.fetchone()
+    if not src:
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    is_owner = src["user_id"] == user["id"]
+    if not is_owner and (not src["is_public"] or not src.get("allow_copy", True)):
+        cur.close(); conn.close()
+        return jsonify({"error": "This list can't be copied"}), 403
+
+    list_type = src.get("list_type") or "games"
+    new_title = (src["title"] or "Untitled")
+    if len(new_title) <= 94:
+        new_title += " (Copy)"
+
+    cur.execute("""
+        INSERT INTO game_lists (user_id, title, description, is_public, is_ranked, list_type, allow_copy)
+        VALUES (%s, %s, %s, TRUE, %s, %s, TRUE) RETURNING *
+    """, (user["id"], new_title, src.get("description"), bool(src.get("is_ranked", False)), list_type))
+    new = cur.fetchone()
+    new_id = new["id"]
+
+    table, cols = _LIST_ITEM_COPY.get(list_type, _LIST_ITEM_COPY["games"])
+    cur.execute(f"""
+        INSERT INTO {table} (list_id, {cols}, added_at)
+        SELECT %s, {cols}, NOW() FROM {table} WHERE list_id = %s
+    """, (new_id, list_id))
+    cur.execute(f"SELECT COUNT(*) AS n FROM {table} WHERE list_id = %s", (new_id,))
+    count = int(cur.fetchone()["n"])
+
+    conn.commit()
+    cover = _list_cover_items(cur, new_id, list_type, bool(new.get("is_ranked")))
+    cur.close(); conn.close()
+    return jsonify({"list": _format_list(new, count, cover)}), 201
 
 
 @app.route("/api/lists/<int:list_id>", methods=["DELETE"])
@@ -11314,13 +11379,15 @@ def browse_players():
     is_wnba  = league == "wnba"
 
     _safe_sort = {
-        "name": "player_name ASC",
-        "pts":  "pts  DESC NULLS LAST",
-        "reb":  "reb  DESC NULLS LAST",
-        "ast":  "ast  DESC NULLS LAST",
-        "stl":  "stl  DESC NULLS LAST",
-        "blk":  "blk  DESC NULLS LAST",
-        "gp":   "gp   DESC NULLS LAST",
+        "name":  "player_name ASC",
+        "pts":   "pts  DESC NULLS LAST",
+        "reb":   "reb  DESC NULLS LAST",
+        "ast":   "ast  DESC NULLS LAST",
+        "stl":   "stl  DESC NULLS LAST",
+        "blk":   "blk  DESC NULLS LAST",
+        "gp":    "gp   DESC NULLS LAST",
+        # Combined production — a simple proxy for "stars / most notable players".
+        "stars": "(COALESCE(pts,0) + COALESCE(reb,0) + COALESCE(ast,0)) DESC NULLS LAST",
     }
     order_sql = _safe_sort.get(sort, "player_name ASC")
 
