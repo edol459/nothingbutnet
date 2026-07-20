@@ -5714,20 +5714,15 @@ def get_user_insights(user_id):
                               "league": r["league"] or "nba", "count": int(r["n"]),
                               "avg_stars": float(r["avg_stars"] or 0)} if r else None)
 
-        # Games reviewed by season — latest + previous (for the "vs last" delta).
-        cur.execute("""
-            SELECT g.season AS season, COUNT(*) AS n
-            FROM game_reviews gr JOIN games g ON g.game_id = gr.game_id
-            WHERE gr.user_id = %s AND g.season IS NOT NULL
-            GROUP BY g.season ORDER BY g.season DESC LIMIT 2
-        """, (user_id,))
-        seasons = cur.fetchall()
-        if seasons:
-            prev = seasons[1] if len(seasons) > 1 else None
-            out["games_this_season"] = {"season": seasons[0]["season"], "count": int(seasons[0]["n"]),
-                                        "prev_count": int(prev["n"]) if prev else None}
-        else:
-            out["games_this_season"] = None
+        # Lifetime totals — games + performances you've logged (all-time). A
+        # per-season "vs last" delta is ambiguous with two leagues (NBA seasons
+        # like "2025-26" and WNBA seasons like "2026" don't share a calendar), so
+        # we show a simple all-time count instead.
+        cur.execute("SELECT COUNT(*) AS n FROM game_reviews WHERE user_id = %s", (user_id,))
+        games_total = int((cur.fetchone() or {}).get("n") or 0)
+        cur.execute("SELECT COUNT(*) AS n FROM performance_reviews WHERE user_id = %s", (user_id,))
+        perf_total = int((cur.fetchone() or {}).get("n") or 0)
+        out["totals"] = {"games": games_total, "performances": perf_total}
 
         # Your average vs the crowd.
         cur.execute("SELECT round(AVG(rating) / 2.0, 2) AS a FROM game_reviews WHERE user_id = %s", (user_id,))
@@ -7691,6 +7686,123 @@ def teams_list():
             teams = [{"teamAbbr": r["team_abbr"], "teamName": r["team_name"]} for r in rows]
         teams.sort(key=lambda t: t["teamName"])
         return jsonify({"teams": teams, "season": latest})
+    finally:
+        cur.close(); conn.close()
+
+
+# NBA conferences aren't stored in team_seasons, so map them by canonical games
+# abbr (stable). The WNBA has no conferences (single-table since 2016).
+_NBA_EAST = {"ATL","BOS","BKN","CHA","CHI","CLE","DET","IND","MIA","MIL","NYK","ORL","PHI","TOR","WAS"}
+_NBA_WEST = {"DAL","DEN","GSW","HOU","LAC","LAL","MEM","MIN","NOP","OKC","PHX","POR","SAC","SAS","UTA"}
+
+
+@app.route("/api/standings")
+def get_standings():
+    """Current-season standings for a league. NBA splits East/West; the WNBA is a
+    single table. W/L/PCT come from team_seasons; streak + last-10 are computed
+    from finished games. GB is relative to each group's leader."""
+    league  = request.args.get("league", "nba").strip().lower()
+    is_wnba = league == "wnba"
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT MAX(season) AS m FROM team_seasons WHERE league = %s", (league,))
+        row = cur.fetchone()
+        season = row["m"] if row else None
+        if not season:
+            return jsonify({"league": league, "season": None, "groups": []})
+
+        cur.execute("""
+            SELECT team_abbr, team_name, wins, losses
+            FROM team_seasons WHERE league = %s AND season = %s
+        """, (league, season))
+        rows = cur.fetchall()
+
+        # Canonicalize to the games abbr. The WNBA has duplicate rows per team:
+        # the games-abbr row carries the CURRENT record but often a placeholder
+        # name (name == abbr), while the standings-abbr row carries the real name
+        # but a stale record. So take the record from the games-abbr row and the
+        # name from whichever row has a real one.
+        teams = {}   # games_abbr -> {abbr, name, wins, losses}
+        if is_wnba:
+            name_for = {}
+            for r in rows:
+                ga = _WNBA_STANDINGS_TO_GAMES.get(r["team_abbr"], r["team_abbr"])
+                nm = r["team_name"]
+                if nm and nm != r["team_abbr"] and nm != ga:
+                    name_for.setdefault(ga, nm)
+                # Prefer the games-abbr row for the record; fall back if it's absent.
+                if r["team_abbr"] == ga or ga not in teams:
+                    teams[ga] = {"abbr": ga, "name": ga,
+                                 "wins": int(r["wins"] or 0), "losses": int(r["losses"] or 0)}
+            for ga, t in teams.items():
+                t["name"] = name_for.get(ga, ga)
+            teams = {a: t for a, t in teams.items() if t["name"] != a}   # drop nameless orphans
+        else:
+            for r in rows:
+                teams[r["team_abbr"]] = {"abbr": r["team_abbr"], "name": r["team_name"],
+                                         "wins": int(r["wins"] or 0), "losses": int(r["losses"] or 0)}
+
+        # Streak + last-10 from finished REGULAR-SEASON games (chronological result
+        # list per team). Regular season only, to match the W/L record — play-in
+        # and playoff games shouldn't move the standings.
+        cur.execute("""
+            SELECT home_team_abbr, away_team_abbr, home_score, away_score
+            FROM games
+            WHERE league = %s AND season = %s AND status = 'Final'
+              AND season_type = 'Regular Season'
+              AND home_score IS NOT NULL AND away_score IS NOT NULL
+            ORDER BY game_date ASC, game_id ASC
+        """, (league, season))
+        seq = {}   # abbr -> ['W','L', ...] oldest→newest
+        for g in cur.fetchall():
+            hs, as_ = g["home_score"], g["away_score"]
+            if hs == as_:
+                continue
+            home_won = hs > as_
+            seq.setdefault(g["home_team_abbr"], []).append("W" if home_won else "L")
+            seq.setdefault(g["away_team_abbr"], []).append("L" if home_won else "W")
+
+        def _streak(s):
+            if not s: return ""
+            last = s[-1]; n = 0
+            for r in reversed(s):
+                if r == last: n += 1
+                else: break
+            return f"{last}{n}"
+
+        def _last10(s):
+            w = s[-10:].count("W"); l = s[-10:].count("L")
+            return f"{w}-{l}"
+
+        def _row(t):
+            s = seq.get(t["abbr"], [])
+            gp = t["wins"] + t["losses"]
+            return {
+                "abbr": t["abbr"], "name": t["name"],
+                "wins": t["wins"], "losses": t["losses"],
+                "pct": round(t["wins"] / gp, 3) if gp else 0.0,
+                "streak": _streak(s), "last10": _last10(s),
+            }
+
+        def _group(members, name):
+            entries = sorted((_row(t) for t in members),
+                             key=lambda x: (x["pct"], x["wins"]), reverse=True)
+            if entries:
+                lead = entries[0]
+                for i, e in enumerate(entries):
+                    e["rank"] = i + 1
+                    e["gb"]   = round(((lead["wins"] - e["wins"]) + (e["losses"] - lead["losses"])) / 2, 1)
+            return {"name": name, "teams": entries}
+
+        vals = list(teams.values())
+        if is_wnba:
+            groups = [_group(vals, "")]
+        else:
+            east = [t for t in vals if t["abbr"] in _NBA_EAST]
+            west = [t for t in vals if t["abbr"] not in _NBA_EAST]
+            groups = [_group(east, "Eastern Conference"), _group(west, "Western Conference")]
+
+        return jsonify({"league": league, "season": season, "groups": groups})
     finally:
         cur.close(); conn.close()
 
