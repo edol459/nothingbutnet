@@ -2329,6 +2329,37 @@ def get_scoreboard():
                     payload = {"games": games, "date": date}
                     _future_sb_cache[date] = {"payload": payload, "ts": _time.time()}
                     return jsonify(payload)
+                else:
+                    # Schedule loaded but lists no games for this date (offseason, or
+                    # next season not yet released). It's authoritative, so return
+                    # empty now instead of falling through to a 15 s ScoreboardV3
+                    # timeout that always fails on the production Railway IP — this
+                    # is what made the app's next-date-with-games scan take ~60 s.
+                    payload = {"games": [], "date": date}
+                    _future_sb_cache[date] = {"payload": payload, "ts": _time.time()}
+                    return jsonify(payload)
+        except Exception:
+            pass  # Fall through to ScoreboardV3
+
+    # Past date with nothing in the DB: consult the CDN schedule before paying for a
+    # ScoreboardV3 timeout. If the schedule is loaded and lists no games that day
+    # (offseason), return empty immediately. Real historical games come from the DB
+    # path above; on the production IP ScoreboardV3 fails anyway, so this only speeds
+    # up the inevitable empty result.
+    if is_past:
+        try:
+            sched = _fetch_nba_schedule()
+            if sched:
+                dt = _dt.strptime(date, "%Y-%m-%d")
+                sched_key = f"{dt.month:02d}/{dt.day:02d}/{dt.year} 00:00:00"
+                gd = next((g for g in sched.get("leagueSchedule", {}).get("gameDates", [])
+                           if g.get("gameDate") == sched_key), None)
+                # gd is None  → date outside the loaded schedule (offseason gap)
+                # gd present but no games → scheduled off-day
+                if gd is None or not gd.get("games"):
+                    payload = {"games": [], "date": date}
+                    _past_sb_cache[date] = {"payload": payload, "ts": _time.time()}
+                    return jsonify(payload)
         except Exception:
             pass  # Fall through to ScoreboardV3
 
@@ -2339,7 +2370,7 @@ def get_scoreboard():
         board = scoreboardv3.ScoreboardV3(
             game_date=dt.strftime("%Y-%m-%d"),
             league_id="00",
-            timeout=15,
+            timeout=8,
         )
         gh_df = board.game_header.get_data_frame()
 
