@@ -676,6 +676,11 @@ function buildCard(g) {
   const evTitle = isEvent
     ? ((g.gameLabel.match(/rising stars|all[-\s]?star(?:\s+game)?/i) || [g.gameLabel])[0])
     : '';
+  // When the backend knows both captains, keep the headshot poster; else marquee.
+  const evHs = id => lg==='wnba'
+    ? `https://ak-static.cms.nba.com/wp-content/uploads/headshots/wnba/latest/260x190/${id}.png`
+    : `https://cdn.nba.com/headshots/nba/latest/260x190/${id}.png`;
+  const hasCaps = isEvent && away.captainId && home.captainId;
 
   let status;
   if (live) {
@@ -708,7 +713,14 @@ function buildCard(g) {
     </div>`;
   };
 
-  const poster = isEvent
+  const poster = hasCaps
+    ? `<div style="margin:0 0 11px;height:64px;border-radius:9px 9px 0 0;overflow:hidden;position:relative;background:linear-gradient(120deg,var(--gold) 0%,var(--orange) 100%);">
+    <div style="position:absolute;top:7px;left:8px;font-family:var(--ff-mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:#fff;background:rgba(0,0,0,.28);padding:2px 6px;border-radius:3px;z-index:1;">${lg.toUpperCase()}</div>
+    <img src="${evHs(away.captainId)}" alt="" style="position:absolute;left:0;top:0;width:85px;height:75px;object-fit:cover;object-position:top center;" onerror="this.style.display='none'">
+    <img src="${evHs(home.captainId)}" alt="" style="position:absolute;right:0;top:0;width:85px;height:75px;object-fit:cover;object-position:top center;" onerror="this.style.display='none'">
+    <span style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:16px;filter:drop-shadow(0 1px 4px rgba(0,0,0,.45));">★</span>
+  </div>`
+    : isEvent
     ? `<div style="margin:0 0 11px;height:64px;border-radius:9px 9px 0 0;overflow:hidden;position:relative;background:linear-gradient(120deg,var(--gold) 0%,var(--orange) 100%);display:flex;align-items:center;justify-content:center;gap:9px;">
     <div style="position:absolute;top:7px;left:8px;font-family:var(--ff-mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:#fff;background:rgba(0,0,0,.28);padding:2px 6px;border-radius:3px;z-index:1;">${lg.toUpperCase()}</div>
     <span style="font-size:18px;filter:drop-shadow(0 1px 3px rgba(0,0,0,.3));">★</span>

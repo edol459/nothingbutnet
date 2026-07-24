@@ -1727,13 +1727,36 @@ _POLL_SOON_S      = 20   # upcoming games today (pregame window)
 _POLL_IDLE_S      = 300  # no games today
 
 
+# Manually-maintained captain headshots for exhibition games (All-Star, Rising
+# Stars). The CDN names each team after its captain ("Team Spoon") but exposes no
+# player id, so map the captain here once rosters are set: key by the CDN team
+# slug (preferred, readable) or tricode, value = the captain's NBA/WNBA personId.
+# When BOTH captains resolve, the clients show the headshot poster (built from the
+# game's league); otherwise they fall back to the ★ marquee. Refresh yearly.
+#   e.g.  "spoon": 1642289,   # Napheesa Collier   (WNBA 2026)
+#         "coop":  1631024,   # <captain>          (WNBA 2026)
+_EVENT_CAPTAINS: dict[str, int] = {
+}
+
+
+def _event_captain_id(team: dict) -> int | None:
+    """Resolve an exhibition team's captain personId from _EVENT_CAPTAINS, trying
+    the CDN teamSlug then the tricode (both feeds vary in which they include)."""
+    for k in ((team.get("teamSlug") or "").strip().lower(),
+              (team.get("teamTricode") or "").strip().lower()):
+        if k and k in _EVENT_CAPTAINS:
+            return _EVENT_CAPTAINS[k]
+    return None
+
+
 def _attach_event_meta(game: dict, raw: dict) -> None:
     """Enrich a built game dict with special-event fields for exhibition games
     (All-Star, Rising Stars, Celebrity) from the raw CDN/schedule entry: the event
-    title (``gameLabel``) and full team display names ("Team Spoon"). Gated to
-    exhibitions only — playoff/NBA Cup labels are intentionally skipped so their
-    cards keep the normal team treatment. No-op (unchanged payload) for everything
-    else. The clients render the marquee "event" card whenever ``gameLabel`` is set."""
+    title (``gameLabel``), full team display names ("Team Spoon"), and each team's
+    captain personId (``captainId``) when known. Gated to exhibitions only —
+    playoff/NBA Cup labels are intentionally skipped so their cards keep the normal
+    team treatment. No-op (unchanged payload) for everything else. The clients show
+    the captain-headshot poster when both captainIds are present, else the marquee."""
     label = (raw.get("gameLabel") or "").strip()
     low = label.lower()
     if not label or not any(k in low for k in ("all-star", "all star", "rising stars", "celebrity")):
@@ -1741,10 +1764,15 @@ def _attach_event_meta(game: dict, raw: dict) -> None:
     game["gameLabel"] = label
     for side, key in (("away", "awayTeam"), ("home", "homeTeam")):
         t = raw.get(key, {}) or {}
+        if not isinstance(game.get(side), dict):
+            continue
         nm = " ".join(x for x in [(t.get("teamCity") or "").strip(),
                                   (t.get("teamName") or "").strip()] if x)
-        if nm and isinstance(game.get(side), dict):
+        if nm:
             game[side]["name"] = nm
+        cap = _event_captain_id(t)
+        if cap:
+            game[side]["captainId"] = cap
 
 
 def _parse_cdn_scoreboard(cdn_data: dict, game_today: str) -> dict | None:
