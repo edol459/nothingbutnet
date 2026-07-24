@@ -454,6 +454,8 @@ function nbaLogo(a)  { const id=NBA_IDS[a];  return id?`https://cdn.nba.com/logo
 function wnbaLogo(a) { const id=WNBA_IDS[(a||'').toUpperCase()]; return id?`https://cdn.wnba.com/logos/wnba/${id}/global/L/logo.svg`:null; }
 function teamLogo(a,lg) { return lg==='wnba' ? wnbaLogo(a) : nbaLogo(a); }
 function teamColor(a,lg){ return (lg==='wnba'?WNBA_COLOR:NBA_COLOR)[(a||'').toUpperCase()]||'#555'; }
+// Set All-Star graphics per league (transparent PNGs in /frontend).
+const EVENT_IMAGES = { wnba: '/wnba_allstar.png', nba: '/nba_allstar.png' };
 
 // ── State ──────────────────────────────────────────────────────
 const SB = { today:todayStr(), date:null, league:'all', loading:false, timer:null };
@@ -671,16 +673,14 @@ function buildCard(g) {
 
   // Special event (All-Star, Rising Stars, …): the CDN gives us a gameLabel and
   // captain-team names ("Team Spoon") but no real logos/colors, which otherwise
-  // renders a flat-gray poster + 🏀 rows. Detect it and show a marquee card.
+  // renders a flat-gray poster + 🏀 rows. Show a set All-Star graphic when we have
+  // one for this league, otherwise a ★ marquee with the event title.
   const isEvent = !!g.gameLabel && !al && !hl;
   const evTitle = isEvent
     ? ((g.gameLabel.match(/rising stars|all[-\s]?star(?:\s+game)?/i) || [g.gameLabel])[0])
     : '';
-  // When the backend knows both captains, keep the headshot poster; else marquee.
-  const evHs = id => lg==='wnba'
-    ? `https://ak-static.cms.nba.com/wp-content/uploads/headshots/wnba/latest/260x190/${id}.png`
-    : `https://cdn.nba.com/headshots/nba/latest/260x190/${id}.png`;
-  const hasCaps = isEvent && away.captainId && home.captainId;
+  const isAllStar = isEvent && /all[-\s]?star/i.test(g.gameLabel);
+  const evImg = isAllStar ? EVENT_IMAGES[lg] : null;
 
   let status;
   if (live) {
@@ -713,12 +713,10 @@ function buildCard(g) {
     </div>`;
   };
 
-  const poster = hasCaps
-    ? `<div style="margin:0 0 11px;height:64px;border-radius:9px 9px 0 0;overflow:hidden;position:relative;background:linear-gradient(120deg,var(--gold) 0%,var(--orange) 100%);">
+  const poster = evImg
+    ? `<div style="margin:0 0 11px;height:64px;border-radius:9px 9px 0 0;overflow:hidden;position:relative;background:linear-gradient(135deg,#17173f 0%,#241a3d 100%);display:flex;align-items:center;justify-content:center;">
     <div style="position:absolute;top:7px;left:8px;font-family:var(--ff-mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:#fff;background:rgba(0,0,0,.28);padding:2px 6px;border-radius:3px;z-index:1;">${lg.toUpperCase()}</div>
-    <img src="${evHs(away.captainId)}" alt="" style="position:absolute;left:0;top:0;width:85px;height:75px;object-fit:cover;object-position:top center;" onerror="this.style.display='none'">
-    <img src="${evHs(home.captainId)}" alt="" style="position:absolute;right:0;top:0;width:85px;height:75px;object-fit:cover;object-position:top center;" onerror="this.style.display='none'">
-    <span style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:16px;filter:drop-shadow(0 1px 4px rgba(0,0,0,.45));">★</span>
+    <img src="${evImg}" alt="${evTitle}" style="height:56px;width:auto;max-width:86%;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.4));">
   </div>`
     : isEvent
     ? `<div style="margin:0 0 11px;height:64px;border-radius:9px 9px 0 0;overflow:hidden;position:relative;background:linear-gradient(120deg,var(--gold) 0%,var(--orange) 100%);display:flex;align-items:center;justify-content:center;gap:9px;">
