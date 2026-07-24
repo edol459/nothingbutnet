@@ -641,6 +641,30 @@ def _ensure_tables():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_poeltl_results_user ON poeltl_results(user_id, mode)")
+
+        # ── In-progress daily state (anti-replay) ────────────────────
+        # Saved mid-run so exiting and re-entering resumes where you left off
+        # instead of restarting the daily from scratch. Cleared implicitly by
+        # the date key rolling over; the completed run still lands in *_results.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS survival_progress (
+                user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                date       DATE NOT NULL,
+                picks      JSONB NOT NULL,        -- ordered chosen player_ids so far
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (user_id, date)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS poeltl_progress (
+                user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                date       DATE NOT NULL,
+                guesses    JSONB NOT NULL,        -- ordered guesses so far (0 = reveal-a-clue)
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (user_id, date)
+            )
+        """)
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS game_watches (
                 user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -11256,11 +11280,44 @@ def survival_daily():
     cur.execute("SELECT score FROM survival_results "
                 "WHERE user_id = %s AND mode = 'daily' AND date = %s", (user["id"], today))
     r = cur.fetchone()
+    # In-progress picks (anti-replay): if the run was started but not finished,
+    # the client resumes from here with earlier answers locked in.
+    cur.execute("SELECT picks FROM survival_progress WHERE user_id = %s AND date = %s",
+                (user["id"], today))
+    prow = cur.fetchone()
+    progress = prow["picks"] if prow else None
     best, streak = _survival_streak_best(cur, user["id"])
     return jsonify({
         "date": today, "lives": survival_api.LIVES, "questions": run,
-        "your_result": (r["score"] if r else None), "best": best, "streak": streak,
+        "your_result": (r["score"] if r else None), "progress": progress,
+        "best": best, "streak": streak,
     })
+
+
+@app.route("/api/survival/daily/progress", methods=["POST"])
+@login_required
+def survival_daily_progress():
+    """Persist the player's in-progress daily picks so exiting mid-run resumes
+    instead of restarting. Ordered list of chosen player_ids (one per answered
+    question). No-op once a final result exists for the day (the run is over)."""
+    user  = current_user()
+    data  = request.get_json(force=True, silent=True) or {}
+    today = _survival_today().isoformat()
+    conn  = get_conn(); cur = conn.cursor()
+
+    cur.execute("SELECT 1 FROM survival_results "
+                "WHERE user_id = %s AND mode = 'daily' AND date = %s", (user["id"], today))
+    if cur.fetchone():
+        return jsonify({"ok": True, "final": True})
+
+    picks = [p for p in (data.get("picks") or []) if isinstance(p, int)]
+    cur.execute("""INSERT INTO survival_progress (user_id, date, picks, updated_at)
+                   VALUES (%s, %s, %s, NOW())
+                   ON CONFLICT (user_id, date)
+                   DO UPDATE SET picks = EXCLUDED.picks, updated_at = NOW()""",
+                (user["id"], today, psycopg2.extras.Json(picks)))
+    conn.commit()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/survival/daily/result", methods=["POST"])
@@ -11296,6 +11353,9 @@ def survival_daily_result():
     cur.execute("""INSERT INTO survival_results (user_id, mode, date, score)
                    VALUES (%s, 'daily', %s, %s)
                    ON CONFLICT (user_id, mode, date) DO NOTHING""", (user["id"], today, score))
+    # Run is over — drop the in-progress row (the completed result now lives in
+    # survival_results; leaving stale progress around serves no purpose).
+    cur.execute("DELETE FROM survival_progress WHERE user_id = %s AND date = %s", (user["id"], today))
 
     # Ball Knowledge XP — once per day: +10 for playing + 5 per correct (no perfect bonus)
     play_xp, per_correct = 10, 5
@@ -11423,6 +11483,17 @@ def poeltl_daily():
     }
     if r:                                  # already played → reveal everything (clues/answer/opp/date)
         body.update(poeltl_api.end_reveal(daily))
+    else:
+        # In-progress (anti-replay): resume from saved guesses + the clues they've
+        # already unlocked, so exiting and re-entering doesn't hand back a clean board.
+        cur.execute("SELECT guesses FROM poeltl_progress WHERE user_id = %s AND date = %s",
+                    (user["id"], today))
+        prow = cur.fetchone()
+        if prow and prow["guesses"]:
+            saved = [g for g in prow["guesses"] if isinstance(g, int)]
+            scored = poeltl_api.score_guesses(daily, saved)
+            body["progress"] = {"guesses": saved, "revealed": scored["revealed"],
+                                "results": scored["results"]}
     return jsonify(body)
 
 
@@ -11444,6 +11515,19 @@ def poeltl_guess():
     guesses = [g for g in (data.get("guesses") or []) if isinstance(g, int)]
     res = poeltl_api.score_guesses(daily, guesses)
 
+    # Persist in-progress guesses (anti-replay) so exiting mid-round resumes here
+    # rather than restarting. Skipped once a final result already exists for today.
+    cur.execute("SELECT 1 FROM poeltl_results "
+                "WHERE user_id = %s AND mode = 'daily' AND date = %s", (user["id"], today))
+    already_final = cur.fetchone() is not None
+    if not already_final and not res["done"]:
+        cur.execute("""INSERT INTO poeltl_progress (user_id, date, guesses, updated_at)
+                       VALUES (%s, %s, %s, NOW())
+                       ON CONFLICT (user_id, date)
+                       DO UPDATE SET guesses = EXCLUDED.guesses, updated_at = NOW()""",
+                    (user["id"], today, psycopg2.extras.Json(guesses)))
+        conn.commit()
+
     out = dict(res)
     if res["done"]:
         solved = res["solved"]
@@ -11452,6 +11536,7 @@ def poeltl_guess():
                        VALUES (%s, 'daily', %s, %s, %s)
                        ON CONFLICT (user_id, mode, date) DO NOTHING""",
                     (user["id"], today, solved, used))
+        cur.execute("DELETE FROM poeltl_progress WHERE user_id = %s AND date = %s", (user["id"], today))
         # XP: +10 for playing, +10 more for solving.
         xp_amount = 20 if solved else 10
         new_total = _grant_xp(cur, user["id"], "poeltl_daily", today, xp_amount)
