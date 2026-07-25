@@ -2829,25 +2829,14 @@ def get_top_performers():
         except Exception:
             pass
     else:
-        actual_date = date
-        raw_games = []
-        # Future date explicitly requested — best-effort ScoreboardV3, but with
-        # a short timeout so a blocked cloud IP fails fast instead of pinning
-        # a worker thread for 30s.
-        try:
-            from nba_api.stats.endpoints import scoreboardv3
-            dt = _dt.strptime(date, "%Y-%m-%d")
-            board = scoreboardv3.ScoreboardV3(
-                game_date=dt.strftime("%Y-%m-%d"),
-                league_id="00",
-                timeout=8,
-            )
-            gh_df = board.game_header.get_data_frame()
-            raw_games = [{"gameId": str(r.get("gameId", "") or r.get("GAME_ID", ""))}
-                         for _, r in gh_df.iterrows()
-                         if r.get("gameId") or r.get("GAME_ID")]
-        except Exception as e:
-            return jsonify({"error": str(e), "players": [], "date": date}), 200
+        # Future date: no games have been played, so there are never any top
+        # performers. Return immediately. The old ScoreboardV3 lookup here hit
+        # stats.nba.com, which is BLOCKED on Railway's datacenter IP and hung the
+        # full 8s timeout on EVERY request for a future date (e.g. the eve of
+        # All-Star), pinning a worker thread each time. The CDN schedule already
+        # drives the future scoreboard; performers stay empty until a game is
+        # played. See docs/cdn-akamai-bot-manager.md.
+        return jsonify({"players": [], "date": date}), 200
 
     def get_gid(g):
         return g.get("gameId") or g.get("GAME_ID") or ""
