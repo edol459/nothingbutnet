@@ -4,7 +4,9 @@
       {
         "appIDs": ["RHB7DB5Q97.net.ydkball.ydkball"],
         "components": [
-          { "/": "/profile/*" }
+          { "/": "/profile/*" },
+          { "/": "/list/*" },
+          { "/": "/lists/*" }
         ]
       }
     ]

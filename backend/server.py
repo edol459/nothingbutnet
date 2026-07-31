@@ -20,7 +20,7 @@ os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
 import json
 import math
 from datetime import date
-from flask import Flask, jsonify, request, Response
+from flask import Flask, jsonify, request, Response, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 import psycopg2
@@ -38,26 +38,23 @@ CORS(app)
 def index():
     return app.send_static_file('index.html')
 
+# Universal Links. iOS fetches this at install/update time and only routes the
+# paths listed in it into the app; everything else stays in the browser. The
+# file in frontend/.well-known/ is the single source of truth — this route just
+# serves it with the required application/json type (no redirect, no auth).
+# Editing the path list here means shipping an app update too, since devices
+# cache the association: deploy the backend change FIRST.
 @app.route('/.well-known/apple-app-site-association')
 def aasa():
-    import json
-    data = {
-        "applinks": {
-            "details": [
-                {
-                    "appIDs": ["RHB7DB5Q97.net.ydkball.ydkball"],
-                    "components": [
-                        { "/": "/profile/*" }
-                    ]
-                }
-            ]
-        }
-    }
-    return app.response_class(
-        response=json.dumps(data),
-        status=200,
-        mimetype='application/json'
+    return send_from_directory(
+        os.path.join(FRONTEND_DIR, '.well-known'),
+        'apple-app-site-association',
+        mimetype='application/json',
     )
+
+# App Store id for net.ydkball.ydkball — used by the Smart App Banner on shared
+# list/profile pages and by the "Get the app" CTAs.
+APP_STORE_ID = "6766407610"
 
 DATABASE_URL  = os.getenv("DATABASE_URL")
 
@@ -6851,7 +6848,12 @@ def _fetch_public_list(list_id: int):
 def public_list_page(list_id):
     import html as _html
     lst, _labels, total, creator = _fetch_public_list(list_id)
+    # Railway terminates TLS upstream, so request.url_root comes back as http://
+    # and the emitted og:/app-argument URLs don't match the https page. Force the
+    # public scheme (but leave local dev on http so it still resolves).
     base = request.url_root.rstrip("/")
+    if not request.host.startswith(("localhost", "127.0.0.1")):
+        base = base.replace("http://", "https://", 1)
     if lst:
         title = lst["title"]
         og_title = f"{title} — ydkball"
@@ -6863,13 +6865,21 @@ def public_list_page(list_id):
         og_desc = "NBA & WNBA scores, stats, game reviews, and daily games."
         og_image = f"{base}/og-image.png"
 
+    # Smart App Banner: on iOS Safari this offers the app, and `app-argument`
+    # hands this same URL to the app so a post-install open lands on the list.
+    # (Anyone who already has the app never sees this page — the universal link
+    # opens the app directly; see the AASA route.)
+    banner = (f'<meta name="apple-itunes-app" content="app-id={APP_STORE_ID}, '
+              f'app-argument={base}/list/{list_id}">\n') if lst else ''
+
     meta = (
+        f'{banner}'
         f'<title>{_html.escape(og_title)}</title>\n'
         f'<meta name="description" content="{_html.escape(og_desc)}">\n'
         f'<meta property="og:title" content="{_html.escape(og_title)}">\n'
         f'<meta property="og:description" content="{_html.escape(og_desc)}">\n'
         f'<meta property="og:image" content="{_html.escape(og_image)}">\n'
-        f'<meta property="og:url" content="{_html.escape(request.url)}">\n'
+        f'<meta property="og:url" content="{_html.escape(f"{base}/list/{list_id}")}">\n'
         f'<meta property="og:type" content="website">\n'
         f'<meta name="twitter:card" content="summary_large_image">\n'
         f'<meta name="twitter:image" content="{_html.escape(og_image)}">'

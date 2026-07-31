@@ -46,6 +46,8 @@ body{font-family:var(--ff-sans);background:var(--paper);color:var(--ink);min-hei
 .btn:hover{border-color:var(--orange);}
 .btn.primary{background:var(--orange);border-color:var(--orange);color:#fff;}
 .btn.primary:hover{opacity:.9;}
+.btn svg{flex-shrink:0;}
+.btn.appbtn{border-color:var(--ink3);color:var(--ink);}
 
 /* podium — 2nd/1st/3rd medal order, #1 raised (matches the native app's podium) */
 .podium{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:22px;align-items:end;}
@@ -117,6 +119,16 @@ const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2200);}
 const TYPES={games:'Games',performances:'Performances',players:'Players',player_seasons:'Player Seasons',teams:'Teams',team_seasons:'Team Seasons',jerseys:'Jerseys'};
 const m=location.pathname.match(/\/lists?\/(\d+)/); const listId=m?m[1]:null;
+
+// Anyone on iOS with the app installed never reaches this page — the universal
+// link opens the app instead. So an iOS visitor here almost certainly needs the
+// app, and gets an install CTA in place of the generic one. (Safari also shows
+// the native Smart App Banner; in-app browsers like Instagram's don't, which is
+// exactly where shared links get opened.)
+const APP_STORE_URL='https://apps.apple.com/app/id6766407610';
+const APPLE_MARK='<svg width="13" height="13" viewBox="0 0 384 512" fill="currentColor" aria-hidden="true"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>';
+const IS_IOS=/iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);   // iPadOS reports as Mac
 
 function bg(url){return url?`background-image:url('${url}')`:'';}
 function picHead(pid,league){return `<div class="pic" style="${bg(window.ydkHeadshot&&ydkHeadshot(pid,league))}"></div>`;}
@@ -240,7 +252,8 @@ async function load(){
       <div class="actions">
         <button class="btn" id="likeBtn"><span id="likeIcon" style="color:${list.likedByMe?'#e0245e':'inherit'};font-size:16px;line-height:1;">${list.likedByMe?'♥':'♡'}</span> <span id="likeCount">${list.likeCount||0}</span></button>
         <button class="btn primary" id="shareBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>Share</button>
-        <a class="btn" href="/">Explore ydkball</a>
+        ${IS_IOS?`<a class="btn appbtn" href="${APP_STORE_URL}">${APPLE_MARK} Open in app</a>`
+                :`<a class="btn" href="/">Explore ydkball</a>`}
       </div>
       ${podiumHtml}
       ${rowsHtml}
@@ -249,11 +262,15 @@ async function load(){
         <div id="commentBox"></div>
         <div id="commentList" style="margin-top:14px;"></div>
       </div>
-      <div class="cta">
+      ${IS_IOS?`<div class="cta">
+        <h3>Make your own</h3>
+        <p>Rank the players, games, teams and jerseys you'd defend to the grave — in the ydkball app.</p>
+        <a class="btn primary" href="${APP_STORE_URL}" style="justify-content:center">${APPLE_MARK} Download on the App Store</a>
+      </div>`:`<div class="cta">
         <h3>Think you can do better?</h3>
         <p>Rank the players, games, teams and jerseys you'd defend to the grave — and share the card.</p>
         <a class="btn primary" href="/mylists" style="justify-content:center">Make your list — it's free</a>
-      </div>`;
+      </div>`}`;
     document.getElementById('shareBtn').addEventListener('click',()=>share(list.title));
     wireLike(list);
     renderCommentBox(myId);
