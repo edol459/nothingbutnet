@@ -100,8 +100,8 @@ html { background: var(--paper); }
     padding: 0 16px;
     gap: 0;
   }
-  .site-nav__brand { padding: 9px 0; }
-  .site-nav__auth { padding: 9px 0; margin-left: auto; }
+  .site-nav__brand { padding: 9px 0; min-width: 0; }
+  .site-nav__auth { padding: 9px 0; margin-left: 0; }
   .site-nav__links {
     order: 10;
     flex: 0 0 100%;
@@ -111,8 +111,27 @@ html { background: var(--paper); }
     padding: 5px 0;
   }
   .site-nav__links a { padding: 6px 6px; }
-  .site-nav .nav-support { margin-left: 35%; display: flex; height: 30px; width: 75px; justify-content: center; }
-  .site-nav .nav-support span{ display: none;}
+  /* Support + sign-in share the first row, pinned right. `margin-left: auto`
+     does the pushing; the old rule used a 35% left margin and a fixed 75px
+     width, which overflowed the row and bumped the auth slot onto its own line. */
+  .site-nav .nav-support {
+    margin-left: auto;
+    margin-right: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 30px;
+    padding: 0 12px;
+  }
+  .site-nav .nav-support span { display: none; }   /* drop the ☕, keep the word */
+}
+
+/* Narrow phones: shed padding rather than wrap. */
+@media (max-width: 360px) {
+  .site-nav__bar { padding: 0 12px; }
+  .site-nav__word { font-size: 19px; }
+  .site-nav .nav-support { padding: 0 9px; margin-right: 8px; font-size: 10px; }
+  .site-nav__signin { padding: 6px 10px; }
 }
 
 /* ── Support button — highlighted, sits next to the avatar ── */

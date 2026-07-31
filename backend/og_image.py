@@ -82,13 +82,19 @@ def render_list_card(title: str, subtitle: str, items: list[str], kicker: str = 
     d.rectangle([PAD, y, PAD + 96, y + 5], fill=ORANGE)
     y += 34
 
-    # item preview (numbered) — distribute up to 5 evenly in the space above footer
+    # item preview (numbered) — as many as fit above the footer, evenly spaced.
+    # How much room is left depends on how many lines the title wrapped to, so
+    # the count is derived from the remaining space rather than fixed at 5:
+    # forcing a minimum row height used to push the last rows off the card and
+    # under the ydkball.net watermark.
     fi = _font(_SANS, 34)
     fn = _font(_MONO, 30)
     footer_y = H - PAD - 4
-    n = min(len(items), 5)
+    ROW_H = 44                      # smallest legible row for the 34px item font
+    avail = footer_y - 14 - y       # keeps a gap between the last row and the footer
+    n = min(len(items), 5, max(0, avail // ROW_H))
     if n:
-        step = min(52, max(44, (footer_y - 24 - y) // n))
+        step = min(52, avail // n)
         for i, it in enumerate(items[:n]):
             d.text((PAD, y), f"{i + 1}.", font=fn, fill=ORANGE)
             label = _wrap(d, it, fi, W - 2 * PAD - 64, 1)
