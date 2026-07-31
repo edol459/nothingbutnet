@@ -7429,48 +7429,47 @@ def search_teams():
     conn = get_conn(); cur = conn.cursor()
     results = []
     try:
+        ql = q.lower()
         if list_type == "team_seasons":
-            conditions = ["ts.league = %s"]
-            params = [league]
+            # Historic seasons, so defunct franchises stay — but the WNBA's
+            # duplicate rows per season (games abbr w/ live record + placeholder
+            # name, standings abbr w/ real name + stale record) get merged into
+            # one row: canonical abbr, real name, games-abbr record.
+            cur.execute("""
+                SELECT team_abbr, team_name, season, wins, losses
+                FROM team_seasons WHERE league = %s
+            """, (league,))
+            rows = cur.fetchall()
+            if league == "wnba":
+                merged = {}   # (games_abbr, season) -> row
+                for r in rows:
+                    ga  = _WNBA_STANDINGS_TO_GAMES.get(r["team_abbr"], r["team_abbr"])
+                    key = (ga, r["season"])
+                    m   = merged.setdefault(key, {"teamAbbr": ga, "teamName": None,
+                                                  "season": r["season"],
+                                                  "wins": None, "losses": None})
+                    if r["team_name"] != r["team_abbr"] and not m["teamName"]:
+                        m["teamName"] = r["team_name"]
+                    if r["team_abbr"] == ga or m["wins"] is None:
+                        m["wins"], m["losses"] = r.get("wins"), r.get("losses")
+                rows = [m for m in merged.values() if m["teamName"]]
+            else:
+                rows = [{"teamAbbr": r["team_abbr"], "teamName": r["team_name"],
+                         "season": r["season"], "wins": r.get("wins"), "losses": r.get("losses")}
+                        for r in rows if r["team_name"] != r["team_abbr"]]
             if q:
-                conditions.append("(ts.team_name ILIKE %s OR ts.team_abbr ILIKE %s)")
-                params.extend([f"%{q}%", f"%{q}%"])
-            cur.execute(f"""
-                SELECT ts.team_abbr, ts.team_name, ts.season, ts.wins, ts.losses
-                FROM team_seasons ts
-                WHERE {' AND '.join(conditions)}
-                ORDER BY ts.team_name, ts.season DESC
-                LIMIT 500
-            """, params)
-            for r in cur.fetchall():
-                results.append({
-                    "teamAbbr": r["team_abbr"],
-                    "teamName": r["team_name"],
-                    "season":   r["season"],
-                    "wins":     r.get("wins"),
-                    "losses":   r.get("losses"),
-                })
+                rows = [r for r in rows
+                        if ql in r["teamName"].lower() or ql in r["teamAbbr"].lower()]
+            rows.sort(key=lambda r: r["season"] or "", reverse=True)   # name asc, season desc
+            rows.sort(key=lambda r: r["teamName"])
+            results = rows[:500]
         else:
             def _teams_for(lg: str) -> list:
-                conditions = ["league = %s"]
-                params = [lg]
+                teams, latest = _current_teams(cur, lg)
                 if q:
-                    conditions.append("(team_name ILIKE %s OR team_abbr ILIKE %s)")
-                    params.extend([f"%{q}%", f"%{q}%"])
-                cur.execute(f"""
-                    SELECT DISTINCT ON (team_abbr) team_abbr, team_name,
-                           MAX(season) OVER (PARTITION BY team_abbr) AS latest_season
-                    FROM team_seasons
-                    WHERE {' AND '.join(conditions)}
-                    ORDER BY team_abbr, season DESC
-                    LIMIT 60
-                """, params)
-                return [{
-                    "teamAbbr":     r["team_abbr"],
-                    "teamName":     r["team_name"],
-                    "latestSeason": r.get("latest_season"),
-                    "league":       lg,
-                } for r in cur.fetchall()]
+                    teams = [t for t in teams
+                             if ql in t["teamName"].lower() or ql in t["teamAbbr"].lower()]
+                return [{**t, "latestSeason": latest, "league": lg} for t in teams]
 
             if league == "all":
                 nba, wnba = _teams_for("nba"), _teams_for("wnba")
@@ -7492,6 +7491,36 @@ def search_teams():
 _WNBA_STANDINGS_TO_GAMES = {"LAS": "LA", "LVA": "LV", "NYL": "NY",
                             "GSV": "GS", "WAS": "WSH", "PDX": "POR"}
 _WNBA_GAMES_TO_STANDINGS = {v: k for k, v in _WNBA_STANDINGS_TO_GAMES.items()}
+
+
+def _current_teams(cur, league: str):
+    """The league's CURRENT teams — one row per franchise, canonical games abbr +
+    proper name — as (teams, season). Latest season only, so defunct franchises
+    (Houston Comets, Seattle SuperSonics) drop out; WNBA abbr-variant duplicates
+    collapse; all-star/placeholder rows (team_name == team_abbr) are dropped."""
+    cur.execute("SELECT MAX(season) AS m FROM team_seasons WHERE league = %s", (league,))
+    row = cur.fetchone()
+    latest = row["m"] if row else None
+    if not latest:
+        return [], None
+    cur.execute("""
+        SELECT team_abbr, team_name FROM team_seasons
+        WHERE league = %s AND season = %s
+    """, (league, latest))
+    rows = cur.fetchall()
+    if league == "wnba":
+        best = {}   # games_abbr -> name (prefer real names over placeholders)
+        for r in rows:
+            ga   = _WNBA_STANDINGS_TO_GAMES.get(r["team_abbr"], r["team_abbr"])
+            name = r["team_name"]
+            if ga not in best or (name != ga and best[ga] == ga):
+                best[ga] = name
+        teams = [{"teamAbbr": a, "teamName": n} for a, n in best.items() if n != a]
+    else:
+        teams = [{"teamAbbr": r["team_abbr"], "teamName": r["team_name"]}
+                 for r in rows if r["team_name"] != r["team_abbr"]]
+    teams.sort(key=lambda t: t["teamName"])
+    return teams, latest
 
 
 @app.route("/api/teams/<abbr>/profile")
@@ -7706,27 +7735,7 @@ def teams_list():
     league = request.args.get("league", "nba").strip().lower()
     conn = get_conn(); cur = conn.cursor()
     try:
-        cur.execute("SELECT MAX(season) AS m FROM team_seasons WHERE league = %s", (league,))
-        row = cur.fetchone()
-        latest = row["m"] if row else None
-        if not latest:
-            return jsonify({"teams": [], "season": None})
-        cur.execute("""
-            SELECT team_abbr, team_name FROM team_seasons
-            WHERE league = %s AND season = %s
-        """, (league, latest))
-        rows = cur.fetchall()
-        if league == "wnba":
-            best = {}   # games_abbr -> name (prefer real names over placeholders)
-            for r in rows:
-                ga = _WNBA_STANDINGS_TO_GAMES.get(r["team_abbr"], r["team_abbr"])
-                name = r["team_name"]
-                if ga not in best or (name != ga and best[ga] == ga):
-                    best[ga] = name
-            teams = [{"teamAbbr": a, "teamName": n} for a, n in best.items() if n != a]
-        else:
-            teams = [{"teamAbbr": r["team_abbr"], "teamName": r["team_name"]} for r in rows]
-        teams.sort(key=lambda t: t["teamName"])
+        teams, latest = _current_teams(cur, league)
         return jsonify({"teams": teams, "season": latest})
     finally:
         cur.close(); conn.close()
