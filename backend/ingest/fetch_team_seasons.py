@@ -14,6 +14,7 @@ Usage:
 import os, sys, time, argparse, concurrent.futures
 from dotenv import load_dotenv
 import psycopg2, psycopg2.extras
+import season_util
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -65,9 +66,10 @@ TEAM_NAMES = {
 }
 
 def season_list():
-    """1996-97 through 2025-26."""
+    """1996-97 through the current season (inclusive)."""
+    end = int(season_util.current_season()[:4])
     seasons = []
-    for y in range(1996, 2026):
+    for y in range(1996, end + 1):
         seasons.append(f"{y}-{str(y+1)[-2:]}")
     return seasons
 

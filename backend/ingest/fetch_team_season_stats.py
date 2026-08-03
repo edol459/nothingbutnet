@@ -20,6 +20,7 @@ Usage:
 import os, time, argparse, concurrent.futures
 from dotenv import load_dotenv
 import psycopg2, psycopg2.extras
+import season_util
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -36,9 +37,12 @@ parser.add_argument("--season",       help=argparse.SUPPRESS)
 parser.add_argument("--season-type",  help=argparse.SUPPRESS)
 args = parser.parse_args()
 
-# Current NBA season we have completed data for is 2025-26; WNBA is 2026.
-NBA_SEASONS  = [f"{y}-{str(y+1)[-2:]}" for y in range(1996, 2026)]
-WNBA_SEASONS = [str(y) for y in range(2018, 2027)]
+# Both lists end at the season that has actually been played, so --current
+# (which takes the last entry) can never point at a season with no games yet.
+NBA_SEASONS  = [f"{y}-{str(y+1)[-2:]}"
+                for y in range(1996, int(season_util.current_season()[:4]) + 1)]
+WNBA_SEASONS = [str(y)
+                for y in range(2018, int(season_util.wnba_current_season()) + 1)]
 
 # WNBA team id -> canonical games abbr (reverse of the CDN logo id map).
 WNBA_ID_TO_ABBR = {

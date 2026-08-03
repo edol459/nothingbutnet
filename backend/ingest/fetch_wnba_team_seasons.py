@@ -12,6 +12,7 @@ Usage:
 import os, sys, time, argparse, concurrent.futures
 from dotenv import load_dotenv
 import psycopg2, psycopg2.extras
+import season_util
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -83,7 +84,8 @@ TEAM_NAMES = {
 
 
 def season_list():
-    return [str(y) for y in range(1997, 2027)]
+    """1997 through the current WNBA season (inclusive)."""
+    return [str(y) for y in range(1997, int(season_util.wnba_current_season()) + 1)]
 
 
 def wins_losses_from_games(cur, season):

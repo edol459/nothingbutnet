@@ -30,21 +30,30 @@
 
   /**
    * Populate a <select> with distinct seasons fetched from /api/seasons.
-   * If currentSeason is not yet in the DB (e.g. early October), it is prepended.
-   * Resolves when the dropdown is ready; never rejects (falls back to existing options).
+   *
+   * If currentSeason has no rows yet, the newest season that DOES is selected
+   * instead. The calendar flips to a new season weeks before opening night
+   * (Oct 1 for the NBA, May 1 for the WNBA), and offering a season with nothing
+   * in it just renders empty tables until the first games are played.
+   *
+   * Resolves with the season actually selected, so callers can sync their own
+   * state to it. Never rejects (falls back to existing options).
    */
   async function populateSeasonDropdown(selectEl, currentSeason, source = 'stats') {
     try {
       const res = await fetch(`${_API}/api/seasons?source=${source}`);
       const data = await res.json();
       const all = [...new Set((data.seasons || []).map(s => s.season))].sort().reverse();
-      if (!all.includes(currentSeason)) all.unshift(currentSeason);
+      if (!all.length) return currentSeason;
+      const selected = all.includes(currentSeason) ? currentSeason : all[0];
       selectEl.innerHTML = all
-        .map(s => `<option value="${s}"${s === currentSeason ? ' selected' : ''}>${s.replace('-', '–')}</option>`)
+        .map(s => `<option value="${s}"${s === selected ? ' selected' : ''}>${s.replace('-', '–')}</option>`)
         .join('');
+      return selected;
     } catch {
       // On network error keep existing options, just try to select the right one
       for (const opt of selectEl.options) opt.selected = (opt.value === currentSeason);
+      return currentSeason;
     }
   }
 

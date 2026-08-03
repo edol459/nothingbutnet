@@ -21,8 +21,8 @@ import sys
 import subprocess
 from datetime import datetime
 from dotenv import load_dotenv
-import psycopg2
 import pipeline_status
+import season_util
 
 load_dotenv()
 
@@ -32,22 +32,7 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 def get_current_season():
     """Always returns Regular Season — impact metrics (DARKO, LEBRON, Net Pts)
     only publish regular season data, so we always write to those rows."""
-    try:
-        conn = psycopg2.connect(DATABASE_URL)
-        cur  = conn.cursor()
-        cur.execute("""
-            SELECT season FROM player_seasons
-            WHERE season_type = 'Regular Season'
-            ORDER BY season DESC LIMIT 1
-        """)
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        if row:
-            return row[0], 'Regular Season'
-    except Exception as e:
-        print(f"⚠️  Could not detect season from DB: {e}")
-    return os.getenv('NBA_SEASON', '2025-26'), 'Regular Season'
+    return season_util.current_season(), 'Regular Season'
 
 
 def run(script, label, extra_args=None):
@@ -86,8 +71,9 @@ def main():
 
     season_args = ['--season', season, '--season-type', season_type]
 
-    # WNBA season = calendar year of the second half of NBA season (e.g. "2025-26" → "2026")
-    wnba_year = str(int(season.split('-')[0]) + 1) if '-' in season else season
+    # Resolved independently of the NBA season — deriving it as "NBA start year + 1"
+    # coupled the leagues, so a stalled NBA season silently pinned the WNBA too.
+    wnba_year = season_util.wnba_current_season()
 
     steps = [
         # ── Team W-L records — both computed from games table, Railway-safe ──

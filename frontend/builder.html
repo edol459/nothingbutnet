@@ -1538,7 +1538,9 @@ function navSignOut() {
   window.location.href = '/auth/logout?next=' + encodeURIComponent(window.location.pathname);
 }
 /* initNavAuth(); — replaced by /site-nav.js */
-populateSeasonDropdown(document.getElementById('season-select'), ST.season);
+populateSeasonDropdown(document.getElementById('season-select'), ST.season).then((season) => {
+  ST.season = season;   // may fall back to the newest season that has data
+});
 </script>
 
   <script src="/site-nav.js"></script>

@@ -2559,13 +2559,16 @@ const BUILDER_CATALOG = [
 ];
 
 // ── Season availability ───────────────────────────────────────
-const CURRENT_SEASON = computeCurrentSeason();
-function isPastSeason() { return ST.season !== CURRENT_SEASON; }
+// Impact metrics start in 2025-26 and can't be backfilled. Gate on that floor,
+// NOT on "is this the current season" — every season keeps its own stored
+// metrics, so 2025-26 must not lose its Impact tabs once 2026-27 begins.
+const IMPACT_FIRST_SEASON = '2025-26';
+function seasonLacksImpactData() { return ST.season < IMPACT_FIRST_SEASON; }
 
-// Impact sub-tabs only available in 2025-26 (can't be backfilled)
+// Impact sub-tabs unavailable before IMPACT_FIRST_SEASON
 const PAST_UNAVAILABLE_IMPACT_TABS = new Set(['darko', 'leverage', 'gravity', 'shot_difficulty']);
 
-// Builder keys only available in 2025-26
+// Builder keys unavailable before IMPACT_FIRST_SEASON
 const PAST_UNAVAILABLE_BUILDER_KEYS = new Set([
   'darko_dpm', 'darko_odpm', 'darko_ddpm', 'darko_box',
   'leverage_full', 'leverage_offense', 'leverage_defense', 'leverage_shooting',
@@ -2578,7 +2581,7 @@ const PAST_UNAVAILABLE_BUILDER_KEYS = new Set([
 
 function getDefaultImpactGroup() {
   const subs = STAT_CATS.impact.subs;
-  if (isPastSeason()) {
+  if (seasonLacksImpactData()) {
     return Object.keys(subs).find(k => !PAST_UNAVAILABLE_IMPACT_TABS.has(k)) || Object.keys(subs)[0];
   }
   return Object.keys(subs)[0];
@@ -2618,7 +2621,7 @@ document.getElementById('season-select').addEventListener('change', function() {
   // Re-render impact sub-tabs to reflect which metrics are available for this season
   if (ST.statCat === 'impact') renderSubTabs(ST.statCat);
   // Strip unavailable keys from builder selection when switching to a past season
-  if (isPastSeason()) {
+  if (seasonLacksImpactData()) {
     ST.builderSelected = ST.builderSelected.filter(k => !PAST_UNAVAILABLE_BUILDER_KEYS.has(k));
   }
   // Re-render builder stat list if it's been initialized
@@ -2667,7 +2670,7 @@ function renderSubTabs(cat) {
   const tabBar = document.getElementById('stat-group-tabs');
 
   // If current group is unavailable for this season, switch to the best available default
-  if (cat === 'impact' && isPastSeason() && PAST_UNAVAILABLE_IMPACT_TABS.has(ST.statGroup)) {
+  if (cat === 'impact' && seasonLacksImpactData() && PAST_UNAVAILABLE_IMPACT_TABS.has(ST.statGroup)) {
     ST.statGroup = getDefaultImpactGroup();
     const sub = subs[ST.statGroup];
     ST.sortCol = sub?.defaultSort || 'pts';
@@ -2680,7 +2683,7 @@ function renderSubTabs(cat) {
   };
 
   tabBar.innerHTML = Object.entries(subs).map(([key, sub]) => {
-    const unavailable = cat === 'impact' && isPastSeason() && PAST_UNAVAILABLE_IMPACT_TABS.has(key);
+    const unavailable = cat === 'impact' && seasonLacksImpactData() && PAST_UNAVAILABLE_IMPACT_TABS.has(key);
     const isActive = key === ST.statGroup && !unavailable;
     const badge = SOURCE_TIPS[key]
       ? `<span class="src-info" data-tip="${SOURCE_TIPS[key]}">i</span>`
@@ -3050,7 +3053,7 @@ function renderBuilderStatList(filter = '') {
     html += `<div class="builder-stat-group-items ${isOpen ? 'open' : ''}" data-group-items="${group}">`;
     for (const item of items) {
       const sel = ST.builderSelected.includes(item.key);
-      const unavail = isPastSeason() && PAST_UNAVAILABLE_BUILDER_KEYS.has(item.key);
+      const unavail = seasonLacksImpactData() && PAST_UNAVAILABLE_BUILDER_KEYS.has(item.key);
       html += `
         <button class="builder-stat-item${sel ? ' selected' : ''}${unavail ? ' unavailable' : ''}" data-key="${item.key}"${unavail ? ' disabled title="Not available for past seasons"' : ''}>
           <div class="builder-check">
@@ -3085,7 +3088,7 @@ function renderBuilderStatList(filter = '') {
       e.stopPropagation();
       const group = btn.dataset.groupAll;
       const groupItems = BUILDER_CATALOG.filter(i =>
-        i.group === group && !(isPastSeason() && PAST_UNAVAILABLE_BUILDER_KEYS.has(i.key))
+        i.group === group && !(seasonLacksImpactData() && PAST_UNAVAILABLE_BUILDER_KEYS.has(i.key))
       );
       const groupKeys = groupItems.map(i => i.key);
       const allSelected = groupKeys.every(k => ST.builderSelected.includes(k));
@@ -3348,10 +3351,16 @@ function setStatus(html) {
 renderSubTabs(ST.statCat);  // populates sub-tabs, contextual filters, clears filter vals
 
 // Populate season dropdown from API, then set subtitle to match
-populateSeasonDropdown(document.getElementById('season-select'), ST.season).then(() => {
+populateSeasonDropdown(document.getElementById('season-select'), ST.season).then((season) => {
+  // The dropdown may land on an older season than the calendar suggests (between
+  // Oct 1 and opening night nothing has been played yet) — follow it, and reload
+  // if it moved, so the table matches what's selected.
+  const moved = season !== ST.season;
+  ST.season = season;
   const display = ST.season.replace('-', '–');
   document.getElementById('season-type-select').value = ST.seasonType;
   document.getElementById('page-subtitle').textContent = `${display} · ${ST.seasonType}`;
+  if (moved) { syncImpactTabVisibility(); loadStats(); }
 });
 
 syncImpactTabVisibility();

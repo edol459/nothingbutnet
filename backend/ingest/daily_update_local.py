@@ -27,10 +27,10 @@ Scheduled via: run_daily_local.bat (Windows Task Scheduler)
 import os
 import sys
 import subprocess
-from datetime import datetime, date
+from datetime import datetime
 from dotenv import load_dotenv
-import psycopg2
 import pipeline_status
+import season_util
 
 load_dotenv()
 
@@ -38,35 +38,13 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 
 
 def get_current_season_type() -> str:
-    """Returns 'Playoffs' from ~Apr 20 through June, else 'Regular Season'.
-    Mirrors the same logic used in server.py."""
-    today = date.today()
-    m, d  = today.month, today.day
-    if (m == 4 and d >= 20) or m in (5, 6):
-        return 'Playoffs'
-    return 'Regular Season'
+    """Returns 'Playoffs' from ~Apr 20 through June, else 'Regular Season'."""
+    return season_util.season_type_from_date()
 
 
 def get_current_season():
-    """Season year from DB (always from Regular Season rows); type from today's date."""
-    season_type = get_current_season_type()
-    try:
-        conn = psycopg2.connect(DATABASE_URL)
-        cur  = conn.cursor()
-        # Always anchor year to Regular Season rows — they're always present
-        cur.execute("""
-            SELECT season FROM player_seasons
-            WHERE season_type = 'Regular Season'
-            ORDER BY season DESC LIMIT 1
-        """)
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        if row:
-            return row[0], season_type
-    except Exception as e:
-        print(f"⚠️  Could not detect season from DB: {e}")
-    return os.getenv('NBA_SEASON', '2025-26'), season_type
+    """Season year from the games table; type from today's date."""
+    return season_util.current_season(), get_current_season_type()
 
 
 def run(script, label, extra_args=None):

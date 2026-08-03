@@ -20,6 +20,8 @@ import psycopg2
 from dotenv import load_dotenv
 from nba_api.stats.endpoints import leaguedashplayershotlocations as L
 
+import season_util
+
 load_dotenv()
 
 SEASON_TYPE = "Regular Season"
@@ -28,7 +30,7 @@ DEEP_BUCKETS = {"25-29 ft.", "30-34 ft.", "35-39 ft.", "40+ ft."}
 
 def all_seasons(since="1996-97"):
     start = int(since[:4])
-    end = 2025  # 2025-26 is the latest; bump as seasons are added
+    end = int(season_util.current_season()[:4])
     return [f"{y}-{str(y+1)[-2:]}" for y in range(start, end + 1)]
 
 
@@ -91,7 +93,7 @@ def main():
     conn = psycopg2.connect(os.getenv("DATABASE_URL"))
     ensure_column(conn)
 
-    seasons = all_seasons(args.since) if args.all else [args.season or "2025-26"]
+    seasons = all_seasons(args.since) if args.all else [args.season or season_util.current_season()]
     print(f"Backfilling fgm_25ft_pg for {len(seasons)} season(s): {seasons[0]}…{seasons[-1]}")
     for s in seasons:
         backfill_season(conn, s)

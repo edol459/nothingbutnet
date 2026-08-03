@@ -59,8 +59,8 @@ APP_STORE_ID = "6766407610"
 DATABASE_URL  = os.getenv("DATABASE_URL")
 
 
-def get_current_season() -> str:
-    """Returns the active NBA season string, e.g. '2025-26'.
+def _season_from_today() -> str:
+    """NBA season string for today's date, e.g. '2025-26'.
     October–December → the season that just started.
     January–September → the season that started last October.
     """
@@ -69,6 +69,48 @@ def get_current_season() -> str:
     if m >= 10:
         return f"{y}-{str(y + 1)[2:]}"
     return f"{y - 1}-{str(y)[2:]}"
+
+
+_played_season     = {"value": None, "ts": 0.0}
+_PLAYED_SEASON_TTL = 3600.0
+
+
+def get_current_season() -> str:
+    """Returns the active NBA season string, e.g. '2025-26'.
+
+    Anchored to the newest season that actually has a Final regular-season game,
+    falling back to the calendar. The calendar alone flips on Oct 1, ~3 weeks
+    before opening night, and every stat page would then default to a season with
+    no rows in it. Waiting for a real game means the switch happens when there is
+    something to show.
+
+    Cached for an hour — this backs the default season on most stat endpoints.
+    Deliberately does NOT close the connection: get_conn() hands back a shared
+    thread-local whose close() rolls back, which would throw away the caller's
+    in-flight transaction.
+    """
+    now = _time.time()
+    if _played_season["value"] and now - _played_season["ts"] < _PLAYED_SEASON_TTL:
+        return _played_season["value"]
+    season = None
+    try:
+        cur = get_conn().cursor()
+        try:
+            cur.execute("""
+                SELECT MAX(season) AS s FROM games
+                WHERE league = 'nba' AND season_type = 'Regular Season'
+                  AND status = 'Final' AND season LIKE '____-__'
+            """)
+            row = cur.fetchone()
+            season = (row or {}).get("s")
+        finally:
+            cur.close()
+    except Exception:
+        pass
+    if not season:
+        return _season_from_today()          # not cached — retry on the next call
+    _played_season.update({"value": season, "ts": now})
+    return season
 
 
 def get_current_season_type() -> str:
@@ -80,8 +122,6 @@ def get_current_season_type() -> str:
     return "Regular Season"
 
 
-DEFAULT_SEASON      = os.getenv("NBA_SEASON",      get_current_season())
-DEFAULT_SEASON_TYPE = os.getenv("NBA_SEASON_TYPE", get_current_season_type())
 
 
 class _PersistentConn:
@@ -1164,8 +1204,8 @@ def current_season():
 
 @app.route("/api/players")
 def get_players():
-    season      = request.args.get("season",      DEFAULT_SEASON)
-    season_type = request.args.get("season_type", DEFAULT_SEASON_TYPE)
+    season      = request.args.get("season",      get_current_season())
+    season_type = request.args.get("season_type", get_current_season_type())
     q           = request.args.get("q",           "").strip()
     pos         = request.args.get("pos",         "ALL")
     sort_col    = request.args.get("sort",        "pts")
@@ -1311,8 +1351,8 @@ def get_players():
 def get_stats():
     """Full stat row for a single player."""
     player_id   = request.args.get("player_id")
-    season      = request.args.get("season",      DEFAULT_SEASON)
-    season_type = request.args.get("season_type", DEFAULT_SEASON_TYPE)
+    season      = request.args.get("season",      get_current_season())
+    season_type = request.args.get("season_type", get_current_season_type())
 
     if not player_id:
         return jsonify({"error": "player_id required"}), 400
@@ -1340,8 +1380,8 @@ def get_stats():
 @app.route("/api/stat-keys")
 def get_stat_keys():
     """Return stat keys available in player_pctiles for the Builder."""
-    season      = request.args.get("season",      DEFAULT_SEASON)
-    season_type = request.args.get("season_type", DEFAULT_SEASON_TYPE)
+    season      = request.args.get("season",      get_current_season())
+    season_type = request.args.get("season_type", get_current_season_type())
     try:
         conn = get_conn()
         cur  = conn.cursor()
@@ -1394,8 +1434,8 @@ def run_builder():
       }
     """
     body        = request.get_json() or {}
-    season      = body.get("season",      DEFAULT_SEASON)
-    season_type = body.get("season_type", DEFAULT_SEASON_TYPE)
+    season      = body.get("season",      get_current_season())
+    season_type = body.get("season_type", get_current_season_type())
     selected    = body.get("selected",    [])
     min_minutes = int(body.get("min_minutes", 500))
     pos_filter  = body.get("pos", "ALL")
@@ -1566,8 +1606,8 @@ def builder_pctiles():
         "n": 320
       }
     """
-    season      = request.args.get("season",      DEFAULT_SEASON)
-    season_type = request.args.get("season_type", DEFAULT_SEASON_TYPE)
+    season      = request.args.get("season",      get_current_season())
+    season_type = request.args.get("season_type", get_current_season_type())
     raw_sel     = request.args.get("selected",    "")
     selected    = [s.strip() for s in raw_sel.split(",") if s.strip()]
     min_minutes = int(request.args.get("min_minutes", 500))
@@ -2048,7 +2088,7 @@ def _enrich_games_with_records(games):
     if not games:
         return
 
-    season = os.getenv("NBA_SEASON", "2025-26")
+    season = get_current_season()
     all_abbrs = set()
     playoff_pairs = set()
     for g in games:
@@ -3439,7 +3479,7 @@ def _season_type_from_game_id(game_id: str) -> str:
         "2": "Regular Season",
         "4": "Playoffs",
         "5": "PlayIn",
-    }.get(prefix, os.getenv("NBA_SEASON_TYPE", "Regular Season"))
+    }.get(prefix, "Regular Season")
 
 
 def _season_from_game_id(game_id: str) -> str:
@@ -3453,7 +3493,7 @@ def _season_from_game_id(game_id: str) -> str:
         year = 2000 + yr
         return f"{year}-{str(year + 1)[-2:]}"
     except Exception:
-        return os.getenv("NBA_SEASON", "2025-26")
+        return get_current_season()
 
 
 def _upsert_game_from_boxscore(game_id: str, game: dict, league: str = "nba"):
@@ -7944,6 +7984,28 @@ def reorder_team_items(list_id):
 _EDITION_ORDER = {"Association Edition": 1, "Icon Edition": 2, "Statement Edition": 3, "City Edition": 4}
 
 
+@app.route("/api/jerseys/seasons")
+def jersey_seasons():
+    """Seasons that actually have jerseys ingested, newest first.
+
+    Clients should populate their season picker from this rather than hardcoding
+    a list — otherwise every new season's jerseys need an app release to appear.
+    """
+    league = request.args.get("league", "nba").strip().lower()
+    source = "lockervision_wnba" if league == "wnba" else "lockervision"
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT DISTINCT year_range FROM jerseys
+            WHERE source_slug = %s AND year_range IS NOT NULL
+            ORDER BY year_range DESC
+        """, (source,))
+        seasons = [r["year_range"] for r in cur.fetchall()]
+        return jsonify({"league": league, "seasons": seasons})
+    finally:
+        cur.close(); conn.close()
+
+
 @app.route("/api/jerseys/search")
 def search_jerseys():
     q      = request.args.get("q", "").strip()
@@ -9059,8 +9121,8 @@ _MATCHUP_SORT_PAIRINGS = {'adj_delta', 'possessions', 'opp_season_fg_pct', 'fg_p
 @app.route("/api/matchups/leaders")
 def matchups_leaders():
     """Top defenders ranked by opponent-adjusted FG% allowed, computed from player_matchups."""
-    season      = request.args.get("season",      DEFAULT_SEASON)
-    season_type = request.args.get("season_type", DEFAULT_SEASON_TYPE)
+    season      = request.args.get("season",      get_current_season())
+    season_type = request.args.get("season_type", get_current_season_type())
     min_poss    = max(0, int(request.args.get("min_poss", 200)))
     sort_col    = request.args.get("sort", "impact")
     sort_dir    = request.args.get("dir",  "desc").lower()
@@ -9127,8 +9189,8 @@ def matchups_leaders():
 @app.route("/api/matchups/pairings")
 def matchups_pairings():
     """Individual defender×attacker pairing results."""
-    season      = request.args.get("season",      DEFAULT_SEASON)
-    season_type = request.args.get("season_type", DEFAULT_SEASON_TYPE)
+    season      = request.args.get("season",      get_current_season())
+    season_type = request.args.get("season_type", get_current_season_type())
     min_poss    = max(0, int(request.args.get("min_poss", 100)))
     sort_col    = request.args.get("sort", "adj_delta")
     sort_dir    = request.args.get("dir",  "desc").lower()
@@ -9197,8 +9259,8 @@ def matchups_pairings():
 @app.route("/api/matchups/defender/<int:player_id>")
 def matchups_defender(player_id):
     """Full matchup card for a specific defender."""
-    season      = request.args.get("season",      DEFAULT_SEASON)
-    season_type = request.args.get("season_type", DEFAULT_SEASON_TYPE)
+    season      = request.args.get("season",      get_current_season())
+    season_type = request.args.get("season_type", get_current_season_type())
 
     try:
         conn = get_conn()
@@ -9281,7 +9343,7 @@ def _safe(v):
 
 @app.route("/api/trends")
 def get_trends():
-    season    = request.args.get("season", DEFAULT_SEASON)
+    season    = request.args.get("season", get_current_season())
     n         = int(request.args.get("n", 5))
     team_days = int(request.args.get("team_days", 10))
     if n not in (5, 10, 15):
@@ -9439,7 +9501,7 @@ def get_trends():
 @app.route("/api/trends/gamelog")
 def get_trends_gamelog():
     player_id = request.args.get("player_id", type=int)
-    season    = request.args.get("season",    DEFAULT_SEASON)
+    season    = request.args.get("season",    get_current_season())
 
     if not player_id:
         return jsonify({"error": "player_id required"}), 400
@@ -9493,7 +9555,7 @@ def pva_leaders():
       dir          — "desc" | "asc" (default "desc")
       limit        — max rows (default 200)
     """
-    season      = request.args.get("season",      DEFAULT_SEASON)
+    season      = request.args.get("season",      get_current_season())
     season_type = request.args.get("season_type", "Regular Season")
     min_poss    = request.args.get("min_poss",    200,  type=int)
     sort        = request.args.get("sort",        "total_pva_per_100")
@@ -9577,7 +9639,7 @@ def pva_player(player_id):
     Return all seasons of PVA data for a single player, plus their last
     10 possessions (for game-log flavour context).
     """
-    season      = request.args.get("season",      DEFAULT_SEASON)
+    season      = request.args.get("season",      get_current_season())
     season_type = request.args.get("season_type", "Regular Season")
 
     try:
@@ -11820,7 +11882,7 @@ def get_player_profile(person_id):
             team_abbr = ta_row["team_abbr"] if ta_row else None
 
         wnba_default = _get_wnba_season()
-        fallback_season = wnba_default if is_wnba else DEFAULT_SEASON
+        fallback_season = wnba_default if is_wnba else get_current_season()
         active_season = season if season in unique_seasons else (unique_seasons[0] if unique_seasons else fallback_season)
 
         # ── Season averages ───────────────────────────────────────
