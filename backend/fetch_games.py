@@ -107,12 +107,29 @@ def fetch_season_type(season_type_label: str, season_type_api: str):
         if len(rows) < 2:
             continue  # need both team rows to know home/away
 
-        # MATCHUP format: "BOS vs. LAL" (home team) or "BOS @ LAL" (away team)
-        # Find home and away rows
-        home_rows = rows[rows["MATCHUP"].str.contains("vs\\.", na=False)]
-        away_rows = rows[rows["MATCHUP"].str.contains("@", na=False)]
+        # MATCHUP format: "BOS vs. LAL" (home team's row) or "BOS @ LAL" (away
+        # team's row). Normally one row of each, but for a handful of games per
+        # season the feed emits the "@" form on BOTH rows (e.g. 0022501229,
+        # NYK @ ORL) — keying off the presence of a "vs." row dropped those
+        # games silently. The "@" string itself already names away and home in
+        # order, so resolve them from it and only fall back to the row form.
+        away_abbr = home_abbr = None
+        at_rows = rows[rows["MATCHUP"].str.contains("@", na=False)]
+        if not at_rows.empty:
+            parts = str(at_rows.iloc[0]["MATCHUP"]).split("@")
+            if len(parts) == 2:
+                away_abbr, home_abbr = parts[0].strip(), parts[1].strip()
 
+        if not away_abbr or not home_abbr:
+            print(f"   ⚠️  Game {gid}: cannot resolve home/away from MATCHUP "
+                  f"{list(rows['MATCHUP'])} — skipping")
+            continue
+
+        home_rows = rows[rows["TEAM_ABBREVIATION"] == home_abbr]
+        away_rows = rows[rows["TEAM_ABBREVIATION"] == away_abbr]
         if home_rows.empty or away_rows.empty:
+            print(f"   ⚠️  Game {gid}: MATCHUP names {away_abbr}/{home_abbr} but "
+                  f"rows are {list(rows['TEAM_ABBREVIATION'])} — skipping")
             continue
 
         home = home_rows.iloc[0]

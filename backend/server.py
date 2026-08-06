@@ -366,6 +366,22 @@ def _ensure_tables():
             WHERE LEFT(game_id, 3) = '004'
               AND season_type != 'Playoffs'
         """)
+        # Same class of bug on the WNBA side: _upsert_wnba_game used to hardcode
+        # 'Regular Season', so preseason (101…) and All-Star (103…) games were
+        # counted in team W-L records. WNBA ids share the NBA layout, so the
+        # digit at position 3 is the season type. ESPN-sourced ids (401…) are
+        # excluded — they don't encode it.
+        cur.execute("""
+            UPDATE games g
+            SET season_type = m.st
+            FROM (VALUES ('1','Pre Season'), ('2','Regular Season'),
+                         ('3','All Star'),   ('4','Playoffs'),
+                         ('5','PlayIn')) AS m(digit, st)
+            WHERE g.league = 'wnba'
+              AND g.game_id ~ '^10[0-9]{8}$'
+              AND SUBSTRING(g.game_id, 3, 1) = m.digit
+              AND g.season_type != m.st
+        """)
         cur.execute("""
             ALTER TABLE users ADD COLUMN IF NOT EXISTS night_mode BOOLEAN DEFAULT FALSE
         """)
@@ -3468,15 +3484,20 @@ def players_today():
 
 def _season_type_from_game_id(game_id: str) -> str:
     """
-    Derive season type from the NBA game ID.
-    Format: 00TYYYYYY where T is a single digit at position [2]:
-      1 = Pre-Season, 2 = Regular Season, 4 = Playoffs, 5 = Play-In
+    Derive season type from the NBA/WNBA game ID.
+    Format: LLTYYYYYY where T is a single digit at position [2]:
+      1 = Pre-Season, 2 = Regular Season, 3 = All-Star, 4 = Playoffs, 5 = Play-In
     e.g. 0022400001 → Regular Season, 0042400001 → Playoffs
+
+    WNBA ids use the same layout with league prefix '10' (1012600006 →
+    Pre Season, 1022600002 → Regular Season), so this works for both leagues.
+    ESPN-sourced WNBA ids (401…) do NOT follow it — see _wnba_season_type_from_espn.
     """
     prefix = game_id[2] if len(game_id) >= 3 else ""
     return {
         "1": "Pre Season",
         "2": "Regular Season",
+        "3": "All Star",
         "4": "Playoffs",
         "5": "PlayIn",
     }.get(prefix, "Regular Season")
@@ -10505,19 +10526,25 @@ def _upsert_wnba_game(game_id, game_date, home_abbr, away_abbr, home_score, away
     try:
         conn = get_conn()
         cur  = conn.cursor()
+        # Derive the type from the id — hardcoding 'Regular Season' here let
+        # preseason and All-Star games count toward team W-L records.
+        season_type = _season_type_from_game_id(game_id)
         cur.execute("""
             INSERT INTO games (
                 game_id, season, season_type, game_date,
                 home_team_abbr, away_team_abbr,
                 home_score, away_score, status, league
-            ) VALUES (%s, %s, 'Regular Season', %s, %s, %s, %s, %s, 'Final', 'wnba')
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Final', 'wnba')
             ON CONFLICT (game_id) DO UPDATE SET
-                home_score = EXCLUDED.home_score,
-                away_score = EXCLUDED.away_score,
-                status     = 'Final',
-                updated_at = NOW()
-            WHERE games.status != 'Final' OR games.home_score IS NULL
-        """, (game_id, _get_wnba_season(), game_date,
+                home_score  = EXCLUDED.home_score,
+                away_score  = EXCLUDED.away_score,
+                season_type = EXCLUDED.season_type,
+                status      = 'Final',
+                updated_at  = NOW()
+            WHERE games.status != 'Final'
+               OR games.home_score IS NULL
+               OR games.season_type != EXCLUDED.season_type
+        """, (game_id, _get_wnba_season(), season_type, game_date,
               home_abbr, away_abbr, home_score, away_score))
         conn.commit()
         cur.close(); conn.close()

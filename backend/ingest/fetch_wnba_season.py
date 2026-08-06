@@ -42,6 +42,19 @@ def get_conn():
     return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 
 
+def espn_season_type(event: dict, comp: dict) -> str:
+    """Map an ESPN scoreboard event to our season_type.
+
+    ESPN's `season.type` is 1=preseason, 2=regular, 3=postseason. The All-Star
+    game is season.type 2 (!) and is only distinguishable by the competition's
+    type abbreviation, so check that first.
+    """
+    if (comp.get("type") or {}).get("abbreviation") == "ALLSTAR":
+        return "All Star"
+    return {1: "Pre Season", 2: "Regular Season", 3: "Playoffs"}.get(
+        (event.get("season") or {}).get("type"), "Regular Season")
+
+
 def fetch_day(date_str: str) -> list[dict]:
     """Fetch ESPN WNBA scoreboard for a YYYY-MM-DD string. Returns list of game dicts."""
     compact = date_str.replace("-", "")
@@ -68,8 +81,9 @@ def fetch_day(date_str: str) -> list[dict]:
                 else:
                     away_d = {"abbr": abbr, "score": score}
             games.append({
-                "game_id":    event.get("id", ""),
-                "game_date":  date_str,
+                "game_id":     event.get("id", ""),
+                "season_type": espn_season_type(event, comp),
+                "game_date":   date_str,
                 "home_abbr":  home_d.get("abbr", ""),
                 "away_abbr":  away_d.get("abbr", ""),
                 "home_score": home_d.get("score", 0),
@@ -94,13 +108,14 @@ def upsert_games(games: list[dict], season: str):
                     game_id, season, season_type, game_date,
                     home_team_abbr, away_team_abbr,
                     home_score, away_score, status, league
-                ) VALUES (%s, %s, 'Regular Season', %s, %s, %s, %s, %s, 'Final', 'wnba')
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Final', 'wnba')
                 ON CONFLICT (game_id) DO UPDATE SET
-                    home_score = EXCLUDED.home_score,
-                    away_score = EXCLUDED.away_score,
-                    status     = 'Final',
-                    updated_at = NOW()
-            """, (g["game_id"], season, g["game_date"],
+                    home_score  = EXCLUDED.home_score,
+                    away_score  = EXCLUDED.away_score,
+                    season_type = EXCLUDED.season_type,
+                    status      = 'Final',
+                    updated_at  = NOW()
+            """, (g["game_id"], season, g["season_type"], g["game_date"],
                   g["home_abbr"], g["away_abbr"],
                   g["home_score"], g["away_score"]))
             count += 1
