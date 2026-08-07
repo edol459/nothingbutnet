@@ -76,6 +76,15 @@ def main():
     wnba_year = season_util.wnba_current_season()
 
     steps = [
+        # ── Fill any games the live poller missed. MUST run before the team
+        #    record steps below, which are computed straight from `games` — a
+        #    missing game silently costs a team a W or an L in the standings
+        #    for the rest of the season. ──────────────────────────────────────
+        (
+            'reconcile_games.py',
+            'Reconcile games vs CDN schedules',
+            ['--league', 'both'],
+        ),
         # ── Team W-L records — both computed from games table, Railway-safe ──
         (
             'fetch_team_seasons.py',
