@@ -3182,10 +3182,105 @@ def preview_page():
 _final_boxscore_cache: dict = {}  # game_id -> dict
 
 
+def _minutes_to_pt(mins) -> str:
+    """Float minutes (36.8167) → the CDN's ISO-ish duration ("PT36M49.00S"),
+    which is what every boxscore consumer parses."""
+    try:
+        m = float(mins or 0)
+    except (TypeError, ValueError):
+        return "PT00M00.00S"
+    whole = int(m)
+    secs  = int(round((m - whole) * 60))
+    if secs >= 60:
+        whole += 1
+        secs = 0
+    return f"PT{whole:02d}M{secs:02d}.00S"
+
+
+def _boxscore_from_gamelogs(game_id: str) -> dict | None:
+    """Build a boxscore for a historical NBA game out of `player_gamelogs`.
+
+    The CDN's liveData feed only goes back to 2019-20, and the nba_api fallback
+    below talks to stats.nba.com, which is blocked from Railway — so without
+    this, every pre-2019-20 game page came back empty. player_gamelogs covers
+    1996-97 onward and is already kept fresh by the local pipeline.
+
+    It carries no steals/blocks/turnovers/fouls/plus-minus and no 3PA, so those
+    keys are simply omitted; every consumer reads them as optional and renders a
+    dash. Requires a row in `games`, which only ever holds finished games — that
+    keeps this from serving a stale line for a game still in progress."""
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT home_team_abbr, away_team_abbr, home_score, away_score, game_date
+            FROM games WHERE game_id = %s AND league = 'nba'
+        """, (game_id,))
+        g = cur.fetchone()
+        if not g:
+            return None
+
+        cur.execute("""
+            SELECT player_id, player_name, matchup, min, pts, reb, ast,
+                   fgm, fga, fg3m, ftm, fta
+            FROM player_gamelogs WHERE game_id = %s
+        """, (game_id,))
+        rows = cur.fetchall()
+        if not rows:
+            return None
+
+        sides: dict = {g["home_team_abbr"]: [], g["away_team_abbr"]: []}
+        for r in rows:
+            # "PHI @ BOS" / "BOS vs. PHI" — the leading abbr is the player's own team.
+            abbr = (r["matchup"] or "").split(" ")[0].strip().upper()
+            if abbr not in sides:
+                continue
+            stats = {"minutes": _minutes_to_pt(r["min"])}
+            for key, col in (("points", "pts"), ("reboundsTotal", "reb"),
+                             ("assists", "ast"), ("fieldGoalsMade", "fgm"),
+                             ("fieldGoalsAttempted", "fga"),
+                             ("threePointersMade", "fg3m"),
+                             ("freeThrowsMade", "ftm"),
+                             ("freeThrowsAttempted", "fta")):
+                if r[col] is not None:
+                    stats[key] = int(r[col])
+            sides[abbr].append({
+                "personId": r["player_id"],
+                "name": r["player_name"] or "",
+                "played": "1",
+                "statistics": stats,
+            })
+
+        def _team(abbr, score):
+            players = sides.get(abbr, [])
+            return {
+                "teamId": None, "teamCity": "", "teamName": "",
+                "teamTricode": abbr,
+                "score": int(score) if score is not None
+                         else sum(p["statistics"].get("points", 0) for p in players),
+                "players": players,
+            }
+
+        return {
+            "gameId": game_id,
+            "gameStatus": 3,
+            "gameStatusText": "Final",
+            "homeTeam": _team(g["home_team_abbr"], g["home_score"]),
+            "awayTeam": _team(g["away_team_abbr"], g["away_score"]),
+            "gameTimeUTC": f"{g['game_date']}T00:00:00Z" if g["game_date"] else "",
+            "period": 4,
+            "gameClock": "",
+        }
+    except Exception as e:
+        print(f"[boxscore-gamelogs] {game_id}: {e}", flush=True)
+        return None
+    finally:
+        cur.close(); conn.close()
+
+
 def _fetch_live_boxscore_data(game_id: str) -> dict | None:
-    """Core boxscore fetch (NBA or WNBA): CDN first, nba_api fallback for
-    historical NBA games. Returns the normalized game dict, or None if
-    unavailable. Auto-upserts completed games. Cached indefinitely once Final."""
+    """Core boxscore fetch (NBA or WNBA): CDN first, then player_gamelogs, then
+    nba_api for historical NBA games. Returns the normalized game dict, or None
+    if unavailable. Auto-upserts completed games. Cached indefinitely once Final."""
     if game_id in _final_boxscore_cache:
         return _final_boxscore_cache[game_id]
 
@@ -3208,13 +3303,22 @@ def _fetch_live_boxscore_data(game_id: str) -> dict | None:
     except Exception:
         pass
 
-    # CDN failed — fall back to nba_api for historical NBA games only
+    # CDN failed — historical NBA games only from here down
     if is_wnba:
         return None
 
+    # Our own gamelogs first: instant, and the only option that actually works
+    # from Railway, where stats.nba.com (the nba_api call below) is blocked and
+    # would otherwise stall for the full timeout on every request before 404ing.
+    from_logs = _boxscore_from_gamelogs(game_id)
+    if from_logs:
+        _final_boxscore_cache[game_id] = from_logs
+        return from_logs
+
     try:
         from nba_api.stats.endpoints import boxscoretraditionalv3
-        box = boxscoretraditionalv3.BoxScoreTraditionalV3(game_id=game_id, timeout=30)
+        # Short timeout: unreachable from Railway, so this is a dead wait there.
+        box = boxscoretraditionalv3.BoxScoreTraditionalV3(game_id=game_id, timeout=8)
         raw = box.get_dict()
         # Normalise to the same shape the frontend expects
         bd = raw.get("boxScoreTraditional", {})
@@ -3630,7 +3734,9 @@ def get_live_pbp(game_id):
     if not is_wnba:
         try:
             from nba_api.stats.endpoints import playbyplayv3
-            pbp = playbyplayv3.PlayByPlayV3(game_id=game_id, timeout=30)
+            # Short timeout: stats.nba.com is unreachable from Railway, so a long
+            # one just holds the request open before the inevitable 404.
+            pbp = playbyplayv3.PlayByPlayV3(game_id=game_id, timeout=8)
             raw = pbp.get_dict()
             actions = raw.get("game", {}).get("actions", [])
             return jsonify({"gameId": game_id, "actions": actions})
