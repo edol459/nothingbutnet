@@ -3180,6 +3180,18 @@ def preview_page():
 # Boxscore data never changes once a game is Final — cache indefinitely so
 # repeated internal callers (e.g. /api/players/today) don't re-hit the CDN.
 _final_boxscore_cache: dict = {}  # game_id -> dict
+# Bounded: this used to grow without limit, which only stayed small because
+# pre-2019-20 games always failed to resolve and cached nothing. Now that they
+# resolve from player_gamelogs, browsing history fills it, and a long-lived
+# worker's memory would creep until the next deploy reset it. Insertion-ordered
+# FIFO — a full slate is ~15 games, so this still covers weeks of same-day reuse.
+_FINAL_BOXSCORE_CACHE_MAX = 300
+
+
+def _cache_final_boxscore(game_id: str, data: dict) -> None:
+    _final_boxscore_cache[game_id] = data
+    while len(_final_boxscore_cache) > _FINAL_BOXSCORE_CACHE_MAX:
+        _final_boxscore_cache.pop(next(iter(_final_boxscore_cache)), None)
 
 
 def _minutes_to_pt(mins) -> str:
@@ -3298,7 +3310,7 @@ def _fetch_live_boxscore_data(game_id: str) -> dict | None:
         game = data.get("game", data)
         if game.get("gameStatus") == 3:
             _upsert_game_from_boxscore(game_id, game, league="wnba" if is_wnba else "nba")
-            _final_boxscore_cache[game_id] = game
+            _cache_final_boxscore(game_id, game)
         return game
     except Exception:
         pass
@@ -3312,7 +3324,7 @@ def _fetch_live_boxscore_data(game_id: str) -> dict | None:
     # would otherwise stall for the full timeout on every request before 404ing.
     from_logs = _boxscore_from_gamelogs(game_id)
     if from_logs:
-        _final_boxscore_cache[game_id] = from_logs
+        _cache_final_boxscore(game_id, from_logs)
         return from_logs
 
     try:
@@ -3363,7 +3375,7 @@ def _fetch_live_boxscore_data(game_id: str) -> dict | None:
             "period": game_meta.get("period", 4),
             "gameClock": "",
         }
-        _final_boxscore_cache[game_id] = result
+        _cache_final_boxscore(game_id, result)
         return result
     except Exception:
         return None

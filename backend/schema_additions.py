@@ -48,6 +48,11 @@ CREATE INDEX IF NOT EXISTS idx_gamelogs_player_season
     ON player_gamelogs(player_id, season, season_type, game_date DESC);
 CREATE INDEX IF NOT EXISTS idx_gamelogs_season
     ON player_gamelogs(season, season_type, game_date DESC);
+-- Lookup by game alone, for the historical-boxscore fallback in server.py. The
+-- UNIQUE(player_id, game_id, …) index can't serve this — game_id isn't its
+-- leading column, so Postgres fell back to a skip-scan (~12ms, 6k buffers).
+CREATE INDEX IF NOT EXISTS idx_gamelogs_game_id
+    ON player_gamelogs(game_id);
 
 -- ── Users ────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (
