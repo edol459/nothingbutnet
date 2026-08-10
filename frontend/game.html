@@ -650,7 +650,7 @@ function render(box, pbp) {
   const awayAbbr = box?.awayTeam?.teamTricode || '';
   const homeAbbr = box?.homeTeam?.teamTricode || '';
   if (awayAbbr && homeAbbr) {
-    const { awayColor, homeColor } = resolveTeamColors(awayAbbr, homeAbbr);
+    const { awayColor, homeColor } = resolveTeamColors(awayAbbr, homeAbbr, IS_WNBA ? 'wnba' : 'nba');
     document.documentElement.style.setProperty('--away-color', awayColor);
     document.documentElement.style.setProperty('--home-color', homeColor);
   }

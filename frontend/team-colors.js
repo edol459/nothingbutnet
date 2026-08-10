@@ -129,16 +129,21 @@ function colorDistance(hex1, hex2) {
  * If the away team's primary is too similar to the home team's primary,
  * the away team falls back to their secondary color.
  *
+ * Abbreviations collide across leagues (CHI = Bulls red *and* Sky blue, ATL,
+ * DAL, IND, MIN, PHX, POR, TOR…), so pass the league for WNBA matchups.
+ *
  * @param {string} awayAbbr
  * @param {string} homeAbbr
+ * @param {'nba'|'wnba'} [league='nba']
  * @returns {{ awayColor: string, homeColor: string }}
  */
-function resolveTeamColors(awayAbbr, homeAbbr) {
+function resolveTeamColors(awayAbbr, homeAbbr, league = 'nba') {
   const SIMILARITY_THRESHOLD = 100;
+  const color = (league || '').toLowerCase() === 'wnba' ? getWnbaTeamColor : getTeamColor;
 
-  const awayPrimary   = getTeamColor(awayAbbr, 'primary');
-  const awaySecondary = getTeamColor(awayAbbr, 'secondary');
-  const homePrimary   = getTeamColor(homeAbbr, 'primary');
+  const awayPrimary   = color(awayAbbr, 'primary');
+  const awaySecondary = color(awayAbbr, 'secondary');
+  const homePrimary   = color(homeAbbr, 'primary');
 
   const homeColor = homePrimary;
   const dist = colorDistance(awayPrimary, homePrimary);

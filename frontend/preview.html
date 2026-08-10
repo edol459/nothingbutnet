@@ -807,7 +807,7 @@ async function boot() {
     return;
   }
   // Apply team colors before first render so CSS vars are correct immediately
-  const { awayColor, homeColor } = resolveTeamColors(AWAY, HOME);
+  const { awayColor, homeColor } = resolveTeamColors(AWAY, HOME, LEAGUE);
   document.documentElement.style.setProperty('--away-color', awayColor);
   document.documentElement.style.setProperty('--home-color', homeColor);
 
