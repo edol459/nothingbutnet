@@ -617,6 +617,21 @@ async function loadScoreboard() {
   }
 }
 
+// preview.html needs the matchup itself — pass what the card already knows so it
+// can paint the hero without a round-trip (it falls back to a gameId lookup).
+function previewHref(gid, league) {
+  const g = _games.find(x => String(x.gameId) === String(gid)) || {};
+  const rec = t => (t && t.wins != null) ? `${t.wins}-${t.losses}` : '';
+  const p = new URLSearchParams({ gameId: gid, league: league || g.league || 'nba' });
+  if (g.away?.abbr) p.set('away', g.away.abbr);
+  if (g.home?.abbr) p.set('home', g.home.abbr);
+  if (g.gameStatusText) p.set('time', g.gameStatusText.replace(/\b(am|pm)\b/i, m=>m.toUpperCase()));
+  if (rec(g.away)) p.set('awayRec', rec(g.away));
+  if (rec(g.home)) p.set('homeRec', rec(g.home));
+  if (SB.date) p.set('date', SB.date);
+  return `/preview?${p}`;
+}
+
 function renderBoard() {
   const strip = document.getElementById('scoreboard-strip'); if (!strip) return;
   let games = _games.slice();
@@ -652,9 +667,7 @@ function renderBoard() {
     c.addEventListener('click', () => {
       const gid=c.dataset.gameId, st=+c.dataset.gameStatus;
       if (!gid) return;
-      window.location.href = st===1
-        ? `/preview?gameId=${gid}&league=${c.dataset.league}`
-        : `/game?gameId=${gid}`;
+      window.location.href = st===1 ? previewHref(gid, c.dataset.league) : `/game?gameId=${gid}`;
     });
   });
   applyPosters();  // restore headshots from cache on every re-render (e.g. league switch)

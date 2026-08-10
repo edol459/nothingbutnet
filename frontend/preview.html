@@ -558,12 +558,15 @@ const API = window.location.protocol === 'file:' ? 'http://localhost:5000' : '';
 
 const params  = new URLSearchParams(window.location.search);
 const GAME_ID = params.get('gameId') || '';
-const AWAY    = (params.get('away') || '').toUpperCase();
-const HOME    = (params.get('home') || '').toUpperCase();
-const TIP     = params.get('time') || '';
-const AWAY_REC = params.get('awayRec') || '';
-const HOME_REC = params.get('homeRec') || '';
-const LEAGUE  = (params.get('league') || 'nba').toLowerCase();
+const DATE    = params.get('date') || '';
+// Mutable: when only ?gameId is given (e.g. a shared link), these get filled in
+// by resolveFromGameId() before boot.
+let AWAY     = (params.get('away') || '').toUpperCase();
+let HOME     = (params.get('home') || '').toUpperCase();
+let TIP      = params.get('time') || '';
+let AWAY_REC = params.get('awayRec') || '';
+let HOME_REC = params.get('homeRec') || '';
+let LEAGUE   = (params.get('league') || 'nba').toLowerCase();
 
 // Team ID → logo
 const TEAM_IDS = {
@@ -754,10 +757,55 @@ async function loadRecords() {
   } catch(e) { /* silently keep whatever was rendered */ }
 }
 
+// ── Resolve matchup from ?gameId alone ──────────────────────────
+// The scoreboard cards link with the full matchup in the URL, but a bare
+// /preview?gameId=… (shared link, old bookmark) still has to work — look the
+// game up on the scoreboard for its date, then fall back to the games table.
+async function resolveFromGameId() {
+  if (!GAME_ID) return false;
+  const qs = DATE ? `?date=${encodeURIComponent(DATE)}` : '';
+  const boards = LEAGUE === 'wnba'
+    ? [['wnba', `/api/wnba/scoreboard${qs}`], ['nba', `/api/scoreboard${qs}`]]
+    : [['nba', `/api/scoreboard${qs}`], ['wnba', `/api/wnba/scoreboard${qs}`]];
+
+  for (const [lg, url] of boards) {
+    try {
+      const r = await fetch(`${API}${url}`);
+      if (!r.ok) continue;
+      const d = await r.json();
+      const g = (d.games || []).find(x => String(x.gameId) === String(GAME_ID));
+      if (!g) continue;
+      LEAGUE = lg;
+      AWAY = (g.away?.abbr || '').toUpperCase();
+      HOME = (g.home?.abbr || '').toUpperCase();
+      TIP  = TIP || (g.gameStatusText || '').replace(/\b(am|pm)\b/i, m => m.toUpperCase());
+      if (g.away?.wins != null) AWAY_REC = AWAY_REC || `${g.away.wins}-${g.away.losses}`;
+      if (g.home?.wins != null) HOME_REC = HOME_REC || `${g.home.wins}-${g.home.losses}`;
+      return !!(AWAY && HOME);
+    } catch(e) { /* try the next board */ }
+  }
+
+  // Not on any scoreboard (scheduled far out, or a past date) — try the DB.
+  try {
+    const r = await fetch(`${API}/api/games/${GAME_ID}`);
+    if (r.ok) {
+      const g = (await r.json()).game || {};
+      AWAY = (g.away_team_abbr || '').toUpperCase();
+      HOME = (g.home_team_abbr || '').toUpperCase();
+      if (g.league) LEAGUE = g.league;
+      return !!(AWAY && HOME);
+    }
+  } catch(e) { /* fall through to the empty state */ }
+
+  return false;
+}
+
 // ── Boot ────────────────────────────────────────────────────────
-if (!AWAY || !HOME) {
-  document.getElementById('hero').innerHTML = `<div class="state-msg" style="color:rgba(255,255,255,0.4)">No game specified.</div>`;
-} else {
+async function boot() {
+  if ((!AWAY || !HOME) && !(await resolveFromGameId())) {
+    document.getElementById('hero').innerHTML = `<div class="state-msg" style="color:rgba(255,255,255,0.4)">No game specified.</div>`;
+    return;
+  }
   // Apply team colors before first render so CSS vars are correct immediately
   const { awayColor, homeColor } = resolveTeamColors(AWAY, HOME);
   document.documentElement.style.setProperty('--away-color', awayColor);
@@ -768,6 +816,7 @@ if (!AWAY || !HOME) {
   loadH2H();
   loadRecords();
 }
+boot();
 </script>
 <script>
 // ── Nav auth (shared across all pages) ───────────────────────
