@@ -727,6 +727,16 @@ def _ensure_tables():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_game_watches_user ON game_watches(user_id)")
+        # Last good RSS payload per league, so a worker recycle or a deploy
+        # doesn't blank the news rail while the upstream feeds are refusing our
+        # datacenter IP. Written only by the news refresher thread.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS news_cache (
+                league     TEXT PRIMARY KEY,
+                payload    JSONB NOT NULL,
+                fetched_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
         # performance_reviews DDL (definitions live further down the module;
         # resolved at call time since _ensure_tables runs on first request).
         # This must ONLY run here: ALTER TABLE takes an ACCESS EXCLUSIVE lock
@@ -2607,15 +2617,54 @@ def get_scoreboard():
 
 
 # ── /api/news ─────────────────────────────────────────────────────
-_news_cache: dict = {}       # {"payload": list, "ts": float}
-_wnba_news_cache: dict = {}  # {"payload": list, "ts": float}
+# The RSS feeds are fetched ONLY by the background refresher below — never
+# inline on a user request. From Railway's datacenter IP the Google News fetch
+# routinely takes 6-10s or times out outright (the same feeds answer in <1s
+# from a residential IP), and the old inline version paid that cost on EVERY
+# request: a failed fetch returned the stale payload without refreshing its
+# timestamp, so the 5-minute cache never suppressed the next attempt. That made
+# /api/news the one slow call on the home screen — invisible on web (the news
+# aside fills in late) but very visible in the iOS app, where the scoreboard's
+# secondary loads are awaited in sequence behind it.
+#
+# /api/news is now a memory read, and the last good payload is persisted to
+# `news_cache` so a worker recycle (--max-requests) or a deploy doesn't blank
+# the rail while the upstream is refusing us.
+_news_cache: dict = {}       # {"payload": list, "ts": float, "next": float}
+_wnba_news_cache: dict = {}  # same shape
 
+_NEWS_TTL_S     = 300   # refresh cadence after a successful fetch
+_NEWS_RETRY_S   = 60    # retry cadence after a failed one
+_NEWS_TIMEOUT_S = 6     # per-source cap — the refresher eats this wait, not a user
+
+_NEWS_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+
+# Tried in order; the first source that yields items wins. ESPN is the fallback
+# for when Google won't serve Railway at all.
 _NEWS_SOURCES = [
     ("https://news.google.com/rss/search?q=NBA+basketball&hl=en-US&gl=US&ceid=US:en", None),
+    ("https://www.espn.com/espn/rss/nba/news", "ESPN"),
 ]
 _WNBA_NEWS_SOURCES = [
     ("https://news.google.com/rss/search?q=WNBA+basketball&hl=en-US&gl=US&ceid=US:en", None),
+    ("https://www.espn.com/espn/rss/wnba/news", "ESPN"),
 ]
+
+def _norm_pubdate(raw: str) -> str:
+    """Normalize an RFC-822 pubDate to UTC. ESPN stamps its feeds 'EST', which
+    JS's Date() parses inconsistently, and the web sorts news by pubDate."""
+    if not raw:
+        return raw
+    try:
+        from email.utils import parsedate_to_datetime
+        from datetime import timezone as _tz
+        dt = parsedate_to_datetime(raw)
+        if dt.tzinfo is None:
+            return raw
+        return dt.astimezone(_tz.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    except Exception:
+        return raw
 
 def _parse_rss(content, default_source):
     import xml.etree.ElementTree as ET
@@ -2624,7 +2673,7 @@ def _parse_rss(content, default_source):
     for item in root.iter("item"):
         title    = (item.findtext("title") or "").strip()
         link     = (item.findtext("link") or "").strip()
-        pub_date = (item.findtext("pubDate") or "").strip()
+        pub_date = _norm_pubdate((item.findtext("pubDate") or "").strip())
         source   = (item.findtext("source") or default_source or "NBA").strip()
         # Google News titles end with " - Source Name"; strip it when we have the source
         if source and title.endswith(f" - {source}"):
@@ -2635,39 +2684,113 @@ def _parse_rss(content, default_source):
             break
     return items
 
-def _fetch_news(sources: list, cache: dict) -> dict:
-    """Fetch RSS news from sources, populate cache, return jsonifiable response dict."""
-    if cache.get("payload") and _time.time() - cache.get("ts", 0) < 300:
-        return {"status": "ok", "items": cache["payload"]}
+def _news_http_get(url: str):
+    """GET a feed with a Chrome TLS fingerprint (see docs/cdn-akamai-bot-manager.md),
+    falling back to plain requests if curl_cffi can't complete it.
+
+    Deliberately sends NO headers on the impersonated call: curl_cffi supplies
+    Chrome's full header set in Chrome's order, and injecting our own User-Agent
+    breaks that ordering — ESPN answers a UA-overridden request with an empty
+    HTTP 202 while the untouched impersonation gets a normal 200."""
+    try:
+        return _cdn_get(url, timeout=_NEWS_TIMEOUT_S)
+    except Exception:
+        return _requests.get(url, headers={"User-Agent": _NEWS_UA}, timeout=_NEWS_TIMEOUT_S)
+
+def _news_db_load(league: str):
+    """Last good payload for a league, or None. Own short-lived connection —
+    this runs on a daemon thread, not a request."""
+    try:
+        conn = _new_raw_conn(); cur = conn.cursor()
+        cur.execute("SELECT payload FROM news_cache WHERE league = %s", (league,))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        return (row["payload"] or None) if row else None
+    except Exception as ex:
+        print(f"[news] db load failed ({league}): {ex}", flush=True)
+        return None
+
+def _news_db_save(league: str, items: list):
+    try:
+        conn = _new_raw_conn(); cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO news_cache (league, payload, fetched_at)
+            VALUES (%s, %s::jsonb, NOW())
+            ON CONFLICT (league) DO UPDATE
+               SET payload = EXCLUDED.payload, fetched_at = EXCLUDED.fetched_at
+        """, (league, json.dumps(items)))
+        conn.commit(); cur.close(); conn.close()
+    except Exception as ex:
+        print(f"[news] db save failed ({league}): {ex}", flush=True)
+
+def _news_refresh(league: str, sources: list, cache: dict) -> bool:
+    """Try each source until one yields items. True if the cache was refreshed."""
     for url, default_source in sources:
         try:
-            resp = _requests.get(
-                url,
-                headers={"User-Agent": "Mozilla/5.0 (compatible; NothingButNet/1.0)"},
-                timeout=10,
-            )
+            resp = _news_http_get(url)
             if resp.status_code != 200 or not resp.content:
+                print(f"[news] {league}: {url} → HTTP {resp.status_code}", flush=True)
                 continue
             items = _parse_rss(resp.content, default_source)
             if items:
                 cache["payload"] = items
-                cache["ts"] = _time.time()
-                return {"status": "ok", "items": items}
+                cache["ts"]      = _time.time()
+                _news_db_save(league, items)
+                return True
         except Exception as ex:
-            print(f"[news] error: {ex}", flush=True)
-    if cache.get("payload"):
-        return {"status": "ok", "items": cache["payload"]}
-    return {"status": "error", "message": "all news sources unavailable"}
+            print(f"[news] {league}: {url} failed: {ex}", flush=True)
+    return False
+
+_news_stop   = _threading.Event()
+_news_thread = None
+_NEWS_LEAGUES = (
+    ("nba",  _NEWS_SOURCES,      _news_cache),
+    ("wnba", _WNBA_NEWS_SOURCES, _wnba_news_cache),
+)
+
+def _news_refresher_loop():
+    # Seed from the DB first so a freshly-recycled worker can answer immediately,
+    # then fall into the refresh loop (both leagues are due on the first pass).
+    for league, _sources, cache in _NEWS_LEAGUES:
+        items = _news_db_load(league)
+        if items and not cache.get("payload"):
+            cache["payload"] = items
+    while not _news_stop.is_set():
+        wait = float(_NEWS_TTL_S)
+        for league, sources, cache in _NEWS_LEAGUES:
+            if _time.time() >= cache.get("next", 0):
+                ok = _news_refresh(league, sources, cache)
+                cache["next"] = _time.time() + (_NEWS_TTL_S if ok else _NEWS_RETRY_S)
+            wait = min(wait, max(5.0, cache.get("next", 0) - _time.time()))
+        _news_stop.wait(wait)
+
+def start_news_refresher():
+    global _news_thread
+    if _news_thread and _news_thread.is_alive():
+        return
+    _news_stop.clear()
+    _news_thread = _threading.Thread(
+        target=_news_refresher_loop, daemon=True, name="NewsRefresher",
+    )
+    _news_thread.start()
 
 @app.route("/api/news")
 def get_news():
-    league = request.args.get("league", "nba").lower()
-    if league == "wnba":
-        result = _fetch_news(_WNBA_NEWS_SOURCES, _wnba_news_cache)
-    else:
-        result = _fetch_news(_NEWS_SOURCES, _news_cache)
-    status = 200 if result.get("status") == "ok" else 200
-    return jsonify(result), status
+    league = "wnba" if request.args.get("league", "nba").lower() == "wnba" else "nba"
+    cache  = _wnba_news_cache if league == "wnba" else _news_cache
+    items  = cache.get("payload")
+    if not items and _time.time() >= cache.get("db_check", 0):
+        # Cold worker that took a request before the refresher's DB seed landed.
+        # Rate-limited so an empty table can't turn every request into a query.
+        cache["db_check"] = _time.time() + 30
+        items = _news_db_load(league)
+        if items:
+            cache["payload"] = items
+    if items:
+        return jsonify({"status": "ok", "items": items})
+    return jsonify({"status": "error", "message": "news unavailable"}), 200
+
+start_news_refresher()
 
 
 # ── Injury helpers ───────────────────────────────────────────────
