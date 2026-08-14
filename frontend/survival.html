@@ -714,7 +714,10 @@ async function ensureUnlimited(idx){            // returns null if loaded, else 
 }
 function unlimitedErrorCard(code){
   if(code==='auth') return `<div class="card center"><div class="sub">Sign in to play unlimited runs.</div><a class="btn" href="/auth/google/login?next=/survival?mode=unlimited" style="text-decoration:none;margin-top:18px">Sign in</a></div>`;
-  if(code==='pro')  return `<div class="card center"><img class="resultlogo" src="/transparent.png" alt=""><div class="headline">Unlimited is Pro</div><div class="sub">Unlimited runs with ydkball Pro.<br>Free includes today's daily Higher or Lower.</div><a class="btn ghost" href="/games" style="text-decoration:none;margin-top:18px">Back to games</a></div>`;
+  if(code==='pro'){
+    window.ydkTrack && ydkTrack('paywall_shown', 'survival_unlimited');
+    return `<div class="card center"><img class="resultlogo" src="/transparent.png" alt=""><div class="headline">Unlimited is Pro</div><div class="sub">Unlimited runs with ydkball Pro.<br>Free includes today's daily Higher or Lower.</div><a class="btn ghost" href="/games" style="text-decoration:none;margin-top:18px">Back to games</a></div>`;
+  }
   return `<div class="card center"><div class="sub">Couldn't start unlimited. Try again.</div></div>`;
 }
 

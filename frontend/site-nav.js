@@ -77,4 +77,20 @@
   } else {
     init();
   }
+
+  // ── Analytics ───────────────────────────────────────────────
+  // Fire-and-forget funnel events. Lives here because site-nav.js is the one script
+  // every page already loads. Never awaited and never throws — a blocked request or an
+  // ad blocker must not affect the page. Server allowlists event/source names.
+  window.ydkTrack = function (event, source) {
+    try {
+      fetch('/api/analytics/event', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: event, source: source || 'other', platform: 'web' }),
+        keepalive: true   // still sends if the page is navigating away
+      }).catch(function () {});
+    } catch (e) {}
+  };
 })();

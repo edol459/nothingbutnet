@@ -617,6 +617,29 @@ def _ensure_tables():
             CREATE INDEX IF NOT EXISTS idx_xp_events_user_type_ref
             ON xp_events(user_id, event_type, reference_id)
         """)
+        # Product analytics — deliberately NOT xp_events: that table's xp_amount sums into
+        # users.xp and its writes dedupe on (user_id, event_type, reference_id), so repeat
+        # paywall views would be dropped and the XP totals skewed. Append-only, no dedupe.
+        # user_id is nullable + SET NULL so logged-out paywall views still count.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS analytics_events (
+                id         BIGSERIAL PRIMARY KEY,
+                user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                event_type TEXT NOT NULL,
+                source     TEXT,                          -- surface that fired it
+                platform   TEXT,                          -- 'ios' | 'web' | NULL
+                metadata   JSONB DEFAULT '{}'::jsonb,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_analytics_type_created
+            ON analytics_events(event_type, created_at DESC)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_analytics_user_created
+            ON analytics_events(user_id, created_at DESC)
+        """)
         # Game predictions
         cur.execute("""
             CREATE TABLE IF NOT EXISTS game_odds (
@@ -853,6 +876,90 @@ def _grant_xp(cur, user_id: int, event_type: str, reference_id: str, amount: int
         (amount, user_id)
     )
     return cur.fetchone()["xp"]
+
+
+# ── Product analytics ─────────────────────────────────────────
+# The paywall funnel. `pro_wall_hit` is logged server-side wherever a Pro gate rejects,
+# so it can't be under-reported by an old client; the rest are client-reported through
+# /api/analytics/event. Purchase completion is NOT here — that arrives authoritatively
+# from RevenueCat into revenue_events.
+ANALYTICS_EVENT_TYPES = {
+    "pro_wall_hit",              # user hit a Pro-gated feature and was refused (server-side)
+    "paywall_shown",             # paywall UI presented
+    "paywall_dismissed",         # closed without purchasing
+    "paywall_purchase_started",  # tapped subscribe (may still fail/cancel in StoreKit)
+    "paywall_restore_started",
+}
+
+# Surfaces allowed as `source`. Bounded so a client can't spray unbounded cardinality
+# into the column and wreck the dashboard's GROUP BY.
+ANALYTICS_SOURCES = {
+    "survival_unlimited", "poeltl_unlimited", "review_length",
+    "cosmetics",    # locked rings/titles in the Ball Knowledge picker
+    "profile", "games_hub", "settings", "feed", "onboarding", "other",
+}
+
+
+def log_event(event_type: str, source: str = None, user_id: int = None,
+              platform: str = None, metadata: dict = None, cur=None) -> None:
+    """Fire-and-forget analytics write. Never raises — instrumentation must not be able
+    to break a product request. Pass `cur` to join an existing transaction (the caller
+    then owns the commit); otherwise this opens its own connection and commits."""
+    conn = None
+    try:
+        if cur is None:
+            conn = get_conn()
+            cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO analytics_events (user_id, event_type, source, platform, metadata) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (user_id, event_type, source, platform,
+             psycopg2.extras.Json(metadata or {}))
+        )
+        if conn is not None:
+            conn.commit()
+    except Exception:
+        # Swallow: a failed metric must never surface as a failed request. If we opened the
+        # connection we also own rolling it back, so the caller's next query isn't poisoned.
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
+
+def _log_pro_wall(source: str, user_id: int = None) -> None:
+    """Shorthand for the three server-side Pro gates."""
+    log_event("pro_wall_hit", source=source, user_id=user_id,
+              platform=("ios" if request.headers.get("Authorization") else "web"))
+
+
+@app.route("/api/analytics/event", methods=["POST"])
+def post_analytics_event():
+    """Client-reported funnel events. Deliberately NOT @login_required — logged-out users
+    see paywalls too and those views matter. Event type and source are allowlisted so this
+    can't be used as an open write endpoint; unknown values are rejected rather than stored.
+    Always returns 204 on success so clients can fire-and-forget."""
+    body = request.get_json(silent=True) or {}
+    event_type = (body.get("event") or "").strip()
+    if event_type not in ANALYTICS_EVENT_TYPES:
+        return jsonify({"error": "unknown_event"}), 400
+    # pro_wall_hit is authoritative from the server only — a client claiming it would
+    # double-count against the gates we already instrument.
+    if event_type == "pro_wall_hit":
+        return jsonify({"error": "server_only_event"}), 400
+
+    source = (body.get("source") or "other").strip()
+    if source not in ANALYTICS_SOURCES:
+        source = "other"
+    platform = (body.get("platform") or "").strip().lower()
+    if platform not in ("ios", "web"):
+        platform = "ios" if request.headers.get("Authorization") else "web"
+
+    user = current_user()
+    log_event(event_type, source=source, platform=platform,
+              user_id=(user["id"] if user else None))
+    return "", 204
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -4584,6 +4691,7 @@ def submit_review(game_id):
     # ── Character limit for free users ───────────────────────────
     _FREE_REVIEW_LIMIT = 500
     if review_text and not user.get("is_pro") and len(review_text) > _FREE_REVIEW_LIMIT:
+        _log_pro_wall("review_length", user.get("id"))
         return jsonify({"error": f"Review exceeds {_FREE_REVIEW_LIMIT} characters. Upgrade to Pro for unlimited length."}), 400
 
     # ── Profanity filter ──────────────────────────────────────────
@@ -6569,6 +6677,44 @@ def admin_dashboard():
     revenue_30d  = _safe_count("SELECT COALESCE(SUM(price),0) AS n FROM revenue_events WHERE event_type IN ('INITIAL_PURCHASE','RENEWAL','PRODUCT_CHANGE') AND event_at >= NOW() - INTERVAL '30 days'")
     has_history  = (_safe_count("SELECT COUNT(*) AS n FROM revenue_events") or 0) > 0
 
+    # ── Paywall funnel (analytics_events) ────────────────────────────────────
+    # Counts are DISTINCT users, not raw events: one person bouncing off the same wall
+    # ten times is one unconverted user, not ten. Logged-out views (user_id NULL) are
+    # counted as one extra "user" each via the COALESCE fallback on id.
+    def _funnel(event_type, days):
+        return _safe_count(
+            "SELECT COUNT(DISTINCT COALESCE(user_id::text, 'anon:' || id::text)) AS n "
+            "FROM analytics_events WHERE event_type = '%s' "
+            "AND created_at >= NOW() - INTERVAL '%d days'" % (event_type, days))
+
+    wall_7d     = _funnel("pro_wall_hit", 7)
+    shown_7d    = _funnel("paywall_shown", 7)
+    started_7d  = _funnel("paywall_purchase_started", 7)
+    wall_30d    = _funnel("pro_wall_hit", 30)
+    shown_30d   = _funnel("paywall_shown", 30)
+    started_30d = _funnel("paywall_purchase_started", 30)
+
+    # Which surfaces actually drive people into the paywall.
+    by_source = []
+    try:
+        cur.execute("""
+            SELECT source, COUNT(*) AS hits,
+                   COUNT(DISTINCT user_id) AS users
+            FROM analytics_events
+            WHERE event_type = 'pro_wall_hit'
+              AND created_at >= NOW() - INTERVAL '30 days'
+            GROUP BY source ORDER BY hits DESC
+        """)
+        by_source = [{"source": r["source"], "hits": r["hits"], "users": r["users"]}
+                     for r in cur.fetchall()]
+    except Exception:
+        conn.rollback()
+
+    def _rate(num, den):
+        if not den or num is None:
+            return None
+        return round(100.0 * num / den, 1)
+
     return jsonify({
         "generated_at": _dt.now().isoformat(timespec="seconds"),
         "health": _admin_health_panel(),
@@ -6595,6 +6741,19 @@ def admin_dashboard():
             "note": ("Live from RevenueCat events." if has_history else
                      "MRR estimated from Pro count × PRO_PRICE_USD. "
                      "Real MRR/churn history accrues from now as RevenueCat events arrive."),
+        },
+        "funnel": {
+            "wall_hits_7d": wall_7d,   "wall_hits_30d": wall_30d,
+            "shown_7d": shown_7d,      "shown_30d": shown_30d,
+            "started_7d": started_7d,  "started_30d": started_30d,
+            # wall → paywall actually presented; paywall → purchase attempt;
+            # paywall → completed sub (new_subs from RevenueCat, the authoritative source).
+            "wall_to_paywall_30d":  _rate(shown_30d, wall_30d),
+            "paywall_to_start_30d": _rate(started_30d, shown_30d),
+            "paywall_to_sub_30d":   _rate(new_subs_30d, shown_30d),
+            "by_source_30d": by_source,
+            "note": "Distinct users. Conversions use RevenueCat subs as the numerator; "
+                    "data accrues from first deploy of instrumentation.",
         },
     })
 
@@ -11713,6 +11872,7 @@ def survival_unlimited():
     cur.execute("SELECT is_pro FROM users WHERE id = %s", (user["id"],))
     row = cur.fetchone()
     if not (row and row["is_pro"]):
+        _log_pro_wall("survival_unlimited", user["id"])
         return jsonify({"error": "pro_required",
                         "message": "Unlimited runs are a Pro feature."}), 403
     pos = max(1, int(request.args.get("pos", 1)))
@@ -11877,6 +12037,7 @@ def poeltl_unlimited():
     cur.execute("SELECT is_pro FROM users WHERE id = %s", (user["id"],))
     row = cur.fetchone()
     if not (row and row["is_pro"]):
+        _log_pro_wall("poeltl_unlimited", user["id"])
         return jsonify({"error": "pro_required", "message": "Unlimited is a Pro feature."}), 403
     r = poeltl_api.unlimited_round(conn)
     if not r:

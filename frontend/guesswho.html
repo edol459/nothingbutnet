@@ -288,7 +288,9 @@ function signinCard(next){ return `<div class="card center">
     Ball Knowledge are saved to it.</div>
   <a class="btn" href="/auth/google/login?next=${encodeURIComponent(next||'/guesswho')}"
      style="text-decoration:none;margin-top:18px">Sign in</a></div>`; }
-function proCard(){ return `<div class="card center">
+function proCard(){
+  window.ydkTrack && ydkTrack('paywall_shown', 'poeltl_unlimited');
+  return `<div class="card center">
   <img class="resultlogo" src="/transparent.png" alt="">
   <div class="headline">Unlimited is Pro</div>
   <div class="sub">Unlimited practice rounds with ydkball Pro.<br>Today's puzzle is always free.</div>

@@ -235,6 +235,9 @@ function toast(msg) {
 }
 const el = (h) => { const t=document.createElement('template'); t.innerHTML=h.trim(); return t.content.firstChild; };
 const nfmt = (x) => (x==null ? '—' : Number(x).toLocaleString());
+// Conversion rates are null until there's a denominator — show the label alone rather
+// than a misleading "0%" on a stage nobody has reached yet.
+const pct = (v, label) => (v==null ? `— ${label}` : `${v}% ${label}`);
 
 // ── State ─────────────────────────────────────────────────────
 let offset = 0, total = 0, query = '', loading = false, insightsTimer = null;
@@ -266,6 +269,7 @@ async function renderInsights() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const d = await res.json();
     const h = d.health, g = d.growth, e = d.engagement, rev = d.revenue;
+    const fn = d.funnel || {};
     document.getElementById('asof').textContent = 'live · ' + d.generated_at;
 
     const headline = { OK:'All systems healthy — data is fresh and complete.',
@@ -305,6 +309,23 @@ async function renderInsights() {
       </div>
       <div class="sub" style="margin:-16px 0 4px">${rev.note}</div>
 
+      <div class="section-label">Paywall Funnel</div>
+      <div class="grid">
+        ${kpi('Hit a Pro Wall · 30d', nfmt(fn.wall_hits_30d), `${nfmt(fn.wall_hits_7d)} in last 7d`,
+              'Distinct users refused by a Pro gate (unlimited games, review length). Logged server-side, so old app builds still count.')}
+        ${kpi('Saw the Paywall · 30d', nfmt(fn.shown_30d),
+              pct(fn.wall_to_paywall_30d, 'of wall hits'),
+              'Client-reported paywall impressions. If this is far below wall hits, users are bouncing off the gate without the paywall ever being presented.')}
+        ${kpi('Started Purchase · 30d', nfmt(fn.started_30d),
+              pct(fn.paywall_to_start_30d, 'of paywall views'),
+              'Tapped subscribe. May still fail or be cancelled in StoreKit.')}
+        ${kpi('Converted · 30d', rev.has_history ? nfmt(rev.new_subs_30d) : '—',
+              pct(fn.paywall_to_sub_30d, 'of paywall views'),
+              'New subscriptions from RevenueCat — the authoritative numerator.')}
+      </div>
+      <div class="panel" id="ins-funnel-src" style="margin-top:14px"></div>
+      <div class="sub" style="margin:8px 0 4px">${fn.note || ''}</div>
+
       <div class="section-label">Growth & Engagement</div>
       <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
         <div class="panel" id="ins-signups"></div>
@@ -341,6 +362,20 @@ async function renderInsights() {
         <span class="btrack"><span class="bfill" style="width:${Math.max(2, Math.round(100*x.count/emax))}%"></span></span>
         <span class="bval">${nfmt(x.count)}</span></div>`)));
     if (!e.events_30d.length) ev.appendChild(el('<div class="sub">No events in window.</div>'));
+
+    // which surfaces push people into the paywall
+    const fsrc = document.getElementById('ins-funnel-src');
+    fsrc.appendChild(el('<h3>Pro walls hit by surface · last 30 days</h3>'));
+    const srcs = fn.by_source_30d || [];
+    if (!srcs.length) {
+      fsrc.appendChild(el('<div class="sub">No Pro walls hit yet — instrumentation starts collecting from its first deploy.</div>'));
+    } else {
+      const smax = Math.max(1, ...srcs.map(x => x.hits));
+      srcs.forEach(x => fsrc.appendChild(el(
+        `<div class="bar"><span class="blabel">${(x.source||'unknown').replace(/_/g,' ')}</span>
+          <span class="btrack"><span class="bfill" style="width:${Math.max(2, Math.round(100*x.hits/smax))}%"></span></span>
+          <span class="bval">${nfmt(x.hits)} · ${nfmt(x.users)}u</span></div>`)));
+    }
 
     // full health checks
     const hc = document.getElementById('ins-health');
