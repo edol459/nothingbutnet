@@ -36,6 +36,22 @@ _POOL_WHERE = """
  OR (g.season_type = 'Playoffs' AND g.pts >= 35)
 """
 
+# An answer must carry the SAME clue ladder every other answer gets. _build() silently drops
+# rungs whose data is missing, so a player without position/height/draft would ship 5–6 clues
+# against the same 8 guesses — the last few guesses revealing nothing. Rather than substitute
+# different clues for those players (which would make the game inconsistent), they're excluded
+# from being the answer. Costs 645 -> 523 players / 8311 -> 7910 performances (~5%).
+#   The other rungs need no check: Season, Team and Name always render, and College renders as
+#   "No college" when empty. draft_number is optional — _draft_label only needs draft_year.
+#   position_group is not a valid stand-in here: every player missing `position` also lacks it.
+# NOTE: this filters who can BE the answer. The guess/autocomplete bank is a separate query
+# (survival_api.player_list) over all players and is deliberately unaffected.
+_CLUE_COMPLETE = """
+    COALESCE(p.position, '') <> ''
+AND p.height_inches IS NOT NULL
+AND p.draft_year    IS NOT NULL
+"""
+
 import bisect
 
 # Two-stage selection so the daily isn't the same prolific stars on repeat: pick a PLAYER with
@@ -61,8 +77,11 @@ def _pool(conn):
                     HAVING SUM(gp) >= 200
                         OR BOOL_OR(awards IS NOT NULL AND array_length(awards, 1) > 0))
                 SELECT g.player_id, g.game_id, g.season_type
-                FROM   player_gamelogs g JOIN elig e ON e.player_id = g.player_id
-                WHERE  {_POOL_WHERE}
+                FROM   player_gamelogs g
+                JOIN   elig e   ON e.player_id = g.player_id
+                JOIN   players p ON p.player_id = g.player_id
+                WHERE  ({_POOL_WHERE})
+                  AND  {_CLUE_COMPLETE}
                 ORDER BY g.player_id, g.game_id
             """)
             groups = {}
