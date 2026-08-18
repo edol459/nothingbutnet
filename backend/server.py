@@ -269,6 +269,11 @@ _PERF_TABLE = """
         game_id     TEXT    NOT NULL,
         person_id   INTEGER NOT NULL,
         user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        -- INTERIM 1–10. Performances are graded A+ … F and a full letter scale wants
+        -- eleven values, but widening it shifts every stored rating and the shipped app
+        -- renders these as stars — so the move is deferred to
+        -- ingest/migrate_perf_scale_11.py, run when the app update ships. See
+        -- PERF_RATING_MAX. Game ratings are stars and stay 1–10 permanently.
         rating      INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 10),
         player_name TEXT,
         review_text TEXT,
@@ -278,6 +283,48 @@ _PERF_TABLE = """
     )
 """
 _PERF_MIGRATE = "ALTER TABLE performance_reviews ADD COLUMN IF NOT EXISTS player_name TEXT"
+
+
+# Player performances: letter grades. INTERIM 10 — becomes 11 (adding C-) once
+# ingest/migrate_perf_scale_11.py has run and the app update has shipped.
+# Game reviews are stars and stay on 10 regardless.
+PERF_RATING_MAX = 10
+
+# Letter grade -> grade points, for reporting a player's cumulative rating as a GPA.
+#
+# A single performance reads naturally as a letter, but an AVERAGE of letters does not —
+# "A-" tells you far less about a season than a number does. GPA is the standard way a
+# letter scale aggregates, and it stays sortable and comparable the way a star average was.
+#
+# Keyed by the INTERIM 10-point rating (no C- yet). After migrate_perf_scale_11.py runs,
+# shift every key >= 3 up by one and add 3 -> 1.7 for C-.
+PERF_GPA_POINTS = {
+    10: 4.3,   # A+
+     9: 4.0,   # A
+     8: 3.7,   # A-
+     7: 3.3,   # B+
+     6: 3.0,   # B
+     5: 2.7,   # B-
+     4: 2.3,   # C+
+     3: 2.0,   # C
+     2: 1.0,   # D
+     1: 0.0,   # F
+}
+
+
+def perf_gpa_sql(col: str = "rating") -> str:
+    """SQL expression mapping a rating column to grade points.
+
+    Wrap in AVG() to get a GPA. It MUST be averaged this way rather than by converting an
+    already-averaged rating: the mapping is non-linear on purpose (A+ -> A -> A- steps by
+    0.3, but C -> D by 1.0 and D -> F by 1.0, matching a real 4.0 scale), so
+    points(AVG(rating)) and AVG(points(rating)) give different answers, and only the second
+    one is a GPA.
+    """
+    whens = " ".join(f"WHEN {col} = {r} THEN {pts}"
+                     for r, pts in sorted(PERF_GPA_POINTS.items()))
+    return f"(CASE {whens} ELSE NULL END)"
+
 
 def _ensure_tables():
     try:
@@ -3773,13 +3820,19 @@ def players_today():
                             mins = 0.0
                         if mins <= 0:
                             continue  # DNP — nothing to rate
-                        pts = (p.get("statistics", {}) or {}).get("points", 0) or 0
+                        st  = p.get("statistics", {}) or {}
+                        pts = st.get("points", 0) or 0
+                        # reb/ast were already in the boxscore payload and simply not read.
+                        # The grading report card shows a P/R/A line, which needs them.
+                        reb = st.get("reboundsTotal", 0) or 0
+                        ast = st.get("assists", 0) or 0
                         rows.append({
                             "playerId": pid, "playerName": p.get("name", ""),
                             "teamAbbr": abbr, "league": league,
                             "gameId": game_id, "gameStatus": "final", "gameTimeUTC": tipoff,
                             "avgMinutes": None, "finalMinutes": round(mins, 1),
                             "avgPts": None, "finalPts": int(pts),
+                            "finalReb": int(reb), "finalAst": int(ast),
                             "isFollowed": pid in followed_ids,
                             "myRating": my_ratings.get((game_id, pid)),
                         })
@@ -4823,8 +4876,13 @@ def submit_game_log(game_id):
     # ── Validate EVERYTHING before writing anything ───────────────────────────
     # The whole point of this endpoint is atomicity, so a bad player grade must not
     # leave the game review committed behind it.
+    #
+    # The game rating is OPTIONAL. Grading the players you watched is a complete act on its
+    # own, and requiring a verdict on the game first was an artificial gate. When it's absent
+    # no game_reviews row is written at all — that table's rating is NOT NULL, and inventing
+    # a placeholder would poison games.rating_sum and the community average.
     rating = body.get("rating")
-    if rating is None or not isinstance(rating, int) or not (1 <= rating <= 10):
+    if rating is not None and (not isinstance(rating, int) or not (1 <= rating <= 10)):
         return jsonify({"error": "rating must be an integer 1–10"}), 400
 
     review_text = (body.get("review_text") or "").strip() or None
@@ -4843,6 +4901,12 @@ def submit_game_log(game_id):
     if len(raw_perfs) > _LOG_MAX_PERFORMANCES:
         return jsonify({"error": f"At most {_LOG_MAX_PERFORMANCES} player grades per log."}), 400
 
+    if rating is None and not raw_perfs:
+        return jsonify({"error": "Nothing to log — rate the game or grade a player."}), 400
+    # Review text has nowhere to live without a game_reviews row, so don't silently drop it.
+    if rating is None and review_text:
+        return jsonify({"error": "A written review needs a game rating."}), 400
+
     # Dedupe on person_id, last one wins. Required, not just tidy: a multi-row INSERT
     # ... ON CONFLICT DO UPDATE errors with "cannot affect row a second time" if the
     # same key appears twice in one statement.
@@ -4854,8 +4918,9 @@ def submit_game_log(game_id):
         if not isinstance(pid, int):
             return jsonify({"error": f"performances[{i}].person_id must be an integer"}), 400
         pr = p.get("rating")
-        if pr is None or not isinstance(pr, int) or not (1 <= pr <= 10):
-            return jsonify({"error": f"performances[{i}].rating must be an integer 1–10"}), 400
+        if pr is None or not isinstance(pr, int) or not (1 <= pr <= PERF_RATING_MAX):
+            return jsonify({"error": f"performances[{i}].rating must be an integer "
+                                     f"1–{PERF_RATING_MAX}"}), 400
         ptext = (p.get("review_text") or "").strip() or None
         if ptext and _contains_slur(ptext):
             return jsonify({"error": f"A player note contains language that isn't allowed."}), 400
@@ -4871,25 +4936,31 @@ def submit_game_log(game_id):
             cur.close(); conn.close()
             return jsonify({"error": "Game not found"}), 404
 
-        cur.execute("""
-            INSERT INTO game_reviews (user_id, game_id, rating, review_text, tags, attended)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (user_id, game_id) DO UPDATE SET
-                rating      = EXCLUDED.rating,
-                review_text = EXCLUDED.review_text,
-                tags        = EXCLUDED.tags,
-                attended    = EXCLUDED.attended,
-                updated_at  = NOW()
-            RETURNING *
-        """, (user["id"], game_id, rating, review_text,
-              _json.dumps(_clean_tags(body.get("tags"))), bool(body.get("attended", False))))
-        review = dict(cur.fetchone())
-
         cur.execute("SELECT avatar_url, favorite_team FROM users WHERE id = %s", (user["id"],))
         u = cur.fetchone()
-        review["display_name"]  = user["display_name"]
-        review["avatar_url"]    = (u["avatar_url"] if u else None) or ""
-        review["favorite_team"] = (u["favorite_team"] if u else None) or ""
+        avatar_url = (u["avatar_url"] if u else None) or ""
+
+        # Only touch game_reviews when a game rating was actually given. A grades-only log
+        # must NOT create (or silently delete) a review row — if the user already reviewed
+        # this game and is now just adding grades, their review has to survive untouched.
+        review = None
+        if rating is not None:
+            cur.execute("""
+                INSERT INTO game_reviews (user_id, game_id, rating, review_text, tags, attended)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id, game_id) DO UPDATE SET
+                    rating      = EXCLUDED.rating,
+                    review_text = EXCLUDED.review_text,
+                    tags        = EXCLUDED.tags,
+                    attended    = EXCLUDED.attended,
+                    updated_at  = NOW()
+                RETURNING *
+            """, (user["id"], game_id, rating, review_text,
+                  _json.dumps(_clean_tags(body.get("tags"))), bool(body.get("attended", False))))
+            review = dict(cur.fetchone())
+            review["display_name"]  = user["display_name"]
+            review["avatar_url"]    = avatar_url
+            review["favorite_team"] = (u["favorite_team"] if u else None) or ""
 
         saved_perfs = []
         for pid, (pr, pname, ptext) in perfs.items():
@@ -4905,15 +4976,18 @@ def submit_game_log(game_id):
             """, (user["id"], game_id, pid, pr, pname, ptext))
             row = dict(cur.fetchone())
             row["display_name"] = user["display_name"]
-            row["avatar_url"]   = review["avatar_url"]
+            row["avatar_url"]   = avatar_url
             saved_perfs.append(_format_perf_review(row))
 
-        cur.execute("""
-            UPDATE games
-            SET review_count = (SELECT COUNT(*) FROM game_reviews WHERE game_id = %s),
-                rating_sum   = (SELECT COALESCE(SUM(rating), 0) FROM game_reviews WHERE game_id = %s)
-            WHERE game_id = %s
-        """, (game_id, game_id, game_id))
+        # Only when a review was written — these counters are derived from game_reviews and
+        # recomputing them on a grades-only log is pure lock contention for no change.
+        if review is not None:
+            cur.execute("""
+                UPDATE games
+                SET review_count = (SELECT COUNT(*) FROM game_reviews WHERE game_id = %s),
+                    rating_sum   = (SELECT COALESCE(SUM(rating), 0) FROM game_reviews WHERE game_id = %s)
+                WHERE game_id = %s
+            """, (game_id, game_id, game_id))
 
         # Logging a game implies you watched it — keeps the diary invariant true.
         cur.execute("INSERT INTO game_watches (user_id, game_id) VALUES (%s, %s) "
@@ -4930,7 +5004,8 @@ def submit_game_log(game_id):
 
         cur.close(); conn.close()
         return jsonify({
-            "review":            _format_review(review),
+            # null on a grades-only log — the client must treat this as optional.
+            "review":            _format_review(review) if review is not None else None,
             "performances":      saved_perfs,
             "performance_count": len(saved_perfs),
         }), 201
@@ -5059,7 +5134,11 @@ def get_performance_reviews(game_id, person_id):
         """, (game_id, person_id))
         agg = dict(cur.fetchone())
         count = int(agg["review_count"])
-        avg_stars = round(agg["avg_rating"] / 2, 2) if count > 0 else None
+        # avg_rating is the authoritative value on the 11-point letter scale. avg_stars is
+        # kept only for App Store builds shipped before letter grades — they render stars
+        # and would fail to decode without it. New clients letter-ize from avg_rating.
+        avg_rating = round(agg["avg_rating"], 2) if count > 0 else None
+        avg_stars  = round(agg["avg_rating"] / 2, 2) if count > 0 else None
 
         my_rating, my_stars, my_text = None, None, None
         if user_id:
@@ -5085,6 +5164,7 @@ def get_performance_reviews(game_id, person_id):
 
         cur.close(); conn.close()
         return jsonify({
+            "avg_rating":   avg_rating,
             "avg_stars":    avg_stars,
             "review_count": count,
             "my_rating":    my_rating,
@@ -5122,6 +5202,8 @@ def get_performance_summary(game_id):
             cnt = int(r["review_count"])
             players[str(pid)] = {
                 "person_id":    pid,
+                # avg_rating drives letter grades; avg_stars is legacy for older app builds.
+                "avg_rating":   round(r["avg_rating"], 2) if cnt > 0 else None,
                 "avg_stars":    round(r["avg_rating"] / 2, 2) if cnt > 0 else None,
                 "review_count": cnt,
                 "my_rating":    None,
@@ -5136,8 +5218,8 @@ def get_performance_summary(game_id):
             for r in cur.fetchall():
                 pid   = r["person_id"]
                 entry = players.setdefault(str(pid), {
-                    "person_id": pid, "avg_stars": None, "review_count": 0,
-                    "my_rating": None, "my_stars": None,
+                    "person_id": pid, "avg_rating": None, "avg_stars": None,
+                    "review_count": 0, "my_rating": None, "my_stars": None,
                 })
                 entry["my_rating"] = r["rating"]
                 entry["my_stars"]  = round(r["rating"] / 2, 1)
@@ -5155,8 +5237,9 @@ def submit_performance_review(game_id, person_id):
     user = current_user()
     body = request.get_json() or {}
     rating = body.get("rating")
-    if rating is None or not isinstance(rating, int) or not (1 <= rating <= 10):
-        return jsonify({"error": "rating must be an integer 1–10"}), 400
+    # Performances use the 11-point letter scale, not the 10-point star scale games use.
+    if rating is None or not isinstance(rating, int) or not (1 <= rating <= PERF_RATING_MAX):
+        return jsonify({"error": f"rating must be an integer 1–{PERF_RATING_MAX}"}), 400
     review_text = (body.get("review_text") or "").strip() or None
     if review_text and _contains_slur(review_text):
         return jsonify({"error": "Your review contains language that isn't allowed."}), 400
@@ -12610,25 +12693,35 @@ def get_player_profile(person_id):
         player_info["teamAbbr"] = team_abbr
 
         # ── All-time community rating ──────────────────────────────
-        cur.execute("""
-            SELECT COUNT(*) AS cnt, COALESCE(AVG(rating::float), 0) AS avg_r
+        # GPA is AVG of the per-grade points, never points-of-the-average — see perf_gpa_sql.
+        _gpa = perf_gpa_sql("rating")
+        cur.execute(f"""
+            SELECT COUNT(*) AS cnt,
+                   COALESCE(AVG(rating::float), 0) AS avg_r,
+                   AVG({_gpa}) AS gpa
             FROM performance_reviews WHERE person_id = %s
         """, (person_id,))
         at = dict(cur.fetchone())
         at_count = int(at["cnt"])
         at_stars  = round(at["avg_r"] / 2, 2) if at_count > 0 else None
+        at_gpa    = round(float(at["gpa"]), 2) if at_count > 0 and at["gpa"] is not None else None
 
         # ── Season community rating ────────────────────────────────
+        _gpa_pr = perf_gpa_sql("pr.rating")
         if is_wnba:
-            cur.execute("""
-                SELECT COUNT(pr.id) AS cnt, COALESCE(AVG(pr.rating::float), 0) AS avg_r
+            cur.execute(f"""
+                SELECT COUNT(pr.id) AS cnt,
+                       COALESCE(AVG(pr.rating::float), 0) AS avg_r,
+                       AVG({_gpa_pr}) AS gpa
                 FROM performance_reviews pr
                 JOIN wnba_player_game_stats g ON g.game_id = pr.game_id AND g.player_id = pr.person_id
                 WHERE pr.person_id = %s AND g.season = %s
             """, (person_id, active_season))
         else:
-            cur.execute("""
-                SELECT COUNT(pr.id) AS cnt, COALESCE(AVG(pr.rating::float), 0) AS avg_r
+            cur.execute(f"""
+                SELECT COUNT(pr.id) AS cnt,
+                       COALESCE(AVG(pr.rating::float), 0) AS avg_r,
+                       AVG({_gpa_pr}) AS gpa
                 FROM performance_reviews pr
                 JOIN player_gamelogs g ON g.game_id = pr.game_id AND g.player_id = pr.person_id
                 WHERE pr.person_id = %s AND g.season = %s
@@ -12636,6 +12729,7 @@ def get_player_profile(person_id):
         sa = dict(cur.fetchone())
         sa_count = int(sa["cnt"])
         sa_stars  = round(sa["avg_r"] / 2, 2) if sa_count > 0 else None
+        sa_gpa    = round(float(sa["gpa"]), 2) if sa_count > 0 and sa["gpa"] is not None else None
 
         # ── Rating trend (last 10 rated games this season) ────────
         if is_wnba:
@@ -12849,9 +12943,13 @@ def get_player_profile(person_id):
             "currentSeason":    active_season,
             "seasonAverages":   avgs_out,
             "ratingSummary": {
+                # avgStars is legacy, kept so App Store builds predating letter grades keep
+                # rendering; new clients show the GPA.
                 "allTimeAvgStars":    at_stars,
+                "allTimeGpa":         at_gpa,
                 "allTimeReviewCount": at_count,
                 "seasonAvgStars":     sa_stars,
+                "seasonGpa":          sa_gpa,
                 "seasonReviewCount":  sa_count,
             },
             "trend":              trend,
