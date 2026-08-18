@@ -767,6 +767,11 @@ def _ensure_tables():
         # concurrent /api/feed calls queue on each other until statement_timeout.
         cur.execute(_PERF_TABLE)
         cur.execute(_PERF_MIGRATE)
+        # Same reasoning as above: these two used to run inside the POST
+        # /api/games/<id>/reviews handler, so every single review submission took an
+        # ACCESS EXCLUSIVE lock on game_reviews and serialized against every reader.
+        cur.execute("ALTER TABLE game_reviews ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'")
+        cur.execute("ALTER TABLE game_reviews ADD COLUMN IF NOT EXISTS attended BOOLEAN DEFAULT FALSE")
         conn.commit()
         cur.close(); conn.close()
     except Exception as e:
@@ -4720,10 +4725,8 @@ def submit_review(game_id):
         conn = get_conn()
         cur  = conn.cursor()
 
-        # One-time idempotent migrations
-        cur.execute("ALTER TABLE game_reviews ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'")
-        cur.execute("ALTER TABLE game_reviews ADD COLUMN IF NOT EXISTS attended BOOLEAN DEFAULT FALSE")
-
+        # (tags/attended columns are ensured once per deploy in _ensure_tables — running
+        # ALTER TABLE here took an ACCESS EXCLUSIVE lock on every submission.)
         cur.execute("SELECT game_id FROM games WHERE game_id = %s", (game_id,))
         if not cur.fetchone():
             cur.close(); conn.close()
@@ -4774,6 +4777,168 @@ def submit_review(game_id):
         cur.close(); conn.close()
         return jsonify({"review": _format_review(review)}), 201
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# POST /api/games/<game_id>/log  — the unified "log this game" submit
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# One form, one button: the game rating (required) plus any number of player
+# grades (optional), written in ONE transaction. The client used to fire
+# 1 + N requests — POST the review, then POST each performance — which meant a
+# half-saved log whenever one call failed, and no single "did it work?" answer.
+#
+# Deliberately additive: the single-review and single-performance endpoints stay
+# exactly as they are. The performance card still rates one player instantly, which
+# is the fast path; this is the batch path.
+
+_LOG_MAX_PERFORMANCES = 40   # ~26 dress for an NBA game; anything past this is abuse
+
+
+def _clean_tags(raw):
+    """Tags are client-supplied display metadata — truncate every field and cap the count
+    so a malformed client can't write unbounded junk into the JSONB column."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for t in raw[:5]:
+        if isinstance(t, dict):
+            out.append({
+                "player_id":    str(t.get("player_id", ""))[:20],
+                "player_name":  str(t.get("player_name", ""))[:60],
+                "team_abbr":    str(t.get("team_abbr", ""))[:5],
+                "stat_label":   str(t.get("stat_label", ""))[:10],
+                "stat_display": str(t.get("stat_display", ""))[:20],
+            })
+    return out
+
+
+@app.route("/api/games/<game_id>/log", methods=["POST"])
+@login_required
+def submit_game_log(game_id):
+    import json as _json
+    user = current_user()
+    body = request.get_json(silent=True) or {}
+
+    # ── Validate EVERYTHING before writing anything ───────────────────────────
+    # The whole point of this endpoint is atomicity, so a bad player grade must not
+    # leave the game review committed behind it.
+    rating = body.get("rating")
+    if rating is None or not isinstance(rating, int) or not (1 <= rating <= 10):
+        return jsonify({"error": "rating must be an integer 1–10"}), 400
+
+    review_text = (body.get("review_text") or "").strip() or None
+    _FREE_REVIEW_LIMIT = 500
+    if review_text and not user.get("is_pro") and len(review_text) > _FREE_REVIEW_LIMIT:
+        _log_pro_wall("review_length", user.get("id"))
+        return jsonify({"error": f"Review exceeds {_FREE_REVIEW_LIMIT} characters. "
+                                 "Upgrade to Pro for unlimited length."}), 400
+    if review_text and _contains_slur(review_text):
+        return jsonify({"error": "Your review contains language that isn't allowed. "
+                                 "Please edit and resubmit."}), 400
+
+    raw_perfs = body.get("performances") or []
+    if not isinstance(raw_perfs, list):
+        return jsonify({"error": "performances must be a list"}), 400
+    if len(raw_perfs) > _LOG_MAX_PERFORMANCES:
+        return jsonify({"error": f"At most {_LOG_MAX_PERFORMANCES} player grades per log."}), 400
+
+    # Dedupe on person_id, last one wins. Required, not just tidy: a multi-row INSERT
+    # ... ON CONFLICT DO UPDATE errors with "cannot affect row a second time" if the
+    # same key appears twice in one statement.
+    perfs = {}
+    for i, p in enumerate(raw_perfs):
+        if not isinstance(p, dict):
+            return jsonify({"error": f"performances[{i}] must be an object"}), 400
+        pid = p.get("person_id")
+        if not isinstance(pid, int):
+            return jsonify({"error": f"performances[{i}].person_id must be an integer"}), 400
+        pr = p.get("rating")
+        if pr is None or not isinstance(pr, int) or not (1 <= pr <= 10):
+            return jsonify({"error": f"performances[{i}].rating must be an integer 1–10"}), 400
+        ptext = (p.get("review_text") or "").strip() or None
+        if ptext and _contains_slur(ptext):
+            return jsonify({"error": f"A player note contains language that isn't allowed."}), 400
+        perfs[pid] = (pr, (p.get("player_name") or "").strip()[:100] or None, ptext)
+
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+
+        cur.execute("SELECT game_date FROM games WHERE game_id = %s", (game_id,))
+        game_row = cur.fetchone()
+        if not game_row:
+            cur.close(); conn.close()
+            return jsonify({"error": "Game not found"}), 404
+
+        cur.execute("""
+            INSERT INTO game_reviews (user_id, game_id, rating, review_text, tags, attended)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (user_id, game_id) DO UPDATE SET
+                rating      = EXCLUDED.rating,
+                review_text = EXCLUDED.review_text,
+                tags        = EXCLUDED.tags,
+                attended    = EXCLUDED.attended,
+                updated_at  = NOW()
+            RETURNING *
+        """, (user["id"], game_id, rating, review_text,
+              _json.dumps(_clean_tags(body.get("tags"))), bool(body.get("attended", False))))
+        review = dict(cur.fetchone())
+
+        cur.execute("SELECT avatar_url, favorite_team FROM users WHERE id = %s", (user["id"],))
+        u = cur.fetchone()
+        review["display_name"]  = user["display_name"]
+        review["avatar_url"]    = (u["avatar_url"] if u else None) or ""
+        review["favorite_team"] = (u["favorite_team"] if u else None) or ""
+
+        saved_perfs = []
+        for pid, (pr, pname, ptext) in perfs.items():
+            cur.execute("""
+                INSERT INTO performance_reviews (user_id, game_id, person_id, rating, player_name, review_text)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id, game_id, person_id) DO UPDATE SET
+                    rating      = EXCLUDED.rating,
+                    player_name = EXCLUDED.player_name,
+                    review_text = EXCLUDED.review_text,
+                    updated_at  = NOW()
+                RETURNING *
+            """, (user["id"], game_id, pid, pr, pname, ptext))
+            row = dict(cur.fetchone())
+            row["display_name"] = user["display_name"]
+            row["avatar_url"]   = review["avatar_url"]
+            saved_perfs.append(_format_perf_review(row))
+
+        cur.execute("""
+            UPDATE games
+            SET review_count = (SELECT COUNT(*) FROM game_reviews WHERE game_id = %s),
+                rating_sum   = (SELECT COALESCE(SUM(rating), 0) FROM game_reviews WHERE game_id = %s)
+            WHERE game_id = %s
+        """, (game_id, game_id, game_id))
+
+        # Logging a game implies you watched it — keeps the diary invariant true.
+        cur.execute("INSERT INTO game_watches (user_id, game_id) VALUES (%s, %s) "
+                    "ON CONFLICT DO NOTHING", (user["id"], game_id))
+
+        conn.commit()
+
+        # Cache invalidation AFTER the commit — if the write rolled back we must not
+        # have already dropped caches for data that never landed.
+        date_str = str(game_row["game_date"])
+        _past_sb_cache.pop(date_str, None)
+        if _today_sb_cache.get("date") == date_str:
+            _today_sb_cache.clear()
+
+        cur.close(); conn.close()
+        return jsonify({
+            "review":            _format_review(review),
+            "performances":      saved_perfs,
+            "performance_count": len(saved_perfs),
+        }), 201
+    except Exception as e:
+        try:
+            conn.rollback(); cur.close(); conn.close()
+        except Exception:
+            pass
         return jsonify({"error": str(e)}), 500
 
 
