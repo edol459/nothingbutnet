@@ -5147,6 +5147,124 @@ def delete_review(game_id):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/games/<game_id>/log/<user_id>  — read one person's log
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# The counterpart to publishing. Until this existed a full report card could be published
+# and then read by nobody: the game page showed only game-level reviews, and grades were
+# visible one player at a time on each player's card — so seeing a 13-player log meant
+# opening 13 cards and scanning each for the author's name.
+#
+# Returns ONLY the players this user graded, deliberately. It is their report card, not a
+# box score; who they left out is part of what they said.
+@app.route("/api/games/<game_id>/log/<int:log_user_id>")
+def get_game_log(game_id, log_user_id):
+    viewer    = current_user()
+    viewer_id = viewer["id"] if viewer else None
+    try:
+        conn = get_conn(); cur = conn.cursor()
+
+        cur.execute("""
+            SELECT u.id, u.display_name, u.avatar_url, u.favorite_team, u.is_pro,
+                   u.xp, u.equipped_ring, u.equipped_title
+            FROM users u WHERE u.id = %s
+        """, (log_user_id,))
+        u = cur.fetchone()
+        if not u:
+            cur.close(); conn.close()
+            return jsonify({"error": "User not found"}), 404
+
+        cur.execute("""
+            SELECT gr.*,
+                   (SELECT COUNT(*) FROM review_likes rl WHERE rl.review_id = gr.id)   AS like_count,
+                   (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count
+            FROM game_reviews gr
+            WHERE gr.user_id = %s AND gr.game_id = %s
+        """, (log_user_id, game_id))
+        review = cur.fetchone()
+
+        liked_by_me = False
+        if viewer_id and review:
+            cur.execute("SELECT 1 FROM review_likes WHERE review_id = %s AND user_id = %s",
+                        (review["id"], viewer_id))
+            liked_by_me = cur.fetchone() is not None
+
+        # Stat lines come from whichever league's table has the row; a log can be for either.
+        cur.execute("""
+            SELECT pr.person_id, pr.rating, pr.player_name, pr.review_text, pr.created_at,
+                   COALESCE(pgl.pts, wgs.pts) AS pts,
+                   COALESCE(pgl.reb, wgs.reb) AS reb,
+                   COALESCE(pgl.ast, wgs.ast) AS ast,
+                   COALESCE(pgl.min, NULL)    AS min
+            FROM performance_reviews pr
+            LEFT JOIN player_gamelogs pgl
+                   ON pgl.game_id = pr.game_id AND pgl.player_id = pr.person_id
+            LEFT JOIN wnba_player_game_stats wgs
+                   ON wgs.game_id = pr.game_id AND wgs.player_id = pr.person_id
+            WHERE pr.user_id = %s AND pr.game_id = %s
+            ORDER BY pr.rating DESC, pr.player_name
+        """, (log_user_id, game_id))
+        # player_gamelogs stores these as floats, so a raw pass-through renders "19.0 PTS".
+        def _i(v):
+            return None if v is None else int(round(float(v)))
+
+        grades = [{
+            "person_id":   r["person_id"],
+            "player_name": r["player_name"] or "",
+            "rating":      r["rating"],
+            "stars":       round(r["rating"] / 2.0, 1),
+            "review_text": r["review_text"],
+            "pts": _i(r["pts"]), "reb": _i(r["reb"]), "ast": _i(r["ast"]),
+        } for r in cur.fetchall()]
+
+        cur.execute("""
+            SELECT game_id, game_date, league, home_team_abbr, away_team_abbr,
+                   home_score, away_score, status
+            FROM games WHERE game_id = %s
+        """, (game_id,))
+        g = cur.fetchone()
+        cur.close(); conn.close()
+
+        # A log with neither a review nor grades doesn't exist — say so rather than
+        # returning an empty shell the client has to special-case.
+        if not review and not grades:
+            return jsonify({"error": "No log found"}), 404
+
+        return jsonify({
+            "user": {
+                "id": u["id"], "display_name": u["display_name"],
+                "avatar_url": u["avatar_url"] or "", "favorite_team": u["favorite_team"] or "",
+                "is_pro": bool(u["is_pro"]), "xp": u["xp"],
+                "equipped_ring": u["equipped_ring"], "equipped_title": u["equipped_title"],
+                "ball_knowledge_level": _xp_to_level(int(u["xp"] or 0)),
+            },
+            "game": ({
+                "game_id": g["game_id"],
+                "game_date": str(g["game_date"]) if g["game_date"] else None,
+                "league": g["league"],
+                "home_team_abbr": g["home_team_abbr"], "away_team_abbr": g["away_team_abbr"],
+                "home_score": g["home_score"], "away_score": g["away_score"],
+                "status": g["status"],
+            } if g else None),
+            "review": ({
+                "id": review["id"],
+                "rating": review["rating"],
+                "stars": round(review["rating"] / 2.0, 1),
+                "review_text": review["review_text"],
+                "tags": review.get("tags") or [],
+                "attended": bool(review.get("attended", False)),
+                "created_at": str(review["created_at"]),
+                "like_count": int(review["like_count"] or 0),
+                "reply_count": int(review["reply_count"] or 0),
+                "liked_by_me": liked_by_me,
+            } if review else None),
+            "grades": grades,
+            "grade_count": len(grades),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Live-logging drafts  —  /api/games/<game_id>/draft
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # A draft is a private notebook. It is written constantly during a live game and read only
