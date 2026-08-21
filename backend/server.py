@@ -579,6 +579,10 @@ def _ensure_tables():
                 fga         INTEGER DEFAULT 0,
                 fg3m        INTEGER DEFAULT 0,
                 fg3a        INTEGER DEFAULT 0,
+                -- REAL, and nullable with no default, to match player_gamelogs.min:
+                -- 0 would mean "played zero minutes", which is not the same claim as
+                -- "we have no minutes for this row".
+                min         REAL,
                 PRIMARY KEY (player_id, game_id)
             )
         """)
@@ -589,6 +593,7 @@ def _ensure_tables():
             ("fga",  "INTEGER DEFAULT 0"),
             ("fg3m", "INTEGER DEFAULT 0"),
             ("fg3a", "INTEGER DEFAULT 0"),
+            ("min",  "REAL"),
         ]:
             try:
                 cur.execute(f"ALTER TABLE wnba_player_game_stats ADD COLUMN IF NOT EXISTS {col} {defn}")
@@ -3037,6 +3042,23 @@ def _is_out(player_name: str, injury_report: dict) -> bool:
                       "suspension", "not with team", "inactive")
 
 
+def _cdn_minutes(raw) -> float | None:
+    """CDN duration ("PT35M40.00S") -> float minutes (35.667), or None if absent.
+
+    None, not 0.0: a player who did not play and a player whose minutes we failed to parse
+    must stay distinguishable, since 0.0 is a legitimate value for someone who checked in
+    and checked straight back out.
+    """
+    if not raw:
+        return None
+    try:
+        body = str(raw).replace("PT", "")
+        mins, _, secs = body.partition("M")
+        return round(float(mins) + float(secs.replace("S", "") or 0) / 60.0, 4)
+    except Exception:
+        return None
+
+
 def _box_star(team_data: dict):
     """Top P+R+A player ID from a CDN boxscore team dict (must have played ≥1 min)."""
     best_id, best_total = None, -1
@@ -5275,7 +5297,7 @@ def get_game_log(game_id, log_user_id):
                    COALESCE(pgl.pts, wgs.pts) AS pts,
                    COALESCE(pgl.reb, wgs.reb) AS reb,
                    COALESCE(pgl.ast, wgs.ast) AS ast,
-                   COALESCE(pgl.min, NULL)    AS min
+                   COALESCE(pgl.min, wgs.min) AS min
             FROM performance_reviews pr
             LEFT JOIN player_gamelogs pgl
                    ON pgl.game_id = pr.game_id AND pgl.player_id = pr.person_id
@@ -5294,6 +5316,9 @@ def get_game_log(game_id, log_user_id):
             "rating":      r["rating"],
             "stars":       round(r["rating"] / 2.0, 1),
             "review_text": r["review_text"],
+            # `min` is real-typed and only exists for the NBA — wnba_player_game_stats has
+            # no minutes column at all, so it stays null there rather than being faked.
+            "min": _i(r["min"]),
             "pts": _i(r["pts"]), "reb": _i(r["reb"]), "ast": _i(r["ast"]),
         } for r in cur.fetchall()]
 
@@ -6802,6 +6827,108 @@ def browse_lists():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # GET /api/users/<user_id>/activity — game + performance reviews for one user
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Grouped diary: one entry per LOG
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Same problem the feed had, on your own history: grading 13 players wrote 13 diary
+# entries plus a 14th for the game itself. A game rating, a review and the player grades
+# are parts of ONE log, so the diary shows one row per game.
+#
+# Opt-in via ?grouped=1 — the shipped app switches on `type` and has no 'game_log' branch.
+#
+# Unlike the feed this must also carry the diary's sort/filter/team controls, and two of
+# those filters change meaning under grouping: 'games' and 'performances' used to select
+# a row TYPE, and now select logs that contain a game rating / contain player grades.
+_DIARY_GROUPED_SQL = """
+    WITH logs AS (
+        SELECT
+            COALESCE(gr.user_id, pl.user_id) AS user_id,
+            COALESCE(gr.game_id, pl.game_id) AS game_id,
+            gr.id                            AS review_id,
+            gr.rating, gr.review_text,
+            COALESCE(gr.tags, '[]'::jsonb)   AS tags,
+            COALESCE(gr.attended, FALSE)     AS attended,
+            COALESCE(pl.grade_count, 0)      AS grade_count,
+            GREATEST(COALESCE(gr.updated_at, gr.created_at, pl.last_at),
+                     COALESCE(pl.last_at, gr.created_at)) AS activity_at
+        FROM (SELECT * FROM game_reviews WHERE user_id = %(uid)s) gr
+        FULL OUTER JOIN (
+            SELECT user_id, game_id, COUNT(*) AS grade_count, MAX(created_at) AS last_at
+            FROM performance_reviews WHERE user_id = %(uid)s
+            GROUP BY user_id, game_id
+        ) pl ON pl.user_id = gr.user_id AND pl.game_id = gr.game_id
+    ),
+    combined AS (
+        SELECT
+            'game_log'::text          AS type,
+            COALESCE(l.review_id, 0)  AS id,
+            l.game_id,
+            NULL::integer             AS person_id,
+            NULL::text                AS player_name,
+            l.user_id,
+            l.rating,
+            round(l.rating / 2.0, 1)  AS stars,
+            l.review_text, l.tags, l.attended,
+            l.grade_count,
+            l.activity_at             AS created_at,
+            u.display_name, u.avatar_url, u.favorite_team,
+            u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
+            g.game_date, g.home_team_abbr, g.away_team_abbr,
+            g.home_score, g.away_score,
+            COALESCE(lc.like_count, 0) AS like_count,
+            {liked_by_me},
+            COALESCE((SELECT COUNT(*) FROM review_replies rr
+                       WHERE rr.review_id = l.review_id), 0) AS reply_count,
+            NULL::integer AS pts, NULL::integer AS reb, NULL::integer AS ast
+        FROM logs l
+        JOIN users u ON u.id = l.user_id
+        -- INNER: a log needs its game row to be renderable as a diary entry, and `games`
+        -- only holds finished games. A live game's log lives in game_log_drafts, not here.
+        JOIN games g ON g.game_id = l.game_id
+        LEFT JOIN (SELECT review_id, COUNT(*) AS like_count
+                     FROM review_likes GROUP BY review_id) lc ON lc.review_id = l.review_id
+    )
+    SELECT * FROM combined
+    {where_sql}
+    ORDER BY {order_by}
+    LIMIT %(limit)s OFFSET %(offset)s
+"""
+
+
+def _diary_grouped(user_id, viewer_id, limit, offset, sort, _filter, team):
+    liked_by_me = ("EXISTS (SELECT 1 FROM review_likes rl_me WHERE rl_me.review_id = l.review_id "
+                   "AND rl_me.user_id = %(viewer)s) AS liked_by_me") if viewer_id else "FALSE AS liked_by_me"
+    where, params = [], {"uid": user_id, "limit": limit, "offset": offset}
+    if viewer_id:
+        params["viewer"] = viewer_id
+    # 'games'/'performances' select what a log CONTAINS, not what type a row is.
+    if _filter == "games":          where.append("rating IS NOT NULL")
+    elif _filter == "performances": where.append("grade_count > 0")
+    elif _filter == "attended":     where.append("attended = TRUE")
+    if team:
+        where.append("(home_team_abbr = %(team)s OR away_team_abbr = %(team)s)")
+        params["team"] = team
+    order = {
+        "recent":      "COALESCE(game_date, created_at::date) DESC, created_at DESC",
+        "oldest":      "COALESCE(game_date, created_at::date) ASC,  created_at ASC",
+        # NULLS LAST on both: a grades-only log has no game rating, and letting NULL sort
+        # to the top of "Highest Rated" would put unrated logs above every 5-star one.
+        "rating_desc": "rating DESC NULLS LAST, COALESCE(game_date, created_at::date) DESC",
+        "rating_asc":  "rating ASC  NULLS LAST, COALESCE(game_date, created_at::date) DESC",
+    }.get(sort, None)
+    if order is None:
+        order = "COALESCE(game_date, created_at::date) DESC, created_at DESC"
+    sql = _DIARY_GROUPED_SQL.format(
+        liked_by_me=liked_by_me,
+        where_sql=("WHERE " + " AND ".join(where)) if where else "",
+        order_by=order)
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(sql, params)
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return rows
+
+
 @app.route("/api/users/<int:user_id>/activity")
 def get_user_activity(user_id):
     limit     = min(int(request.args.get("limit", 20)), 100)
@@ -6819,6 +6946,16 @@ def get_user_activity(user_id):
     order_by = _ORDER.get(request.args.get("sort", "recent"), _ORDER["recent"])
     _filter  = request.args.get("filter", "all")
     team     = (request.args.get("team") or "").strip().upper()
+
+    if request.args.get("grouped") in ("1", "true"):
+        try:
+            rows = _diary_grouped(user_id, viewer_id, limit, offset,
+                                  request.args.get("sort", "recent"), _filter, team)
+            return jsonify({"items": _format_feed_rows(rows),
+                            "has_more": len(rows) == limit})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     diary_where, diary_params = [], []
     if _filter == "games":            diary_where.append("type = 'game_review'")
     elif _filter == "performances":   diary_where.append("type = 'performance_review'")
@@ -11756,6 +11893,7 @@ def _wnba_cdn_ingest_game_bg(game_id: str, home_abbr: str, away_abbr: str):
                     _si(stats.get("fieldGoalsAttempted", 0)),
                     _si(stats.get("threePointersMade", 0)),
                     _si(stats.get("threePointersAttempted", 0)),
+                    _cdn_minutes(stats.get("minutes")),
                 ))
 
         if not rows:
@@ -11767,13 +11905,16 @@ def _wnba_cdn_ingest_game_bg(game_id: str, home_abbr: str, away_abbr: str):
             cur.execute("""
                 INSERT INTO wnba_player_game_stats
                     (player_id, player_name, team, game_id, season,
-                     pts, reb, ast, tov, fgm, fga, fg3m, fg3a)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     pts, reb, ast, tov, fgm, fga, fg3m, fg3a, min)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (player_id, game_id) DO UPDATE SET
                     pts  = EXCLUDED.pts,  reb  = EXCLUDED.reb,
                     ast  = EXCLUDED.ast,  tov  = EXCLUDED.tov,
                     fgm  = EXCLUDED.fgm,  fga  = EXCLUDED.fga,
-                    fg3m = EXCLUDED.fg3m, fg3a = EXCLUDED.fg3a
+                    fg3m = EXCLUDED.fg3m, fg3a = EXCLUDED.fg3a,
+                    -- COALESCE so a re-run that fails to parse minutes cannot wipe a
+                    -- value the backfill already established.
+                    min  = COALESCE(EXCLUDED.min, wnba_player_game_stats.min)
             """, row)
         conn.commit()
         cur.close(); conn.close()
