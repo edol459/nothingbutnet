@@ -5537,9 +5537,23 @@ def list_my_drafts():
     try:
         conn = get_conn(); cur = conn.cursor()
         cur.execute("""
-            SELECT d.*, g.game_date, g.home_score, g.away_score, g.status AS game_status
+            SELECT d.*, g.game_date, g.home_score, g.away_score, g.status AS game_status,
+                   r.rating       AS pub_rating,
+                   r.review_text  AS pub_review_text,
+                   r.attended     AS pub_attended,
+                   (r.id IS NOT NULL) AS has_review,
+                   COALESCE(p.grades, '{}'::jsonb) AS pub_grades
             FROM game_log_drafts d
-            LEFT JOIN games g ON g.game_id = d.game_id
+            LEFT JOIN games g        ON g.game_id = d.game_id
+            LEFT JOIN game_reviews r ON r.user_id = d.user_id AND r.game_id = d.game_id
+            LEFT JOIN (
+                -- Published grades as {person_id: rating}, so the draft's JSONB can be
+                -- compared against it directly rather than row by row in Python.
+                SELECT user_id, game_id,
+                       jsonb_object_agg(person_id::text, rating) AS grades
+                FROM performance_reviews
+                GROUP BY user_id, game_id
+            ) p ON p.user_id = d.user_id AND p.game_id = d.game_id
             WHERE d.user_id = %s
             ORDER BY d.updated_at DESC
             LIMIT %s
@@ -5556,6 +5570,39 @@ def list_my_drafts():
             item["game_date"]  = str(d["game_date"]) if d.get("game_date") else None
             item["home_score"] = d.get("home_score")
             item["away_score"] = d.get("away_score")
+
+            # Published state, and how far the draft has drifted from it. Without this the
+            # list can't tell "a log you never finished" from "edits you never submitted" —
+            # which read as completely different jobs to the person holding the phone.
+            pub_grades = d.get("pub_grades") or {}
+            if isinstance(pub_grades, str):
+                pub_grades = json.loads(pub_grades)
+            is_published = bool(d.get("has_review")) or bool(pub_grades)
+            item["is_published"] = is_published
+
+            if is_published:
+                draft_grades = {str(k): v for k, v in (item.get("grades") or {}).items()}
+                pub = {str(k): v for k, v in pub_grades.items()}
+                changed = sum(1 for k, v in draft_grades.items()
+                              if v and k in pub and pub[k] != v)
+                added   = sum(1 for k, v in draft_grades.items() if v and k not in pub)
+                # Absence means removal only because every draft on a published log is
+                # written as a full snapshot of it — see the client's seeding rules.
+                removed = sum(1 for k in pub if not draft_grades.get(k))
+                n = changed + added + removed
+                if (item.get("rating") or None) != d.get("pub_rating"):
+                    n += 1
+                if (item.get("review_text") or "") != (d.get("pub_review_text") or ""):
+                    n += 1
+                if bool(item.get("attended")) != bool(d.get("pub_attended")):
+                    n += 1
+                item["pending_changes"] = n
+                # A draft identical to its published log is a copy, not work. It should
+                # never have been written; don't advertise it if an old one lingers.
+                if n == 0:
+                    continue
+            else:
+                item["pending_changes"] = 0
             out.append(item)
         return jsonify({"drafts": out})
     except Exception as e:
