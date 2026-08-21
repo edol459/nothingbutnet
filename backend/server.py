@@ -6213,17 +6213,114 @@ def get_recent_reviews():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # GET /api/feed  — unified stream: game reviews + performance reviews
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Grouped feed: one entry per LOG, not per rating
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# The ungrouped feed emits a row per game_review AND per performance_review, so a full
+# 24-player report card floods it with 25 consecutive entries from one person — and that
+# gets worse precisely as live logging succeeds. This collapses each (user, game) into a
+# single "logged this game" entry carrying the rating, the note and a grade count.
+#
+# Opt-in via ?grouped=1 for the same reason ?include_lists is: the shipped app switches on
+# `type` and would push an unknown 'game_log' through its performance-review branch.
+#
+# A FULL OUTER JOIN, not an inner one — all three shapes are valid: review-only,
+# grades-only (since the game rating became optional), and both.
+_FEED_GROUPED_SQL = """
+    WITH logs AS (
+        SELECT
+            COALESCE(gr.user_id, pl.user_id)  AS user_id,
+            COALESCE(gr.game_id, pl.game_id)  AS game_id,
+            gr.id                             AS review_id,
+            gr.rating, gr.review_text,
+            COALESCE(gr.tags, '[]'::jsonb)    AS tags,
+            COALESCE(gr.attended, FALSE)      AS attended,
+            COALESCE(pl.grade_count, 0)       AS grade_count,
+            -- Most recent activity, so editing a log resurfaces it instead of leaving a
+            -- stale entry or creating a second one.
+            GREATEST(COALESCE(gr.updated_at, gr.created_at, pl.last_at),
+                     COALESCE(pl.last_at, gr.created_at))  AS activity_at
+        FROM game_reviews gr
+        FULL OUTER JOIN (
+            SELECT user_id, game_id, COUNT(*) AS grade_count, MAX(created_at) AS last_at
+            FROM performance_reviews
+            GROUP BY user_id, game_id
+        ) pl ON pl.user_id = gr.user_id AND pl.game_id = gr.game_id
+    )
+    SELECT
+        'game_log'::text AS type,
+        COALESCE(l.review_id, 0)  AS id,
+        l.game_id, l.user_id, l.rating,
+        round(l.rating / 2.0, 1)  AS stars,
+        l.review_text, l.tags, l.attended,
+        l.grade_count,
+        l.activity_at             AS created_at,
+        u.display_name, u.avatar_url, u.favorite_team,
+        u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
+        g.game_date, g.home_team_abbr, g.away_team_abbr, g.home_score, g.away_score, g.league,
+        COALESCE(lc.like_count, 0) AS like_count,
+        {liked_by_me},
+        COALESCE((SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = l.review_id), 0) AS reply_count
+    FROM logs l
+    JOIN users u ON u.id = l.user_id
+    JOIN games g ON g.game_id = l.game_id
+    LEFT JOIN (SELECT review_id, COUNT(*) AS like_count FROM review_likes GROUP BY review_id) lc
+           ON lc.review_id = l.review_id
+    {liked_join}
+    {friends_join}
+    WHERE 1=1 {block_where}
+    ORDER BY l.activity_at DESC
+    LIMIT %s OFFSET %s
+"""
+
+
+def _feed_grouped(user_id, limit, offset, friends_only):
+    liked_by_me = "COALESCE(lm.liked, FALSE) AS liked_by_me" if user_id else "FALSE AS liked_by_me"
+    liked_join  = ("LEFT JOIN (SELECT review_id, TRUE AS liked FROM review_likes WHERE user_id = %s) lm "
+                   "ON lm.review_id = l.review_id") if user_id else ""
+    friends_join = ("""
+        JOIN friendships fr ON (
+            (fr.sender_id = %s AND fr.receiver_id = l.user_id)
+            OR (fr.receiver_id = %s AND fr.sender_id = l.user_id)
+        ) AND fr.status = 'accepted'
+    """ if friends_only else "")
+    block_where = ("AND l.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = %s)"
+                   if user_id else "")
+
+    params = []
+    if user_id:     params.append(user_id)          # liked_join
+    if friends_only: params += [user_id, user_id]   # friends_join
+    if user_id:     params.append(user_id)          # block_where
+    params += [limit, offset]
+
+    sql = _FEED_GROUPED_SQL.format(liked_by_me=liked_by_me, liked_join=liked_join,
+                                   friends_join=friends_join, block_where=block_where)
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(sql, params)
+    rows = [dict(r) for r in cur.fetchall()]
+    cur.close(); conn.close()
+    return rows
+
+
 @app.route("/api/feed")
 def get_feed():
     limit        = min(int(request.args.get("limit", 20)), 100)
     offset       = int(request.args.get("offset", 0))
     friends_only  = request.args.get("friends") in ("1", "true")
     include_lists = request.args.get("include_lists") in ("1", "true")
+    grouped       = request.args.get("grouped") in ("1", "true")
     user          = current_user()
     user_id       = user["id"] if user else None
 
     if friends_only and not user_id:
         return jsonify({"items": [], "has_more": False})
+
+    if grouped:
+        try:
+            rows = _feed_grouped(user_id, limit, offset, friends_only)
+            return jsonify({"items": _format_feed_rows(rows), "has_more": len(rows) == limit})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     game_friends_join   = ""
     game_friends_params = []
@@ -6671,7 +6768,9 @@ def _format_feed_rows(rows) -> list:
             "equipped_ring":      d.get("equipped_ring"),
             "equipped_title":     d.get("equipped_title"),
             "rating":             d["rating"],
-            "stars":              float(d["stars"]),
+            # A grades-only log has no game rating, so stars is NULL — float(None) would
+            # raise and 500 the whole feed. 30 such logs already exist in production.
+            "stars":              float(d["stars"]) if d.get("stars") is not None else None,
             "review_text":        d.get("review_text"),
             "tags":               d.get("tags") or [],
             "attended":           bool(d.get("attended", False)),
@@ -6688,6 +6787,9 @@ def _format_feed_rows(rows) -> list:
             "pts":                d.get("pts"),
             "reb":                d.get("reb"),
             "ast":                d.get("ast"),
+            # Grouped feed only: how many players this log graded, so the entry can read
+            # "13 players graded" instead of emitting 13 separate rows.
+            "grade_count":        d.get("grade_count"),
         })
     return items
 
