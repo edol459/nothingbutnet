@@ -664,6 +664,43 @@ def _ensure_tables():
             CREATE INDEX IF NOT EXISTS idx_xp_events_user_type_ref
             ON xp_events(user_id, event_type, reference_id)
         """)
+        # Live-logging drafts. A user's in-progress notebook for a game: freely editable
+        # while the game is live, and NEVER read by any aggregate. Publishing transcribes it
+        # into game_reviews/performance_reviews and deletes the row.
+        #
+        # Deliberately its own table rather than a `status` column on the real tables: with a
+        # flag, every aggregate query (game score, community average, GPA, feed rails,
+        # leaderboards) would need `WHERE status='published'`, and missing one would silently
+        # publish someone's draft — the exact failure the submit gate exists to prevent.
+        #
+        # No FK on game_id: `games` only holds FINISHED games, so a live game has no row yet.
+        # For the same reason the game context is denormalised here — the unfinished-logs
+        # list has to render a draft for a game the DB doesn't know about.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS game_log_drafts (
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                game_id     TEXT    NOT NULL,
+                league      TEXT    NOT NULL DEFAULT 'nba',
+                home_abbr   TEXT,
+                away_abbr   TEXT,
+                -- Nullable and CHECK-free on purpose: a draft may be incomplete or briefly
+                -- invalid. Validation happens at publish time against the published scale.
+                rating      INTEGER,
+                review_text TEXT,
+                tags        JSONB   DEFAULT '[]'::jsonb,
+                attended    BOOLEAN DEFAULT FALSE,
+                -- {"2544": 9, ...}. A blob, not rows: a draft is edited as a unit and
+                -- nothing aggregates across drafts.
+                grades      JSONB   DEFAULT '{}'::jsonb,
+                created_at  TIMESTAMPTZ DEFAULT NOW(),
+                updated_at  TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (user_id, game_id)
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_drafts_user_updated
+            ON game_log_drafts(user_id, updated_at DESC)
+        """)
         # Product analytics — deliberately NOT xp_events: that table's xp_amount sums into
         # users.xp and its writes dedupe on (user_id, event_type, reference_id), so repeat
         # paywall views would be dropped and the XP totals skewed. Append-only, no dedupe.
@@ -3462,6 +3499,13 @@ def preview_page():
 # Boxscore data never changes once a game is Final — cache indefinitely so
 # repeated internal callers (e.g. /api/players/today) don't re-hit the CDN.
 _final_boxscore_cache: dict = {}  # game_id -> dict
+
+# Short-lived cache for IN-PROGRESS boxscores. Finals are cached forever above, but live
+# games were re-fetched on every call — and with live logging, N people watching one game
+# each poll every ~25s, which would be N Akamai-workaround CDN fetches per interval.
+# One fetch per game per TTL instead, shared across every viewer.
+_live_boxscore_cache: dict = {}   # game_id -> (payload, fetched_at)
+_LIVE_BOXSCORE_TTL = 20.0         # seconds; below the client's 25s poll so it stays fresh
 # Bounded: this used to grow without limit, which only stayed small because
 # pre-2019-20 games always failed to resolve and cached nothing. Now that they
 # resolve from player_gamelogs, browsing history fills it, and a long-lived
@@ -3578,6 +3622,10 @@ def _fetch_live_boxscore_data(game_id: str) -> dict | None:
     if game_id in _final_boxscore_cache:
         return _final_boxscore_cache[game_id]
 
+    cached = _live_boxscore_cache.get(game_id)
+    if cached and (_time.time() - cached[1]) < _LIVE_BOXSCORE_TTL:
+        return cached[0]
+
     is_wnba = str(game_id).startswith("10")
     # Try CDN first (works for current season)
     try:
@@ -3593,6 +3641,11 @@ def _fetch_live_boxscore_data(game_id: str) -> dict | None:
         if game.get("gameStatus") == 3:
             _upsert_game_from_boxscore(game_id, game, league="wnba" if is_wnba else "nba")
             _cache_final_boxscore(game_id, game)
+            # A game that just went final no longer needs the short-lived copy, and leaving
+            # it would serve a stale in-progress line for up to the TTL.
+            _live_boxscore_cache.pop(game_id, None)
+        else:
+            _live_boxscore_cache[game_id] = (game, _time.time())
         return game
     except Exception:
         pass
@@ -3717,6 +3770,8 @@ def players_today():
     body     = request.get_json(silent=True) or {}
     date     = (body.get("date") or "").strip()
     games_in = body.get("games") or []
+    # Only the log sheet asks for real in-progress stats; see the branch below.
+    want_live_stats = bool(body.get("live_stats", False))
     # followedOnly powers the home-screen "My Players Today" rail: restrict to
     # the caller's followed players and — crucially — only touch games that
     # involve a team one of them plays for, so a full slate doesn't fetch a
@@ -3800,10 +3855,30 @@ def players_today():
                 if not (game_abbrs & followed_team_abbrs[league]):
                     continue
 
-            if status == "final":
+            # Live games read the real boxscore, same as finals. They used to fall through to
+            # season averages ("no live polling needed — cheap and stable while a game is in
+            # progress"), which was right when this only fed a rail. It is wrong for a
+            # notebook: a stat line that doesn't move while you watch reads as broken.
+            #
+            # If the live fetch fails we fall back to season averages rather than dropping the
+            # game — a notebook with approximate numbers beats an empty one.
+            box = None
+            # Live boxscore stats are OPT-IN via live_stats=true, not the default.
+            #
+            # The rails that already consume this endpoint show the full roster with season
+            # averages during a live game. Reading the boxscore instead changes both the
+            # numbers ("32.4 MPG avg" -> "18 MIN") and the ROSTER, because the boxscore branch
+            # skips anyone with 0 minutes — so the rail would shrink to only players who had
+            # already entered. Correct for a notebook, wrong for a browse rail, and not a
+            # change shipped users asked for.
+            if status == "final" or (status == "live" and want_live_stats):
                 box = _fetch_live_boxscore_data(game_id)
-                if not box:
+                # Finals keep their old behaviour exactly: no boxscore means skip the game.
+                # Only LIVE games get the season-average fallback, because dropping a game
+                # you're actively taking notes on is worse than approximate numbers.
+                if not box and status == "final":
                     continue
+            if box:
                 for side in ("homeTeam", "awayTeam"):
                     team = box.get(side, {})
                     abbr = team.get("teamTricode", "")
@@ -3829,7 +3904,9 @@ def players_today():
                         rows.append({
                             "playerId": pid, "playerName": p.get("name", ""),
                             "teamAbbr": abbr, "league": league,
-                            "gameId": game_id, "gameStatus": "final", "gameTimeUTC": tipoff,
+                            # Report the REAL status: the client renders a live game
+                            # differently and must not be told a running game is final.
+                            "gameId": game_id, "gameStatus": status, "gameTimeUTC": tipoff,
                             "avgMinutes": None, "finalMinutes": round(mins, 1),
                             "avgPts": None, "finalPts": int(pts),
                             "finalReb": int(reb), "finalAst": int(ast),
@@ -4930,11 +5007,18 @@ def submit_game_log(game_id):
         conn = get_conn()
         cur  = conn.cursor()
 
-        cur.execute("SELECT game_date FROM games WHERE game_id = %s", (game_id,))
+        cur.execute("SELECT game_date, status FROM games WHERE game_id = %s", (game_id,))
         game_row = cur.fetchone()
         if not game_row:
             cur.close(); conn.close()
-            return jsonify({"error": "Game not found"}), 404
+            # `games` only holds finished games, so a miss here usually means the game is
+            # still in progress rather than that it doesn't exist.
+            return jsonify({"error": "not_final",
+                            "message": "You can submit once the game is final."}), 409
+        if "final" not in str(game_row.get("status") or "").lower():
+            cur.close(); conn.close()
+            return jsonify({"error": "not_final",
+                            "message": "You can submit once the game is final."}), 409
 
         cur.execute("SELECT avatar_url, favorite_team FROM users WHERE id = %s", (user["id"],))
         u = cur.fetchone()
@@ -4992,6 +5076,12 @@ def submit_game_log(game_id):
         # Logging a game implies you watched it — keeps the diary invariant true.
         cur.execute("INSERT INTO game_watches (user_id, game_id) VALUES (%s, %s) "
                     "ON CONFLICT DO NOTHING", (user["id"], game_id))
+
+        # The notebook has become a log; consume it. Inside the transaction on purpose — a
+        # rolled-back publish must not lose the draft, and a committed one must not leave a
+        # stale draft behind to resurrect old values next time the sheet opens.
+        cur.execute("DELETE FROM game_log_drafts WHERE user_id = %s AND game_id = %s",
+                    (user["id"], game_id))
 
         conn.commit()
 
@@ -5053,6 +5143,233 @@ def delete_review(game_id):
             return jsonify({"error": "Review not found"}), 404
         return jsonify({"ok": True})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Live-logging drafts  —  /api/games/<game_id>/draft
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# A draft is a private notebook. It is written constantly during a live game and read only
+# by its owner; nothing here ever feeds a public aggregate. See docs/live-logging-spec.md.
+
+def _format_draft(r: dict) -> dict:
+    return {
+        "game_id":     r["game_id"],
+        "league":      r.get("league") or "nba",
+        "home_abbr":   r.get("home_abbr"),
+        "away_abbr":   r.get("away_abbr"),
+        "rating":      r.get("rating"),
+        "review_text": r.get("review_text"),
+        "tags":        r.get("tags") or [],
+        "attended":    bool(r.get("attended", False)),
+        # Player ids stay STRING-keyed on the wire — JSON object keys are always strings, so
+        # converting to int here would just be re-stringified by jsonify. The client parses
+        # them back. Non-numeric keys are dropped rather than trusted.
+        "grades":      {str(k): v for k, v in (r.get("grades") or {}).items()
+                        if str(k).lstrip("-").isdigit()},
+        "updated_at":  str(r.get("updated_at") or ""),
+    }
+
+
+@app.route("/api/games/<game_id>/draft", methods=["GET"])
+@login_required
+def get_game_draft(game_id):
+    user = current_user()
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("SELECT * FROM game_log_drafts WHERE user_id = %s AND game_id = %s",
+                    (user["id"], game_id))
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        return jsonify({"draft": _format_draft(dict(row)) if row else None})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/games/<game_id>/draft", methods=["PUT"])
+@login_required
+def put_game_draft(game_id):
+    """Upsert the whole draft. The client sends the complete notebook and last write wins —
+    no field-level merge, because a draft has exactly one author and merging two versions of
+    someone's opinion is worse than picking the later one."""
+    import json as _json
+    user = current_user()
+    body = request.get_json(silent=True) or {}
+
+    # Ratings are NOT validated against the published scale here. A draft is allowed to hold
+    # a value the publish path would reject; publishing is where the rules apply.
+    rating = body.get("rating")
+    if rating is not None and not isinstance(rating, int):
+        return jsonify({"error": "rating must be an integer or null"}), 400
+
+    raw_grades = body.get("grades") or {}
+    if not isinstance(raw_grades, dict):
+        return jsonify({"error": "grades must be an object"}), 400
+    if len(raw_grades) > _LOG_MAX_PERFORMANCES:
+        return jsonify({"error": f"At most {_LOG_MAX_PERFORMANCES} grades per draft."}), 400
+    grades = {}
+    for k, v in raw_grades.items():
+        try:
+            pid = int(k)
+        except (TypeError, ValueError):
+            return jsonify({"error": "grade keys must be player ids"}), 400
+        if not isinstance(v, int):
+            return jsonify({"error": "grade values must be integers"}), 400
+        grades[str(pid)] = v
+
+    text = body.get("review_text")
+    if text is not None and not isinstance(text, str):
+        return jsonify({"error": "review_text must be a string or null"}), 400
+    # Cap length generously — this is a private buffer, not a published review, so the free
+    # tier limit is enforced at publish time rather than throttling someone mid-sentence.
+    if text and len(text) > 10000:
+        text = text[:10000]
+
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO game_log_drafts
+                (user_id, game_id, league, home_abbr, away_abbr,
+                 rating, review_text, tags, attended, grades, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (user_id, game_id) DO UPDATE SET
+                league      = EXCLUDED.league,
+                home_abbr   = COALESCE(EXCLUDED.home_abbr, game_log_drafts.home_abbr),
+                away_abbr   = COALESCE(EXCLUDED.away_abbr, game_log_drafts.away_abbr),
+                rating      = EXCLUDED.rating,
+                review_text = EXCLUDED.review_text,
+                tags        = EXCLUDED.tags,
+                attended    = EXCLUDED.attended,
+                grades      = EXCLUDED.grades,
+                updated_at  = NOW()
+            RETURNING *
+        """, (user["id"], game_id,
+              (body.get("league") or "nba").lower(),
+              body.get("home_abbr"), body.get("away_abbr"),
+              rating, (text or None) if text != "" else None,
+              _json.dumps(_clean_tags(body.get("tags"))),
+              bool(body.get("attended", False)),
+              _json.dumps(grades)))
+        row = dict(cur.fetchone())
+        conn.commit(); cur.close(); conn.close()
+        return jsonify({"draft": _format_draft(row)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/games/<game_id>/draft", methods=["DELETE"])
+@login_required
+def delete_game_draft(game_id):
+    user = current_user()
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("DELETE FROM game_log_drafts WHERE user_id = %s AND game_id = %s",
+                    (user["id"], game_id))
+        deleted = cur.rowcount or 0
+        conn.commit(); cur.close(); conn.close()
+        return jsonify({"ok": True, "deleted": deleted})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/me/drafts", methods=["GET"])
+@login_required
+def list_my_drafts():
+    """Unfinished logs. LEFT JOIN games on purpose: a live game has no row there yet, and an
+    inner join would drop exactly the drafts this list exists to show."""
+    user = current_user()
+    limit = min(int(request.args.get("limit", 30)), 100)
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("""
+            SELECT d.*, g.game_date, g.home_score, g.away_score, g.status AS game_status
+            FROM game_log_drafts d
+            LEFT JOIN games g ON g.game_id = d.game_id
+            WHERE d.user_id = %s
+            ORDER BY d.updated_at DESC
+            LIMIT %s
+        """, (user["id"], limit))
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        out = []
+        for r in rows:
+            d = dict(r)
+            item = _format_draft(d)
+            # `is_final` is what unlocks Submit. A missing games row means the game hasn't
+            # finished yet, so absence reads as "not final" rather than "unknown".
+            item["is_final"]   = bool(d.get("game_status") and "final" in str(d["game_status"]).lower())
+            item["game_date"]  = str(d["game_date"]) if d.get("game_date") else None
+            item["home_score"] = d.get("home_score")
+            item["away_score"] = d.get("away_score")
+            out.append(item)
+        return jsonify({"drafts": out})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# DELETE /api/games/<game_id>/log  — delete the whole log
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# The counterpart to POST /log. Removes the game review AND every player grade this
+# user left on the game, in one transaction.
+#
+# DELETE /reviews only ever removed the game_reviews row, so once grading existed a user
+# could "delete their log" and silently keep every grade — and with the log form unable to
+# submit an empty state, there was no way to erase grades at all.
+#
+# game_watches is deliberately left alone: you still watched the game. Un-watching is its
+# own action (DELETE /watch) and shouldn't be a side effect of removing an opinion.
+@app.route("/api/games/<game_id>/log", methods=["DELETE"])
+@login_required
+def delete_game_log(game_id):
+    user = current_user()
+    conn = None
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+
+        cur.execute("DELETE FROM game_reviews WHERE user_id = %s AND game_id = %s RETURNING id",
+                    (user["id"], game_id))
+        review_deleted = cur.fetchone() is not None
+
+        cur.execute("DELETE FROM performance_reviews WHERE user_id = %s AND game_id = %s",
+                    (user["id"], game_id))
+        grades_deleted = cur.rowcount or 0
+
+        if not review_deleted and grades_deleted == 0:
+            conn.rollback(); cur.close(); conn.close()
+            return jsonify({"error": "Nothing logged for this game"}), 404
+
+        # Only the game review feeds these counters.
+        if review_deleted:
+            cur.execute("""
+                UPDATE games
+                SET review_count = (SELECT COUNT(*) FROM game_reviews WHERE game_id = %s),
+                    rating_sum   = (SELECT COALESCE(SUM(rating), 0) FROM game_reviews WHERE game_id = %s)
+                WHERE game_id = %s
+            """, (game_id, game_id, game_id))
+
+        cur.execute("SELECT game_date FROM games WHERE game_id = %s", (game_id,))
+        date_row = cur.fetchone()
+        conn.commit()
+
+        # After the commit, so a rollback can't leave caches dropped for data still present.
+        if review_deleted and date_row:
+            date_str = str(date_row["game_date"])
+            _past_sb_cache.pop(date_str, None)
+            if _today_sb_cache.get("date") == date_str:
+                _today_sb_cache.clear()
+
+        cur.close(); conn.close()
+        return jsonify({"ok": True,
+                        "review_deleted": review_deleted,
+                        "grades_deleted": grades_deleted})
+    except Exception as e:
+        try:
+            if conn is not None:
+                conn.rollback(); conn.close()
+        except Exception:
+            pass
         return jsonify({"error": str(e)}), 500
 
 
