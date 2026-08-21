@@ -4455,7 +4455,8 @@ def _format_review(r: dict) -> dict:
         "favorite_team":  r.get("favorite_team") or "",
         "is_pro":         bool(r.get("is_pro", False)),
         "rating":         r["rating"],
-        "stars":          r["rating"] / 2,
+        # A grades-only log has no game rating. Dividing None here 500s the whole list.
+        "stars":          (r["rating"] / 2) if r.get("rating") is not None else None,
         "review_text":    r.get("review_text"),
         "created_at":     str(r.get("created_at", "")),
         "updated_at":     str(r.get("updated_at", "")),
@@ -4467,6 +4468,9 @@ def _format_review(r: dict) -> dict:
         "ball_knowledge_level": _xp_to_level(int(r.get("xp") or 0)),
         "equipped_ring":        r.get("equipped_ring"),   # null=use rank, 0=no ring,  1-10=specific
         "equipped_title":       r.get("equipped_title"),  # null=use rank, 0=no title, 1-10=specific
+        # Only present on the ?logs=1 branch, which returns whole game logs rather than
+        # bare reviews. Absent (not 0) otherwise so old clients see no change at all.
+        **({"grade_count": int(r["grade_count"])} if r.get("grade_count") is not None else {}),
     }
 
 
@@ -4758,6 +4762,79 @@ def get_game(game_id):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # GET /api/games/<game_id>/reviews
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ?logs=1 returns whole game LOGS rather than bare reviews: a user who only graded
+# players — no rating, no note — is a real log and belongs in this list, but has no
+# game_reviews row at all, so the plain query cannot see them. Opt-in because the
+# shipped App Store build reads this endpoint and must keep getting exactly what it
+# gets today.
+_GAME_LOGS_SQL = """
+    WITH logs AS (
+        SELECT
+            COALESCE(gr.user_id, pl.user_id) AS user_id,
+            gr.id                            AS review_id,
+            gr.rating, gr.review_text, gr.created_at, gr.updated_at,
+            COALESCE(gr.tags, '[]'::jsonb)   AS tags,
+            COALESCE(gr.attended, FALSE)     AS attended,
+            COALESCE(pl.grade_count, 0)      AS grade_count,
+            GREATEST(COALESCE(gr.updated_at, gr.created_at, pl.last_at),
+                     COALESCE(pl.last_at, gr.created_at)) AS activity_at
+        FROM (SELECT * FROM game_reviews WHERE game_id = %(gid)s) gr
+        FULL OUTER JOIN (
+            SELECT user_id, COUNT(*) AS grade_count, MAX(created_at) AS last_at
+            FROM performance_reviews WHERE game_id = %(gid)s
+            GROUP BY user_id
+        ) pl ON pl.user_id = gr.user_id
+    )
+    SELECT
+        COALESCE(l.review_id, 0) AS id,
+        %(gid)s::text            AS game_id,
+        l.user_id,
+        -- 0, not NULL: `Review.rating` is non-optional on the client and a grades-only log
+        -- is exactly the "no game rating" case the feed already encodes as 0.
+        COALESCE(l.rating, 0)                      AS rating,
+        l.review_text, l.tags, l.attended, l.grade_count,
+        -- A grades-only log has no game_reviews row, so no created_at of its own.
+        COALESCE(l.created_at, l.activity_at)      AS created_at,
+        COALESCE(l.updated_at, l.activity_at)      AS updated_at,
+        u.display_name, u.avatar_url, u.favorite_team,
+        u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
+        COALESCE(lc.like_count, 0) AS like_count,
+        {liked_by_me},
+        COALESCE((SELECT COUNT(*) FROM review_replies rr
+                   WHERE rr.review_id = l.review_id), 0) AS reply_count
+    FROM logs l
+    JOIN users u ON u.id = l.user_id
+    LEFT JOIN (SELECT review_id, COUNT(*) AS like_count
+                 FROM review_likes GROUP BY review_id) lc ON lc.review_id = l.review_id
+    ORDER BY {order_sql}
+    LIMIT %(limit)s OFFSET %(offset)s
+"""
+
+
+def _game_logs(game_id, user_id, limit, offset, sort):
+    # Scalar subquery rather than a join, so the SELECT needs no GROUP BY.
+    liked_by_me = ("EXISTS (SELECT 1 FROM review_likes rl_me WHERE rl_me.review_id = l.review_id "
+                   "AND rl_me.user_id = %(me)s) AS liked_by_me") if user_id else "FALSE AS liked_by_me"
+    order_sql = "like_count DESC, l.activity_at DESC" if sort == "likes" else "l.activity_at DESC"
+    sql = _GAME_LOGS_SQL.format(liked_by_me=liked_by_me, order_sql=order_sql)
+    params = {"gid": game_id, "limit": limit, "offset": offset}
+    if user_id:
+        params["me"] = user_id
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(sql, params)
+    rows = [_format_review(dict(r)) for r in cur.fetchall()]
+    cur.execute("""
+        SELECT COUNT(*) FROM (
+            SELECT user_id FROM game_reviews WHERE game_id = %(gid)s
+            UNION
+            SELECT user_id FROM performance_reviews WHERE game_id = %(gid)s
+        ) t
+    """, {"gid": game_id})
+    total = cur.fetchone()["count"]
+    cur.close(); conn.close()
+    return rows, total
+
+
 @app.route("/api/games/<game_id>/reviews")
 def get_game_reviews(game_id):
     limit  = min(int(request.args.get("limit", 20)), 100)
@@ -4767,6 +4844,10 @@ def get_game_reviews(game_id):
     user    = current_user()
     user_id = user["id"] if user else None
     try:
+        if request.args.get("logs") in ("1", "true"):
+            reviews, total = _game_logs(game_id, user_id, limit, offset, sort)
+            return jsonify({"reviews": reviews, "total": total,
+                            "has_more": offset + len(reviews) < total})
         conn = get_conn()
         cur  = conn.cursor()
         if user_id:
