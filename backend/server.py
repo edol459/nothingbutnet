@@ -5081,7 +5081,7 @@ def submit_game_log(game_id):
     if len(raw_perfs) > _LOG_MAX_PERFORMANCES:
         return jsonify({"error": f"At most {_LOG_MAX_PERFORMANCES} player grades per log."}), 400
 
-    if rating is None and not raw_perfs:
+    if rating is None and not raw_perfs and not (body.get("remove_grades") or []):
         return jsonify({"error": "Nothing to log — rate the game or grade a player."}), 400
     # Review text has nowhere to live without a game_reviews row, so don't silently drop it.
     if rating is None and review_text:
@@ -5105,6 +5105,24 @@ def submit_game_log(game_id):
         if ptext and _contains_slur(ptext):
             return jsonify({"error": f"A player note contains language that isn't allowed."}), 400
         perfs[pid] = (pr, (p.get("player_name") or "").strip()[:100] or None, ptext)
+
+    # Removals are EXPLICIT, never inferred from a player's absence from `performances`.
+    # Inferring it would mean any client that posted a partial payload — an older build, a
+    # retry that lost rows — silently deleted every grade it forgot to mention. Naming the
+    # ids makes deletion something a client has to ask for.
+    raw_removed = body.get("remove_grades") or []
+    if not isinstance(raw_removed, list):
+        return jsonify({"error": "remove_grades must be a list"}), 400
+    removed_ids = []
+    for i, pid in enumerate(raw_removed):
+        if not isinstance(pid, int):
+            return jsonify({"error": f"remove_grades[{i}] must be an integer"}), 400
+        if pid in perfs:
+            return jsonify({"error": f"remove_grades[{i}] is also being graded"}), 400
+        removed_ids.append(pid)
+    if len(removed_ids) > _LOG_MAX_PERFORMANCES:
+        return jsonify({"error": f"At most {_LOG_MAX_PERFORMANCES} removals per log."}), 400
+
 
     try:
         conn = get_conn()
@@ -5166,6 +5184,18 @@ def submit_game_log(game_id):
             row["avatar_url"]   = avatar_url
             saved_perfs.append(_format_perf_review(row))
 
+        # Grades the user pulled out of their log. Scoped to (user, game, person_id) so this
+        # can only ever touch this user's own grades for this one game. Inside the same
+        # transaction as the upserts, so an update can never half-apply — leaving a log that
+        # is neither the old version nor the new one.
+        removed_count = 0
+        if removed_ids:
+            cur.execute("""
+                DELETE FROM performance_reviews
+                WHERE user_id = %s AND game_id = %s AND person_id = ANY(%s)
+            """, (user["id"], game_id, removed_ids))
+            removed_count = cur.rowcount
+
         # Only when a review was written — these counters are derived from game_reviews and
         # recomputing them on a grades-only log is pure lock contention for no change.
         if review is not None:
@@ -5201,6 +5231,7 @@ def submit_game_log(game_id):
             "review":            _format_review(review) if review is not None else None,
             "performances":      saved_perfs,
             "performance_count": len(saved_perfs),
+            "removed_count":     removed_count,
         }), 201
     except Exception as e:
         try:
