@@ -6242,6 +6242,7 @@ def get_top_rated_games():
     season_type = request.args.get("season_type", "").strip()
     min_reviews = int(request.args.get("min_reviews", 1))
     limit       = min(int(request.args.get("limit", 25)), 100)
+    offset      = int(request.args.get("offset", 0))   # 0 keeps existing callers unchanged
     days        = request.args.get("days")
     weighted    = request.args.get("weighted") in ("1", "true")
 
@@ -6287,8 +6288,8 @@ def get_top_rated_games():
               {d_filter}
               AND review_count >= %s
             ORDER BY {order_sql}
-            LIMIT %s
-        """, l_params + s_params + st_params + d_params + [min_reviews] + order_params + [limit])
+            LIMIT %s OFFSET %s
+        """, l_params + s_params + st_params + d_params + [min_reviews] + order_params + [limit, offset])
         games = [_format_game(dict(r)) for r in cur.fetchall()]
         cur.close(); conn.close()
         return jsonify({"games": games})
