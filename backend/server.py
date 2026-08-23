@@ -4857,6 +4857,21 @@ def _game_logs(game_id, user_id, limit, offset, sort):
     return rows, total
 
 
+@app.route("/api/config")
+def api_config():
+    """Constants the client must not hardcode.
+
+    The grade scale is here because it CHANGES: migrate_perf_scale_11.py shifts stored
+    ratings to make room for C-, and a client with the scale baked in would need an App Store
+    release timed to that migration — a coupling that can't be scheduled. Serving it means
+    the migration and a server deploy are the whole operation.
+
+    Deliberately unauthenticated: signed-out users see grades too (community logs, player
+    profiles), so this can't live behind /auth/me.
+    """
+    return jsonify({"perf_rating_max": PERF_RATING_MAX})
+
+
 @app.route("/api/games/<game_id>/reviews")
 def get_game_reviews(game_id):
     limit  = min(int(request.args.get("limit", 20)), 100)
