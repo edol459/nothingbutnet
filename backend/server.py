@@ -6235,18 +6235,42 @@ def admin_list_reviews():
 @app.route("/api/reviews/top-games")
 def get_top_rated_games():
     league      = request.args.get("league", "nba").lower().strip()
+    both_leagues = league == "all"
     _def_season = _get_wnba_season() if league == "wnba" else get_current_season()
-    season      = request.args.get("season", _def_season).strip()
+    # Across leagues there is no single "current season" to default to.
+    season      = request.args.get("season", "all" if both_leagues else _def_season).strip()
     season_type = request.args.get("season_type", "").strip()
     min_reviews = int(request.args.get("min_reviews", 1))
     limit       = min(int(request.args.get("limit", 25)), 100)
     days        = request.args.get("days")
+    weighted    = request.args.get("weighted") in ("1", "true")
 
     all_seasons = season.lower() in ("all", "")
 
     try:
         conn = get_conn()
         cur  = conn.cursor()
+        # Opt-in, both of them: three web pages call this endpoint expecting one league and a
+        # raw average, and a rail wanting neither is not a reason to change what they get.
+        #
+        # Weighted, because a raw average ranks by luck at low volume — 15 of the 24 games
+        # rated in a recent window had exactly ONE rating, so a single 5-star outranked a 4.8
+        # from five people. Pulling low-count games toward the window mean orders them
+        # honestly while still showing them, where a min-ratings threshold would drop most of
+        # the rail instead.
+        l_filter  = "" if both_leagues else "AND league = %s"
+        l_params  = [] if both_leagues else [league]
+        order_sql = ("""
+            ((review_count / (review_count + 3.0)) * (rating_sum::float / review_count)
+             + (3.0 / (review_count + 3.0)) * (
+                   SELECT COALESCE(SUM(rating_sum)::float / NULLIF(SUM(review_count), 0), 8.0)
+                   FROM games
+                   WHERE review_count > 0 AND status = 'Final'
+                     AND game_date >= CURRENT_DATE - INTERVAL '%s days'
+               )) DESC NULLS LAST, review_count DESC
+        """ if weighted and days else
+        "(rating_sum::float / NULLIF(review_count, 0)) DESC NULLS LAST, review_count DESC")
+        order_params = [int(days)] if (weighted and days) else []
         s_filter  = "" if all_seasons else "AND season = %s"
         s_params  = [] if all_seasons else [season]
         st_filter = "AND season_type = %s" if season_type else ""
@@ -6257,15 +6281,14 @@ def get_top_rated_games():
             SELECT *
             FROM games
             WHERE status = 'Final'
-              AND league = %s
+              {l_filter}
               {s_filter}
               {st_filter}
               {d_filter}
               AND review_count >= %s
-            ORDER BY (rating_sum::float / NULLIF(review_count, 0)) DESC NULLS LAST,
-                     review_count DESC
+            ORDER BY {order_sql}
             LIMIT %s
-        """, [league] + s_params + st_params + d_params + [min_reviews, limit])
+        """, l_params + s_params + st_params + d_params + [min_reviews] + order_params + [limit])
         games = [_format_game(dict(r)) for r in cur.fetchall()]
         cur.close(); conn.close()
         return jsonify({"games": games})
@@ -6368,7 +6391,7 @@ def get_top_rated_performances():
     days        = request.args.get("days")
     min_reviews = int(request.args.get("min_reviews", 1))
 
-    d_filter = "AND pr.created_at >= CURRENT_DATE - INTERVAL '%s days'" if days else ""
+    d_filter = "AND g.game_date >= CURRENT_DATE - INTERVAL '%s days'" if days else ""
     d_params = [int(days)] if days else []
 
     try:
