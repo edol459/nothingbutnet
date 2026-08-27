@@ -994,6 +994,47 @@ ANALYTICS_SOURCES = {
 }
 
 
+def _safe_log(*args, **kwargs) -> None:
+    """log_event, but it cannot take the request down with it.
+
+    log_event already swallows its own failures, but these calls sit INSIDE the request's
+    try/except — so anything raised on the way in (a metadata value psycopg2 can't adapt,
+    say) would surface as a 500 for an operation that already committed. The user would be
+    told their log failed to save while it sat in the database.
+    """
+    try:
+        log_event(*args, **kwargs)
+    except Exception:
+        pass
+
+
+def _log_log_opened(user_id: int, game: dict) -> None:
+    """One `log_opened` per user per game per hour.
+
+    The log sheet re-polls this endpoint every 25 seconds while it's on screen, so logging
+    every call would count one person watching one game as a hundred opens and make the
+    funnel meaningless. Deduped in the DB rather than in process memory because gunicorn
+    runs several workers and each would keep its own cache.
+    """
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("""
+            SELECT 1 FROM analytics_events
+            WHERE event_type = 'log_opened' AND user_id = %s
+              AND metadata->>'game_id' = %s
+              AND created_at >= NOW() - INTERVAL '1 hour'
+            LIMIT 1
+        """, (user_id, str(game.get("gameId"))))
+        seen = cur.fetchone() is not None
+        cur.close(); conn.close()
+        if seen:
+            return
+    except Exception:
+        return   # never let a metric break the request it's measuring
+    _safe_log("log_opened", source="log_sheet", user_id=user_id, platform="ios",
+              metadata={"game_id": game.get("gameId"), "status": game.get("status")})
+
+
 def log_event(event_type: str, source: str = None, user_id: int = None,
               platform: str = None, metadata: dict = None, cur=None) -> None:
     """Fire-and-forget analytics write. Never raises — instrumentation must not be able
@@ -3794,6 +3835,9 @@ def players_today():
     games_in = body.get("games") or []
     # Only the log sheet asks for real in-progress stats; see the branch below.
     want_live_stats = bool(body.get("live_stats", False))
+    # live_stats is asked for by the log sheet and by nothing else, which makes this the one
+    # place the server can see someone OPEN a log without the app being told to report it —
+    # and the build in testers' hands can't be told anything without another release.
     # followedOnly powers the home-screen "My Players Today" rail: restrict to
     # the caller's followed players and — crucially — only touch games that
     # involve a team one of them plays for, so a full slate doesn't fetch a
@@ -3802,6 +3846,8 @@ def players_today():
 
     user    = current_user()
     user_id = user["id"] if user else None
+    if want_live_stats and user_id and games_in:
+        _log_log_opened(user_id, games_in[0])
     # followedOnly always reports followCount (even for an empty slate) so the
     # rail can tell "you follow nobody" (show the prompt) from "your players
     # just aren't playing in this scope today" (show nothing).
@@ -5156,6 +5202,15 @@ def submit_game_log(game_id):
             return jsonify({"error": "not_final",
                             "message": "You can submit once the game is final."}), 409
 
+        # Read before writing: after the upserts, every publish looks like an update.
+        cur.execute("""
+            SELECT EXISTS (SELECT 1 FROM game_reviews
+                            WHERE user_id = %s AND game_id = %s)
+                OR EXISTS (SELECT 1 FROM performance_reviews
+                            WHERE user_id = %s AND game_id = %s) AS existed
+        """, (user["id"], game_id, user["id"], game_id))
+        was_update = bool((cur.fetchone() or {}).get("existed"))
+
         cur.execute("SELECT avatar_url, favorite_team FROM users WHERE id = %s", (user["id"],))
         u = cur.fetchone()
         avatar_url = (u["avatar_url"] if u else None) or ""
@@ -5241,6 +5296,21 @@ def submit_game_log(game_id):
             _today_sb_cache.clear()
 
         cur.close(); conn.close()
+        _safe_log("log_published", source="log_sheet", user_id=user["id"], platform="ios",
+                  metadata={
+                      "game_id":      game_id,
+                      "grades":       len(saved_perfs),
+                      "removed":      removed_count,
+                      "has_rating":   rating is not None,
+                      # Length, not the text: this is a metric, not a copy of what people
+                      # wrote.
+                      "note_length":  len(review_text or ""),
+                      "attended":     bool(body.get("attended", False)),
+                      "tags":         len(_clean_tags(body.get("tags"))),
+                      # Distinguishes a first publish from an edit to a live log, which is
+                      # the difference between "people log" and "people come back".
+                      "is_update":    was_update,
+                  })
         return jsonify({
             # null on a grades-only log — the client must treat this as optional.
             "review":            _format_review(review) if review is not None else None,
@@ -5512,7 +5582,10 @@ def put_game_draft(game_id):
                 attended    = EXCLUDED.attended,
                 grades      = EXCLUDED.grades,
                 updated_at  = NOW()
-            RETURNING *
+            -- xmax is 0 on a genuine INSERT and non-zero when ON CONFLICT took the UPDATE
+            -- path. The client re-PUTs the whole draft every couple of seconds while you
+            -- type, so without this "started a draft" would count keystrokes.
+            RETURNING *, (xmax = 0) AS was_insert
         """, (user["id"], game_id,
               (body.get("league") or "nba").lower(),
               body.get("home_abbr"), body.get("away_abbr"),
@@ -5522,6 +5595,11 @@ def put_game_draft(game_id):
               _json.dumps(grades)))
         row = dict(cur.fetchone())
         conn.commit(); cur.close(); conn.close()
+        if row.pop("was_insert", False):
+            _safe_log("draft_started", source="log_sheet", user_id=user["id"], platform="ios",
+                      metadata={"game_id": game_id, "grades": len(grades),
+                                "has_rating": rating is not None,
+                                "has_note": bool(text)})
         return jsonify({"draft": _format_draft(row)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
