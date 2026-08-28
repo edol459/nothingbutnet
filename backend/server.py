@@ -6875,7 +6875,8 @@ def get_feed():
                 NULL::boolean  AS list_is_ranked,
                 NULL::integer  AS pts,
                 NULL::integer  AS reb,
-                NULL::integer  AS ast
+                NULL::integer  AS ast,
+                NULL::integer  AS min
             FROM game_reviews gr
             JOIN users u  ON gr.user_id = u.id
             JOIN games g  ON gr.game_id = g.game_id
@@ -6914,7 +6915,12 @@ def get_feed():
                 NULL::boolean  AS list_is_ranked,
                 COALESCE(pgl.pts, wgs.pts)            AS pts,
                 COALESCE(pgl.reb, wgs.reb)            AS reb,
-                COALESCE(pgl.ast, wgs.ast)            AS ast
+                COALESCE(pgl.ast, wgs.ast)            AS ast,
+                -- Rounded to an int on purpose. min is REAL, and the iOS client decodes
+                -- these with `try? decode(Int.self)`, which yields nil for a fractional
+                -- number — so an unrounded 32.4 would silently drop MIN from the row
+                -- rather than fail loudly. get_game_log already coerces via _i().
+                ROUND(COALESCE(pgl.min, wgs.min))::int AS min
             FROM performance_reviews pr
             JOIN users u ON pr.user_id = u.id
             LEFT JOIN games g ON pr.game_id = g.game_id
@@ -7193,7 +7199,8 @@ def get_user_activity(user_id):
                 (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count,
                 NULL::integer                         AS pts,
                 NULL::integer                         AS reb,
-                NULL::integer                         AS ast
+                NULL::integer                         AS ast,
+                NULL::integer                         AS min
             FROM game_reviews gr
             JOIN users u  ON gr.user_id = u.id
             JOIN games g  ON gr.game_id = g.game_id
@@ -7226,7 +7233,12 @@ def get_user_activity(user_id):
                 0::bigint                            AS reply_count,
                 COALESCE(pgl.pts, wgs.pts)            AS pts,
                 COALESCE(pgl.reb, wgs.reb)            AS reb,
-                COALESCE(pgl.ast, wgs.ast)            AS ast
+                COALESCE(pgl.ast, wgs.ast)            AS ast,
+                -- Rounded to an int on purpose. min is REAL, and the iOS client decodes
+                -- these with `try? decode(Int.self)`, which yields nil for a fractional
+                -- number — so an unrounded 32.4 would silently drop MIN from the row
+                -- rather than fail loudly. get_game_log already coerces via _i().
+                ROUND(COALESCE(pgl.min, wgs.min))::int AS min
             FROM performance_reviews pr
             JOIN users u ON pr.user_id = u.id
             LEFT JOIN games g ON pr.game_id = g.game_id
@@ -7318,6 +7330,9 @@ def _format_feed_rows(rows) -> list:
             "pts":                d.get("pts"),
             "reb":                d.get("reb"),
             "ast":                d.get("ast"),
+            # Minutes lead the stat line — 18 points reads very differently at 12 minutes
+            # than at 38. Already rounded to an int in SQL; see the feed/diary queries.
+            "min":                d.get("min"),
             # Grouped feed only: how many players this log graded, so the entry can read
             # "13 players graded" instead of emitting 13 separate rows.
             "grade_count":        d.get("grade_count"),
