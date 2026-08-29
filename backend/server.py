@@ -4066,6 +4066,65 @@ def _season_from_game_id(game_id: str) -> str:
         return get_current_season()
 
 
+def _refresh_team_records(cur, league: str, season: str, abbrs: list) -> None:
+    """Recompute regular-season W-L for specific teams straight from `games`.
+
+    Called the moment a game goes Final, so a team's record is right when the
+    buzzer sounds rather than at the next daily run. `team_seasons.wins/losses`
+    is a cache over `games`, and the only reason it was ever wrong is that the
+    cache could drift from its source for up to 24 hours.
+
+    Recomputes rather than increments, deliberately. The scoreboard poller runs
+    inside the web process and gunicorn runs two workers, so the same final can
+    be observed twice; adding a win would double-count, while recomputing from
+    source is idempotent however many times it fires.
+
+    Runs on the caller's cursor so it commits atomically with the game write —
+    the record can never reflect a game the table doesn't have, or vice versa.
+    """
+    if not abbrs:
+        return
+    cur.execute("""
+        WITH per_team AS (
+            SELECT home_team_abbr AS abbr,
+                   COUNT(*) FILTER (WHERE home_score > away_score) AS wins,
+                   COUNT(*) FILTER (WHERE home_score < away_score) AS losses
+            FROM games
+            WHERE league = %s AND season = %s AND season_type = 'Regular Season'
+              AND home_team_abbr = ANY(%s) AND home_score IS NOT NULL
+            GROUP BY 1
+            UNION ALL
+            SELECT away_team_abbr AS abbr,
+                   COUNT(*) FILTER (WHERE away_score > home_score) AS wins,
+                   COUNT(*) FILTER (WHERE away_score < home_score) AS losses
+            FROM games
+            WHERE league = %s AND season = %s AND season_type = 'Regular Season'
+              AND away_team_abbr = ANY(%s) AND away_score IS NOT NULL
+            GROUP BY 1
+        )
+        SELECT abbr, SUM(wins)::int AS wins, SUM(losses)::int AS losses
+        FROM per_team GROUP BY abbr
+    """, (league, season, abbrs, league, season, abbrs))
+
+    for row in cur.fetchall():
+        # DO UPDATE deliberately leaves team_name alone, and the INSERT carries
+        # the franchise's last real name forward. Writing the abbreviation into
+        # the name column is what left six WNBA team pages showing a record
+        # months out of date.
+        cur.execute("""
+            INSERT INTO team_seasons (team_abbr, team_name, season, wins, losses, league)
+            VALUES (%s,
+                    COALESCE((SELECT ts.team_name FROM team_seasons ts
+                              WHERE ts.league = %s AND ts.team_abbr = %s
+                                AND ts.team_name <> ts.team_abbr
+                              ORDER BY ts.season DESC LIMIT 1), %s),
+                    %s, %s, %s, %s)
+            ON CONFLICT (team_abbr, season) DO UPDATE
+               SET wins = EXCLUDED.wins, losses = EXCLUDED.losses
+        """, (row["abbr"], league, row["abbr"], row["abbr"],
+              season, row["wins"], row["losses"], league))
+
+
 def _upsert_game_from_boxscore(game_id: str, game: dict, league: str = "nba"):
     """
     Upsert a completed game into the games table from CDN boxscore data.
@@ -4113,6 +4172,8 @@ def _upsert_game_from_boxscore(game_id: str, game: dict, league: str = "nba"):
             from datetime import date as _date2
             game_date = _date2.today()
 
+        season = _get_wnba_season() if league == "wnba" else _season_from_game_id(game_id)
+
         conn = get_conn()
         cur  = conn.cursor()
         cur.execute("""
@@ -4136,13 +4197,16 @@ def _upsert_game_from_boxscore(game_id: str, game: dict, league: str = "nba"):
                OR games.season != EXCLUDED.season
         """, (
             game_id,
-            _get_wnba_season() if league == "wnba" else _season_from_game_id(game_id),
+            season,
             season_type,
             game_date,
             home_abbr, away_abbr,
             home_score, away_score,
             league,
         ))
+        # Only regular-season games move a record, so nothing else needs it.
+        if season_type == "Regular Season":
+            _refresh_team_records(cur, league, season, [home_abbr, away_abbr])
         conn.commit()
         cur.close()
         conn.close()
@@ -9836,21 +9900,214 @@ def update_favorite_team():
     try:
         conn = get_conn()
         cur  = conn.cursor()
-        cur.execute("""
-            UPDATE users SET favorite_team = %s, updated_at = NOW()
-            WHERE id = %s
-        """, (team, user["id"]))
+        # Route through team_allegiance so this endpoint — still used by the web
+        # picker and older app builds — records history instead of overwriting
+        # in place. _sync_favorite_team writes the users column afterwards.
+        if team:
+            league, abbr = _split_favorite_team(team)
+            _set_allegiance(cur, user["id"], league, abbr)
+        else:
+            # Clearing predates per-league allegiance and can't say which league
+            # it means, so it clears both — matching what it did when a user
+            # could only have one team.
+            league = None
+            for lg in _ALLEGIANCE_LEAGUES:
+                _set_allegiance(cur, user["id"], lg, None)
+        # prefer_league keeps this endpoint's old contract: the team you send is
+        # the team that comes back, regardless of the other league's allegiance.
+        stored = _sync_favorite_team(cur, user["id"], prefer_league=league)
         conn.commit()
         cur.close(); conn.close()
 
         from flask import session
         if "user" in session:
-            session["user"]["favorite_team"] = team or ""
+            session["user"]["favorite_team"] = stored
             session.modified = True
 
-        return jsonify({"ok": True, "favorite_team": team or ""})
+        return jsonify({"ok": True, "favorite_team": stored})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Team allegiance — one team per league, with receipts.
+#
+# users.favorite_team is a single column that overwrites in place, so it can
+# hold only one team and keeps no record of when it was set. team_allegiance
+# holds one open row per league plus every closed row behind it, which is what
+# makes a loyalty streak (and a switch history) possible.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_ALLEGIANCE_LEAGUES = ("nba", "wnba")
+
+
+def _split_favorite_team(value: str):
+    """'WNBA_LV' -> ('wnba', 'LV');  'GSW' -> ('nba', 'GSW')."""
+    if value.startswith("WNBA_"):
+        return "wnba", value[5:]
+    return "nba", value
+
+
+def _valid_allegiance(league: str, abbr: str) -> bool:
+    if league == "wnba":
+        return f"WNBA_{abbr}" in _WNBA_FAV_ABBRS
+    return abbr in _NBA_ABBRS
+
+
+def _sync_favorite_team(cur, user_id: int, prefer_league: str | None = None) -> str:
+    """Recompute users.favorite_team from the open allegiance rows.
+
+    The column can only hold one team, but ~30 queries still read it for
+    profile badges and feed cards, so one allegiance has to be the primary.
+    Default is NBA when both leagues are set — arbitrary, but stable, so
+    onboarding lands on the same badge no matter what order its screens run in.
+
+    `prefer_league` overrides that for the legacy favorite-team endpoint, whose
+    callers (the web picker, older app builds) expect the team they just sent to
+    become the stored one. Without it, a user with an NBA team who picked a WNBA
+    team would watch their choice apparently do nothing.
+
+    The lasting fix is an explicit primary flag the user controls; this keeps
+    both existing clients and onboarding correct until that exists.
+    """
+    cur.execute("""
+        SELECT league, team_abbr FROM team_allegiance
+        WHERE user_id = %s AND ended_at IS NULL
+    """, (user_id,))
+    current = {r["league"]: r["team_abbr"] for r in cur.fetchall()}
+    order = ([prefer_league] if prefer_league else []) + ["nba", "wnba"]
+    value = None
+    for lg in order:
+        if lg in current:
+            value = (f"WNBA_{current[lg]}" if lg == "wnba" else current[lg])
+            break
+    cur.execute("UPDATE users SET favorite_team = %s, updated_at = NOW() WHERE id = %s",
+                (value, user_id))
+    return value or ""
+
+
+def _set_allegiance(cur, user_id: int, league: str, abbr: str | None) -> bool:
+    """Close the open allegiance for `league` and open a new one. Returns
+    whether anything changed.
+
+    Re-picking the same team is a no-op: onboarding shows every screen with the
+    existing choice pre-selected, so confirming your team must not reset the
+    streak the screen is there to display.
+    """
+    cur.execute("""
+        SELECT id, team_abbr FROM team_allegiance
+        WHERE user_id = %s AND league = %s AND ended_at IS NULL
+    """, (user_id, league))
+    row = cur.fetchone()
+    if row and row["team_abbr"] == abbr:
+        return False
+    if row:
+        cur.execute("UPDATE team_allegiance SET ended_at = NOW() WHERE id = %s", (row["id"],))
+    if abbr:
+        cur.execute("""
+            INSERT INTO team_allegiance (user_id, league, team_abbr)
+            VALUES (%s, %s, %s)
+        """, (user_id, league, abbr))
+    return True
+
+
+@app.route("/api/me/allegiance", methods=["GET"])
+@login_required
+def get_allegiance():
+    """Current team per league, with how long it's been held, plus past teams."""
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT league, team_abbr, started_at,
+                   EXTRACT(DAY FROM NOW() - started_at)::int AS days_held
+            FROM team_allegiance
+            WHERE user_id = %s AND ended_at IS NULL
+            ORDER BY league
+        """, (user["id"],))
+        current = [{"league": r["league"], "team_abbr": r["team_abbr"],
+                    "started_at": r["started_at"].isoformat(),
+                    "days_held": r["days_held"]} for r in cur.fetchall()]
+
+        cur.execute("""
+            SELECT league, team_abbr, started_at, ended_at
+            FROM team_allegiance
+            WHERE user_id = %s AND ended_at IS NOT NULL
+            ORDER BY ended_at DESC LIMIT 20
+        """, (user["id"],))
+        history = [{"league": r["league"], "team_abbr": r["team_abbr"],
+                    "started_at": r["started_at"].isoformat(),
+                    "ended_at": r["ended_at"].isoformat()} for r in cur.fetchall()]
+        return jsonify({"current": current, "history": history})
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/me/allegiance", methods=["PUT"])
+@login_required
+def set_allegiance():
+    """Set (or clear) the caller's team for one league.
+
+    Body: {"league": "nba"|"wnba", "team_abbr": "GSW"}  — team_abbr "" clears it.
+    Abbreviations are canonical games-table form; the WNBA_ prefix belongs only
+    to users.favorite_team and is applied by _sync_favorite_team.
+    """
+    user   = current_user()
+    body   = request.get_json() or {}
+    league = (body.get("league") or "").strip().lower()
+    abbr   = (body.get("team_abbr") or "").strip().upper() or None
+
+    if league not in _ALLEGIANCE_LEAGUES:
+        return jsonify({"error": "league must be 'nba' or 'wnba'"}), 400
+    if abbr and not _valid_allegiance(league, abbr):
+        return jsonify({"error": f"Unknown {league.upper()} team '{abbr}'"}), 400
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        changed = _set_allegiance(cur, user["id"], league, abbr)
+        stored  = _sync_favorite_team(cur, user["id"])
+        conn.commit()
+
+        from flask import session
+        if "user" in session:
+            session["user"]["favorite_team"] = stored
+            session.modified = True
+
+        return jsonify({"ok": True, "changed": changed,
+                        "league": league, "team_abbr": abbr or "",
+                        "favorite_team": stored})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/me/onboarded", methods=["POST"])
+@login_required
+def mark_onboarded():
+    """Mark onboarding complete. First call wins — re-running it must not move
+    the timestamp, or a reinstall would look like a fresh signup."""
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE users SET onboarded_at = NOW(), updated_at = NOW()
+            WHERE id = %s AND onboarded_at IS NULL
+            RETURNING onboarded_at
+        """, (user["id"],))
+        row = cur.fetchone()
+        conn.commit()
+        if row:
+            return jsonify({"ok": True, "onboarded_at": row["onboarded_at"].isoformat()})
+        cur.execute("SELECT onboarded_at FROM users WHERE id = %s", (user["id"],))
+        existing = cur.fetchone()
+        return jsonify({"ok": True, "onboarded_at": existing["onboarded_at"].isoformat()})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -12146,6 +12403,7 @@ def _upsert_wnba_game(game_id, game_date, home_abbr, away_abbr, home_score, away
         # Derive the type from the id — hardcoding 'Regular Season' here let
         # preseason and All-Star games count toward team W-L records.
         season_type = _season_type_from_game_id(game_id)
+        season      = _get_wnba_season()
         cur.execute("""
             INSERT INTO games (
                 game_id, season, season_type, game_date,
@@ -12161,8 +12419,11 @@ def _upsert_wnba_game(game_id, game_date, home_abbr, away_abbr, home_score, away
             WHERE games.status != 'Final'
                OR games.home_score IS NULL
                OR games.season_type != EXCLUDED.season_type
-        """, (game_id, _get_wnba_season(), season_type, game_date,
+        """, (game_id, season, season_type, game_date,
               home_abbr, away_abbr, home_score, away_score))
+        # Only regular-season games move a record, so nothing else needs it.
+        if season_type == "Regular Season":
+            _refresh_team_records(cur, "wnba", season, [home_abbr, away_abbr])
         conn.commit()
         cur.close(); conn.close()
     except Exception as e:

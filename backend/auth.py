@@ -311,7 +311,8 @@ def me():
         conn = get_conn()
         cur  = conn.cursor()
         cur.execute(
-            "SELECT avatar_url, favorite_team, night_mode, is_pro FROM users WHERE id = %s",
+            "SELECT avatar_url, favorite_team, night_mode, is_pro, onboarded_at "
+            "FROM users WHERE id = %s",
             (user["id"],)
         )
         row = cur.fetchone()
@@ -322,6 +323,11 @@ def me():
             user["favorite_team"] = row["favorite_team"] or ""
             user["night_mode"]    = bool(row["night_mode"])
             user["is_pro"]        = bool(row["is_pro"])
+            # NULL = has never completed onboarding. Lives here rather than in
+            # @AppStorage so it survives a reinstall and follows the account to
+            # a second device.
+            user["onboarded_at"]  = (row["onboarded_at"].isoformat()
+                                     if row["onboarded_at"] else None)
     except Exception:
         pass  # fall back to session values if DB is unavailable
 
