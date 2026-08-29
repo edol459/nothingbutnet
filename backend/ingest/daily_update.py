@@ -85,6 +85,14 @@ def main():
             'Reconcile games vs CDN schedules',
             ['--league', 'both'],
         ),
+        # ── Forward schedule → scheduled_games. Independent of everything
+        #    below (writes its own table, never `games`), but kept next to
+        #    reconcile since both read the same CDN feeds. ──────────────────
+        (
+            'fetch_scheduled_games.py',
+            'Scheduled games + tip times',
+            ['--league', 'both'],
+        ),
         # ── Team W-L records — both computed from games table, Railway-safe ──
         (
             'fetch_team_seasons.py',
