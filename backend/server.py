@@ -2056,14 +2056,28 @@ _POLL_SOON_S      = 20   # upcoming games today (pregame window)
 _POLL_IDLE_S      = 300  # no games today
 
 
-def _attach_event_meta(game: dict, raw: dict) -> None:
-    """Enrich a built game dict with special-event fields for exhibition games
-    (All-Star, Rising Stars, Celebrity) from the raw CDN/schedule entry: the event
-    title (``gameLabel``) and full team display names ("Team Spoon"). Gated to
-    exhibitions only — playoff/NBA Cup labels are intentionally skipped so their
-    cards keep the normal team treatment. No-op (unchanged payload) for everything
-    else. The clients render a set All-Star graphic (falling back to a ★ marquee)
-    whenever ``gameLabel`` is set."""
+def _attach_game_meta(game: dict, raw: dict) -> None:
+    """Enrich a built game dict with display metadata.
+
+    ``seasonType`` is set on every game whose id follows the league's own layout,
+    so clients can tag a card "Preseason" or "Play-In". It is deliberately a
+    separate field from ``gameLabel``: clients render an All-Star graphic
+    whenever ``gameLabel`` is set, so routing preseason through it would dress
+    an exhibition game up as the All-Star Game.
+
+    ``gameLabel`` and full team display names ("Team Spoon") are still attached
+    for exhibition events only (All-Star, Rising Stars, Celebrity). Playoff and
+    NBA Cup labels are intentionally skipped so their cards keep the normal team
+    treatment.
+    """
+    # Only ids that follow the league layout — '00' for the NBA, '10' for the
+    # WNBA — carry the season type at position [2]. ESPN-sourced WNBA ids
+    # (401…) hold an unrelated digit there and would come out as "Pre Season",
+    # so those get no tag rather than a wrong one.
+    gid = str(game.get("gameId") or "")
+    if gid[:2] in ("00", "10"):
+        game["seasonType"] = _season_type_from_game_id(gid)
+
     label = (raw.get("gameLabel") or "").strip()
     low = label.lower()
     if not label or not any(k in low for k in ("all-star", "all star", "rising stars", "celebrity")):
@@ -2107,7 +2121,7 @@ def _parse_cdn_scoreboard(cdn_data: dict, game_today: str) -> dict | None:
             "home": {"abbr": home.get("teamTricode", ""), "score": int(home.get("score", 0) or 0),
                      "wins": home.get("wins"), "losses": home.get("losses")},
         })
-        _attach_event_meta(games[-1], g)
+        _attach_game_meta(games[-1], g)
         if int(g.get("gameStatus", 1) or 1) == 3 and g.get("gameId"):
             _upsert_game_from_boxscore(g["gameId"], g)
     _enrich_games_with_records(games)
@@ -2216,7 +2230,7 @@ def _sb_poller_tick() -> tuple[bool, bool, bool]:
                         "home": {"abbr": home.get("teamTricode", ""), "score": 0,
                                  "wins": None, "losses": None},
                     })
-                    _attach_event_meta(games[-1], g)
+                    _attach_game_meta(games[-1], g)
                 if games:
                     _enrich_games_with_records(games)
                     cached = _today_sb_cache.get("payload", {})
@@ -2596,7 +2610,7 @@ def get_scoreboard():
                         "home": {"abbr": home.get("teamTricode",""), "score": int(home.get("score",0) or 0),
                                  "wins": home.get("wins"), "losses": home.get("losses")},
                     })
-                    _attach_event_meta(games[-1], g)
+                    _attach_game_meta(games[-1], g)
                     # Persist Final games to DB — skip ghost games (0-0 score means never played)
                     game_status = int(g.get("gameStatus", 1) or 1)
                     away_sc = int(away.get("score", 0) or 0)
@@ -2641,7 +2655,7 @@ def get_scoreboard():
                         "home": {"abbr": home.get("teamTricode", ""), "score": 0,
                                  "wins": None, "losses": None},
                     })
-                    _attach_event_meta(games[-1], g)
+                    _attach_game_meta(games[-1], g)
                 if games:
                     _enrich_games_with_records(games)
                     return jsonify({"games": games, "date": _game_today})
@@ -2685,7 +2699,7 @@ def get_scoreboard():
                             "home": {"abbr": home.get("teamTricode", ""), "score": 0,
                                      "wins": None, "losses": None},
                         })
-                        _attach_event_meta(games[-1], g)
+                        _attach_game_meta(games[-1], g)
                     _enrich_games_with_records(games)
                     payload = {"games": games, "date": date}
                     _future_sb_cache[date] = {"payload": payload, "ts": _time.time()}
@@ -2842,7 +2856,7 @@ def get_scoreboard():
                                 "home": {"abbr": home.get("teamTricode", ""), "score": 0,
                                          "wins": None, "losses": None},
                             })
-                            _attach_event_meta(games[-1], g)
+                            _attach_game_meta(games[-1], g)
                         _enrich_games_with_records(games)
                         if games:
                             return jsonify({"games": games, "date": date})
@@ -12439,7 +12453,7 @@ def _wnba_cdn_game_dict(g: dict, game_date: str = "") -> dict:
         "home": {"abbr": _wnba_cdn_abbr(home.get("teamTricode", "")),
                  "score": int(home.get("score", 0) or 0)},
     }
-    _attach_event_meta(d, g)
+    _attach_game_meta(d, g)
     return d
 
 

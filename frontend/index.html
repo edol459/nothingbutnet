@@ -695,16 +695,23 @@ function buildCard(g) {
   const isAllStar = isEvent && /all[-\s]?star/i.test(g.gameLabel);
   const evImg = isAllStar ? EVENT_IMAGES[lg] : null;
 
+  // Preseason and play-in games are otherwise indistinguishable from regular
+  // season ones on the card. Playoffs are left out (those cards already carry
+  // series records) and so is All-Star, which gets the event poster above.
+  const ST_TAG = {'Pre Season':'Preseason', 'PlayIn':'Play-In'};
+  const stag = ST_TAG[g.seasonType] || '';
+  const sfx  = stag ? ` · ${stag}` : '';
+
   let status;
   if (live) {
     const p=g.period||1, pl=p>4?`OT${p-4}`:`Q${p}`, ck=fmtClock(g.gameClock||'');
-    status = `<div style="font-family:var(--ff-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--red);display:flex;align-items:center;justify-content:center;gap:5px;margin-bottom:10px;min-height:13px;"><span style="width:6px;height:6px;border-radius:50%;background:var(--red);animation:pip 1.4s ease-in-out infinite;"></span>${pl}${ck?' · '+ck:''}</div>`;
+    status = `<div style="font-family:var(--ff-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--red);display:flex;align-items:center;justify-content:center;gap:5px;margin-bottom:10px;min-height:13px;"><span style="width:6px;height:6px;border-radius:50%;background:var(--red);animation:pip 1.4s ease-in-out infinite;"></span>${pl}${ck?' · '+ck:''}${sfx}</div>`;
   } else if (fin) {
     const ot=(g.period>4)||(g.gameStatusText||'').toUpperCase().includes('OT');
-    status = `<div style="font-family:var(--ff-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink4);text-align:center;margin-bottom:10px;min-height:13px;">Final${ot?'/OT':''}</div>`;
+    status = `<div style="font-family:var(--ff-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink4);text-align:center;margin-bottom:10px;min-height:13px;">Final${ot?'/OT':''}${sfx}</div>`;
   } else {
     const tip=(g.gameStatusText||'').replace(/\b(am|pm)\b/i, m=>m.toUpperCase());
-    status = `<div style="font-family:var(--ff-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--orange);text-align:center;margin-bottom:10px;min-height:13px;">${tip||'Upcoming'}</div>`;
+    status = `<div style="font-family:var(--ff-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--orange);text-align:center;margin-bottom:10px;min-height:13px;">${tip||'Upcoming'}${sfx}</div>`;
   }
 
   const rec = t => t.wins!=null ? `${t.wins}-${t.losses}` : '';
