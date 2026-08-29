@@ -54,23 +54,37 @@ NICKNAME_TO_ABBR = {
     "STING":        "CHA",
 }
 
+# Six franchises use a different tricode on the CDN than the abbreviation the
+# games table stores. Records are computed from `games`, so the canonical abbr
+# is what gets written — and TEAM_NAMES must be keyed by it, or the
+# .get(abbr, abbr) fallback below silently writes "LV" as the team's *name*.
+# That is what left the six team pages showing a record frozen in early June.
+TRICODE_TO_GAMES = {"LVA": "LV", "LAS": "LA", "NYL": "NY",
+                    "GSV": "GS", "WAS": "WSH", "PDX": "POR"}
+
 TEAM_NAMES = {
     "ATL": "Atlanta Dream",
     "CHI": "Chicago Sky",
     "CON": "Connecticut Sun",
     "DAL": "Dallas Wings",
     "GSV": "Golden State Valkyries",
+    "GS":  "Golden State Valkyries",
     "IND": "Indiana Fever",
     "LVA": "Las Vegas Aces",
+    "LV":  "Las Vegas Aces",
     "LAS": "Los Angeles Sparks",
+    "LA":  "Los Angeles Sparks",
     "MIN": "Minnesota Lynx",
     "NYL": "New York Liberty",
+    "NY":  "New York Liberty",
     "PHX": "Phoenix Mercury",
     "PDX": "Portland Fire",
+    "POR": "Portland Fire",
     "SEA": "Seattle Storm",
     "SAS": "San Antonio Stars",
     "TOR": "Toronto Tempo",
     "WAS": "Washington Mystics",
+    "WSH": "Washington Mystics",
     # Historical
     "CHA": "Charlotte Sting",
     "CLE": "Cleveland Rockers",
@@ -169,13 +183,20 @@ def ensure_league_column(conn):
     conn.commit(); cur.close()
 
 
-def fix_nickname_abbrs(conn):
-    """Rename any existing rows that used nickname abbreviations (ACES, DREAM, etc.)."""
+def migrate_abbrs(conn, mapping, label):
+    """Fold rows stored under an outdated abbreviation into the canonical one.
+
+    A season that has no canonical row yet is renamed in place (keeping its
+    record); one that already has a canonical row is a duplicate, and the stale
+    copy is deleted. Without the delete, both rows survive and downstream
+    readers have to guess which is current — team_profile guessed wrong for
+    every team in TRICODE_TO_GAMES, showing a record months out of date.
+    """
     cur = conn.cursor()
-    updated = 0
-    for nickname, abbr in NICKNAME_TO_ABBR.items():
+    renamed = deleted = 0
+    for old, abbr in mapping.items():
         name = TEAM_NAMES.get(abbr, abbr)
-        # Update only if proper-abbr row doesn't already exist for that season
+        # Rename only where the canonical row doesn't already exist for that season.
         cur.execute("""
             UPDATE team_seasons
             SET team_abbr = %s, team_name = %s
@@ -185,13 +206,40 @@ def fix_nickname_abbrs(conn):
                 SELECT 1 FROM team_seasons t2
                 WHERE t2.league = 'wnba' AND t2.team_abbr = %s AND t2.season = team_seasons.season
               )
-        """, (abbr, name, nickname, abbr))
-        updated += cur.rowcount
-        # Delete any orphaned nickname rows that couldn't be renamed (duplicate season)
-        cur.execute("DELETE FROM team_seasons WHERE league='wnba' AND team_abbr=%s", (nickname,))
-    conn.commit(); cur.close()
-    if updated:
-        print(f"  ✅ Renamed {updated} nickname-based rows to proper abbreviations")
+        """, (abbr, name, old, abbr))
+        renamed += cur.rowcount
+        # Whatever is left is a duplicate of a canonical row — drop it.
+        cur.execute("DELETE FROM team_seasons WHERE league='wnba' AND team_abbr=%s", (old,))
+        deleted += cur.rowcount
+
+    if args.dry_run:
+        conn.rollback()
+        print(f"  (dry-run) {label}: would rename {renamed}, delete {deleted}")
+    else:
+        conn.commit()
+        if renamed or deleted:
+            print(f"  ✅ {label}: renamed {renamed}, deleted {deleted} duplicate row(s)")
+    cur.close()
+
+
+def backfill_team_names(conn):
+    """Repair rows whose team_name was written as the abbreviation itself."""
+    cur = conn.cursor()
+    fixed = 0
+    for abbr, name in TEAM_NAMES.items():
+        cur.execute("""
+            UPDATE team_seasons SET team_name = %s
+            WHERE league = 'wnba' AND team_abbr = %s AND team_name = team_abbr
+        """, (name, abbr))
+        fixed += cur.rowcount
+    if args.dry_run:
+        conn.rollback()
+        print(f"  (dry-run) team names: would repair {fixed} row(s)")
+    else:
+        conn.commit()
+        if fixed:
+            print(f"  ✅ Repaired {fixed} row(s) whose name was just the abbreviation")
+    cur.close()
 
 
 def upsert(conn, rows):
@@ -218,7 +266,9 @@ def run():
     conn = get_conn()
     ensure_league_column(conn)
     print("✅ league column ready")
-    fix_nickname_abbrs(conn)
+    migrate_abbrs(conn, NICKNAME_TO_ABBR, "nickname abbrs")
+    migrate_abbrs(conn, TRICODE_TO_GAMES, "CDN tricodes")
+    backfill_team_names(conn)
     conn.close()
 
     all_seasons = args.seasons if args.seasons else season_list()
