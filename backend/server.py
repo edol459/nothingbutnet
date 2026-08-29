@@ -4217,6 +4217,13 @@ def _upsert_game_from_boxscore(game_id: str, game: dict, league: str = "nba"):
             daemon=True,
         ).start()
     except Exception:
+        # get_conn() hands back a thread-local connection, so a statement that
+        # fails mid-transaction leaves it aborted and every later query on that
+        # thread fails too. Roll back before swallowing.
+        try:
+            conn.rollback(); conn.close()
+        except Exception:
+            pass
         pass  # Never break the main response
 
 # ── /api/live/pbp/<game_id> ───────────────────────────────────────
@@ -9948,7 +9955,7 @@ def _split_favorite_team(value: str):
     return "nba", value
 
 
-def _valid_allegiance(league: str, abbr: str) -> bool:
+def _valid_team_abbr(league: str, abbr: str) -> bool:
     if league == "wnba":
         return f"WNBA_{abbr}" in _WNBA_FAV_ABBRS
     return abbr in _NBA_ABBRS
@@ -10059,7 +10066,7 @@ def set_allegiance():
 
     if league not in _ALLEGIANCE_LEAGUES:
         return jsonify({"error": "league must be 'nba' or 'wnba'"}), 400
-    if abbr and not _valid_allegiance(league, abbr):
+    if abbr and not _valid_team_abbr(league, abbr):
         return jsonify({"error": f"Unknown {league.upper()} team '{abbr}'"}), 400
 
     conn = get_conn(); cur = conn.cursor()
@@ -10076,6 +10083,283 @@ def set_allegiance():
         return jsonify({"ok": True, "changed": changed,
                         "league": league, "team_abbr": abbr or "",
                         "favorite_team": stored})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Watchlist — one list, filled two ways.
+#
+# A team subscription is one row meaning "every game they play", so playoff,
+# play-in and NBA Cup games join automatically as the league schedules them —
+# they aren't on the schedule published in autumn. Game rows are the exceptions
+# in both directions: 'add' for a one-off pick, 'remove' to hide a single game
+# a subscription would otherwise include.
+#
+#   resolved = (subscribed teams' games UNION explicit adds) MINUS explicit removes
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Shared WHERE clause for the resolution above. Named params because uid
+# appears three times; callers pass a dict.
+_WATCHLIST_RESOLVE = """
+    FROM scheduled_games sg
+    WHERE (
+        EXISTS (SELECT 1 FROM watchlist_teams wt
+                 WHERE wt.user_id = %(uid)s AND wt.league = sg.league
+                   AND (wt.team_abbr = sg.home_team_abbr
+                        OR wt.team_abbr = sg.away_team_abbr))
+        OR EXISTS (SELECT 1 FROM watchlist_games wg
+                    WHERE wg.user_id = %(uid)s AND wg.game_id = sg.game_id
+                      AND wg.action = 'add')
+    )
+    AND NOT EXISTS (SELECT 1 FROM watchlist_games wg
+                     WHERE wg.user_id = %(uid)s AND wg.game_id = sg.game_id
+                       AND wg.action = 'remove')
+"""
+
+
+def _game_covered_by_subscription(cur, user_id: int, game_id: str) -> bool:
+    cur.execute("""
+        SELECT 1 FROM scheduled_games sg
+        JOIN watchlist_teams wt
+          ON wt.user_id = %s AND wt.league = sg.league
+         AND (wt.team_abbr = sg.home_team_abbr OR wt.team_abbr = sg.away_team_abbr)
+        WHERE sg.game_id = %s
+        LIMIT 1
+    """, (user_id, game_id))
+    return cur.fetchone() is not None
+
+
+@app.route("/api/me/watchlist", methods=["GET"])
+@login_required
+def get_watchlist():
+    """Resolved upcoming games, plus the subscriptions behind them.
+
+    `teams` is returned separately so the UI can show "Warriors season" as one
+    collapsed row instead of drowning a hand-picked game under 82 others.
+
+    Query params: from / to (YYYY-MM-DD, default today onward), limit.
+    """
+    user   = current_user()
+    params = {"uid": user["id"]}
+    date_from = (request.args.get("from") or "").strip()
+    date_to   = (request.args.get("to") or "").strip()
+    try:
+        limit = min(int(request.args.get("limit", 100)), 500)
+    except ValueError:
+        limit = 100
+
+    clause = _WATCHLIST_RESOLVE
+    if date_from:
+        clause += " AND sg.game_date >= %(from)s"; params["from"] = date_from
+    else:
+        # Past games are out of scope for now — the watchlist is forward-looking.
+        clause += " AND sg.game_date >= CURRENT_DATE"
+    if date_to:
+        clause += " AND sg.game_date <= %(to)s"; params["to"] = date_to
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            SELECT sg.game_id, sg.league, sg.game_date, sg.game_time_utc,
+                   sg.home_team_abbr, sg.away_team_abbr, sg.status,
+                   sg.status_text, sg.arena_name, sg.game_label, sg.season_type,
+                   EXISTS (SELECT 1 FROM watchlist_games wg
+                           WHERE wg.user_id = %(uid)s AND wg.game_id = sg.game_id
+                             AND wg.action = 'add') AS explicitly_added
+            {clause}
+            ORDER BY sg.game_date, sg.game_time_utc NULLS LAST
+            LIMIT {limit}
+        """, params)
+        games = [{
+            "gameId": r["game_id"], "league": r["league"],
+            "gameDate": r["game_date"].isoformat(),
+            "gameTimeUTC": r["game_time_utc"].isoformat() if r["game_time_utc"] else None,
+            "home": r["home_team_abbr"], "away": r["away_team_abbr"],
+            "status": r["status"], "statusText": r["status_text"],
+            "arena": r["arena_name"], "label": r["game_label"],
+            "seasonType": r["season_type"],
+            "explicitlyAdded": r["explicitly_added"],
+        } for r in cur.fetchall()]
+
+        cur.execute("""
+            SELECT wt.league, wt.team_abbr,
+                   (SELECT COUNT(*) FROM scheduled_games sg
+                     WHERE sg.league = wt.league
+                       AND (sg.home_team_abbr = wt.team_abbr
+                            OR sg.away_team_abbr = wt.team_abbr)
+                       AND sg.game_date >= CURRENT_DATE) AS upcoming
+            FROM watchlist_teams wt WHERE wt.user_id = %s
+            ORDER BY wt.league, wt.team_abbr
+        """, (user["id"],))
+        teams = [{"league": r["league"], "teamAbbr": r["team_abbr"],
+                  "upcoming": r["upcoming"]} for r in cur.fetchall()]
+
+        return jsonify({"games": games, "teams": teams, "count": len(games)})
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/me/watchlist/calendar", methods=["GET"])
+@login_required
+def get_watchlist_calendar():
+    """Per-date marker data for one month: ?month=YYYY-MM.
+
+    Returns a row per date that has at least one watched game, with the teams
+    involved so the calendar can draw logos rather than anonymous dots.
+    """
+    from datetime import datetime as _dt   # not imported at module scope here
+    user  = current_user()
+    month = (request.args.get("month") or "").strip()
+    try:
+        start = _dt.strptime(month + "-01", "%Y-%m-%d").date()
+    except ValueError:
+        return jsonify({"error": "month must be YYYY-MM"}), 400
+    end = (start + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            SELECT sg.game_date, COUNT(*) AS games,
+                   ARRAY_AGG(sg.home_team_abbr ORDER BY sg.game_time_utc) AS homes,
+                   ARRAY_AGG(sg.away_team_abbr ORDER BY sg.game_time_utc) AS aways
+            {_WATCHLIST_RESOLVE}
+              AND sg.game_date BETWEEN %(start)s AND %(end)s
+            GROUP BY sg.game_date ORDER BY sg.game_date
+        """, {"uid": user["id"], "start": start, "end": end})
+        days = [{"date": r["game_date"].isoformat(), "games": r["games"],
+                 "home": r["homes"], "away": r["aways"]} for r in cur.fetchall()]
+        return jsonify({"month": month, "days": days})
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/me/watchlist/teams", methods=["PUT"])
+@login_required
+def watchlist_subscribe_team():
+    """Subscribe to a team's whole schedule. Body: {league, team_abbr}."""
+    user   = current_user()
+    body   = request.get_json() or {}
+    league = (body.get("league") or "").strip().lower()
+    abbr   = (body.get("team_abbr") or "").strip().upper()
+
+    if league not in _ALLEGIANCE_LEAGUES:
+        return jsonify({"error": "league must be 'nba' or 'wnba'"}), 400
+    if not _valid_team_abbr(league, abbr):
+        return jsonify({"error": f"Unknown {league.upper()} team '{abbr}'"}), 400
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO watchlist_teams (user_id, league, team_abbr)
+            VALUES (%s, %s, %s) ON CONFLICT DO NOTHING
+        """, (user["id"], league, abbr))
+        cur.execute("""
+            SELECT COUNT(*) AS n FROM scheduled_games
+            WHERE league = %s AND (home_team_abbr = %s OR away_team_abbr = %s)
+              AND game_date >= CURRENT_DATE
+        """, (league, abbr, abbr))
+        upcoming = cur.fetchone()["n"]
+        conn.commit()
+        return jsonify({"ok": True, "league": league, "team_abbr": abbr,
+                        "upcoming": upcoming})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/me/watchlist/teams/<league>/<abbr>", methods=["DELETE"])
+@login_required
+def watchlist_unsubscribe_team(league, abbr):
+    """Drop a team subscription.
+
+    Also clears any 'remove' exceptions for that team's games. Those only ever
+    existed to carve holes in this subscription, and leaving them behind would
+    silently hide games if the user ever re-subscribed.
+    """
+    user  = current_user()
+    league = league.strip().lower()
+    abbr   = abbr.strip().upper()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            DELETE FROM watchlist_teams
+            WHERE user_id = %s AND league = %s AND team_abbr = %s
+        """, (user["id"], league, abbr))
+        removed = cur.rowcount
+        cur.execute("""
+            DELETE FROM watchlist_games wg
+            WHERE wg.user_id = %s AND wg.action = 'remove'
+              AND EXISTS (SELECT 1 FROM scheduled_games sg
+                          WHERE sg.game_id = wg.game_id AND sg.league = %s
+                            AND (sg.home_team_abbr = %s OR sg.away_team_abbr = %s))
+        """, (user["id"], league, abbr, abbr))
+        cleared = cur.rowcount
+        conn.commit()
+        return jsonify({"ok": True, "removed": bool(removed),
+                        "exceptions_cleared": cleared})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/me/watchlist/games/<game_id>", methods=["POST"])
+@login_required
+def watchlist_add_game(game_id):
+    """Add one game. Writes an 'add' row even when a subscription already covers
+    it, so the pick survives unsubscribing from that team later."""
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT 1 FROM scheduled_games WHERE game_id = %s", (game_id,))
+        if not cur.fetchone():
+            return jsonify({"error": "Unknown game"}), 404
+        cur.execute("""
+            INSERT INTO watchlist_games (user_id, game_id, action)
+            VALUES (%s, %s, 'add')
+            ON CONFLICT (user_id, game_id) DO UPDATE
+              SET action = 'add', created_at = NOW()
+        """, (user["id"], game_id))
+        conn.commit()
+        return jsonify({"ok": True, "gameId": game_id, "watching": True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/me/watchlist/games/<game_id>", methods=["DELETE"])
+@login_required
+def watchlist_remove_game(game_id):
+    """Remove one game.
+
+    A game a subscription would still pull in needs a 'remove' exception to stay
+    hidden; a one-off pick just has its row deleted, so the table doesn't
+    accumulate exceptions that guard nothing.
+    """
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM watchlist_games WHERE user_id = %s AND game_id = %s",
+                    (user["id"], game_id))
+        exception_written = False
+        if _game_covered_by_subscription(cur, user["id"], game_id):
+            cur.execute("""
+                INSERT INTO watchlist_games (user_id, game_id, action)
+                VALUES (%s, %s, 'remove')
+            """, (user["id"], game_id))
+            exception_written = True
+        conn.commit()
+        return jsonify({"ok": True, "gameId": game_id, "watching": False,
+                        "exception": exception_written})
     except Exception as e:
         conn.rollback()
         return jsonify({"error": str(e)}), 500
@@ -12427,6 +12711,12 @@ def _upsert_wnba_game(game_id, game_date, home_abbr, away_abbr, home_score, away
         conn.commit()
         cur.close(); conn.close()
     except Exception as e:
+        # Same reasoning as _upsert_game_from_boxscore: an aborted transaction
+        # on the thread-local connection would poison later queries.
+        try:
+            conn.rollback(); conn.close()
+        except Exception:
+            pass
         print(f"[wnba] upsert error: {e}", flush=True)
         return
 
