@@ -8115,6 +8115,243 @@ def _fetch_perf_items(cur, list_id: int, ranked: bool) -> list:
     return items
 
 
+# ━━━ Awards ballots ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Created lazily like _LIST_SOCIAL_TABLES so a fresh dev DB works without
+# running the migration; schema_v9.py is the authoritative version.
+_AWARD_TABLES = """
+CREATE TABLE IF NOT EXISTS award_ballot_items (
+    list_id     INTEGER     NOT NULL REFERENCES game_lists(id) ON DELETE CASCADE,
+    award_code  TEXT        NOT NULL,
+    person_id   INTEGER,
+    player_name TEXT        NOT NULL,
+    team        TEXT,
+    added_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (list_id, award_code)
+);
+CREATE TABLE IF NOT EXISTS award_results (
+    league      TEXT        NOT NULL,
+    season      TEXT        NOT NULL,
+    award_code  TEXT        NOT NULL,
+    person_id   INTEGER,
+    player_name TEXT        NOT NULL,
+    team        TEXT,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (league, season, award_code)
+);
+"""
+
+# The slots on a ballot, in ballot order. NBA codes match the labels
+# fetch_awards.py writes into player_seasons.awards, so grading an NBA ballot is
+# an array lookup rather than a name-mapping layer.
+#
+# Deliberately absent: Coach of the Year (the slot picker searches players and we
+# hold no coach data) and Clutch Player of the Year (nothing upstream reports a
+# winner, so those slots would sit permanently ungraded).
+_AWARD_TEMPLATES = {
+    "nba": [
+        {"code": "MVP",  "label": "Most Valuable Player",         "short": "MVP"},
+        {"code": "ROTY", "label": "Rookie of the Year",           "short": "ROTY"},
+        {"code": "DPOY", "label": "Defensive Player of the Year", "short": "DPOY"},
+        {"code": "6MOY", "label": "Sixth Man of the Year",        "short": "6MOY"},
+        {"code": "MIP",  "label": "Most Improved Player",         "short": "MIP"},
+    ],
+    "wnba": [
+        {"code": "MVP",  "label": "Most Valuable Player",         "short": "MVP"},
+        {"code": "ROTY", "label": "Rookie of the Year",           "short": "ROTY"},
+        {"code": "DPOY", "label": "Defensive Player of the Year", "short": "DPOY"},
+        {"code": "6WOY", "label": "Sixth Woman of the Year",      "short": "6WOY"},
+        {"code": "MIP",  "label": "Most Improved Player",         "short": "MIP"},
+    ],
+}
+
+# Cover art wants the marquee picks first (MVP, not whichever slot was filled
+# first). Both leagues' codes live in one list so ordering needs no league.
+_AWARD_ORDER = ["MVP", "ROTY", "DPOY", "6MOY", "6WOY", "MIP"]
+
+
+def _award_window(cur, league: str) -> dict:
+    """Which season a new ballot predicts, and when it stops accepting picks.
+
+    Resolved from scheduled_games rather than get_current_season(): that helper
+    returns the newest season with a *Final* game, which during the preseason is
+    the season that just ended — the opposite of what a prediction is about. The
+    league publishes its schedule weeks before opening night, which is exactly
+    the window this feature lives in.
+
+    isOpen goes False once the first regular-season game tips (too late to
+    predict) and also when no schedule has been published yet (nothing to
+    predict against). Day-of counts as closed — a ballot filed hours before the
+    first tip is not a preseason prediction.
+    """
+    cur.execute("""
+        SELECT season, MIN(game_date) AS first_date, MIN(game_time_utc) AS first_tip
+        FROM scheduled_games
+        WHERE league = %s AND season_type = 'Regular Season'
+        GROUP BY season
+        HAVING MAX(game_date) >= CURRENT_DATE
+        ORDER BY season ASC
+        LIMIT 1
+    """, (league,))
+    row = cur.fetchone()
+    if not row or not row.get("first_date"):
+        return {"season": None, "locksAt": None, "isOpen": False}
+    first_date = row["first_date"]
+    lock = row.get("first_tip") or first_date
+    return {
+        "season":  row["season"],
+        "locksAt": str(lock),
+        "isOpen":  first_date > date.today(),
+    }
+
+
+def _ballot_locked(lst: dict) -> bool:
+    """A ballot past its deadline is frozen — that immutability is the entire
+    value of grading it eight months later."""
+    lock = lst.get("locked_at")
+    if not lock:
+        return False
+    from datetime import datetime as _dt
+    now = _dt.now(lock.tzinfo) if getattr(lock, "tzinfo", None) else _dt.now()
+    return now >= lock
+
+
+def _fetch_award_items(cur, list_id: int, league: str, season: str) -> list:
+    """Every slot on the ballot, empty ones included — a ballot is a fixed sheet,
+    so the template drives the response and the picks fill it in. Once results
+    exist for that season each slot also carries the winner and a verdict."""
+    league   = (league or "nba").lower()
+    template = _AWARD_TEMPLATES.get(league, _AWARD_TEMPLATES["nba"])
+    cur.execute("""SELECT award_code, person_id, player_name, team
+                   FROM award_ballot_items WHERE list_id = %s""", (list_id,))
+    picks = {r["award_code"]: r for r in cur.fetchall()}
+    results = {}
+    if season:
+        cur.execute("""SELECT award_code, person_id, player_name, team
+                       FROM award_results WHERE league = %s AND season = %s""",
+                    (league, season))
+        results = {r["award_code"]: r for r in cur.fetchall()}
+
+    def _shape(r):
+        return {"personId": r.get("person_id"), "playerName": r["player_name"],
+                "team": r.get("team")}
+
+    out = []
+    for slot in template:
+        pick   = picks.get(slot["code"])
+        winner = results.get(slot["code"])
+        correct = None
+        if pick and winner:
+            # Match on person_id when both sides have one; WNBA results are
+            # entered by hand and may carry only a name.
+            if pick.get("person_id") and winner.get("person_id"):
+                correct = pick["person_id"] == winner["person_id"]
+            else:
+                correct = _norm_name(pick["player_name"]) == _norm_name(winner["player_name"])
+        out.append({
+            "code":    slot["code"],
+            "label":   slot["label"],
+            "short":   slot["short"],
+            "pick":    _shape(pick) if pick else None,
+            "winner":  _shape(winner) if winner else None,
+            "correct": correct,
+        })
+    return out
+
+
+@app.route("/api/awards/template")
+def get_awards_template():
+    """The blank ballot for a league: its slots, the season it predicts, and
+    whether that season is still open to predictions. Clients call this to
+    decide whether to offer the preset at all."""
+    league = (request.args.get("league") or "nba").lower()
+    if league not in _AWARD_TEMPLATES:
+        return jsonify({"error": "unknown league"}), 400
+    cur = get_conn().cursor()
+    try:
+        window = _award_window(cur, league)
+    finally:
+        cur.close()
+    return jsonify({
+        "league":  league,
+        "slots":   _AWARD_TEMPLATES[league],
+        "season":  window["season"],
+        "locksAt": window["locksAt"],
+        "isOpen":  window["isOpen"],
+    })
+
+
+@app.route("/api/lists/<int:list_id>/awards/<award_code>", methods=["PUT"])
+@login_required
+def set_award_pick(list_id, award_code):
+    """Assign a player to one slot. Upsert, because the primary key already says
+    one pick per award — changing your mind is the same write as making it."""
+    user = current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    name = (body.get("playerName") or "").strip()
+    if not name:
+        return jsonify({"error": "playerName is required"}), 400
+
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("SELECT * FROM game_lists WHERE id = %s", (list_id,))
+    lst = cur.fetchone()
+    if not lst or lst["user_id"] != user["id"]:
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    if (lst.get("list_type") or "games") != "awards":
+        cur.close(); conn.close()
+        return jsonify({"error": "not an awards ballot"}), 400
+    if _ballot_locked(lst):
+        cur.close(); conn.close()
+        return jsonify({"error": "this ballot locked when the season started",
+                        "lockedAt": str(lst.get("locked_at"))}), 409
+
+    league   = (lst.get("league") or "nba").lower()
+    template = _AWARD_TEMPLATES.get(league, _AWARD_TEMPLATES["nba"])
+    if award_code not in {s["code"] for s in template}:
+        cur.close(); conn.close()
+        return jsonify({"error": "unknown award"}), 400
+
+    cur.execute(_AWARD_TABLES); conn.commit()
+    cur.execute("""
+        INSERT INTO award_ballot_items (list_id, award_code, person_id, player_name, team)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (list_id, award_code) DO UPDATE
+            SET person_id = EXCLUDED.person_id,
+                player_name = EXCLUDED.player_name,
+                team = EXCLUDED.team,
+                added_at = NOW()
+    """, (list_id, award_code, body.get("playerId"), name, body.get("team")))
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit()
+    items = _fetch_award_items(cur, list_id, league, lst.get("season"))
+    cur.close(); conn.close()
+    return jsonify({"awardItems": items})
+
+
+@app.route("/api/lists/<int:list_id>/awards/<award_code>", methods=["DELETE"])
+@login_required
+def clear_award_pick(list_id, award_code):
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("SELECT * FROM game_lists WHERE id = %s", (list_id,))
+    lst = cur.fetchone()
+    if not lst or lst["user_id"] != user["id"]:
+        cur.close(); conn.close()
+        return jsonify({"error": "not found"}), 404
+    if _ballot_locked(lst):
+        cur.close(); conn.close()
+        return jsonify({"error": "this ballot locked when the season started"}), 409
+    cur.execute(_AWARD_TABLES); conn.commit()
+    cur.execute("DELETE FROM award_ballot_items WHERE list_id = %s AND award_code = %s",
+                (list_id, award_code))
+    cur.execute("UPDATE game_lists SET updated_at = NOW() WHERE id = %s", (list_id,))
+    conn.commit()
+    items = _fetch_award_items(cur, list_id, (lst.get("league") or "nba"), lst.get("season"))
+    cur.close(); conn.close()
+    return jsonify({"awardItems": items})
+
+
 def _list_cover_items(cur, list_id: int, list_type: str, is_ranked: bool, limit: int = 4) -> list:
     """First few items of a list, shaped for a cover-art collage (not display rows).
     Ordering mirrors _list_preview so covers and OG images agree on 'first'."""
@@ -8167,6 +8404,18 @@ def _list_cover_items(cur, list_id: int, list_type: str, is_ranked: bool, limit:
             items.append({"kind": "performance", "personId": r.get("person_id"),
                           "playerName": r["player_name"], "league": r.get("league") or "nba",
                           "homeTeamAbbr": r.get("home_team_abbr"), "awayTeamAbbr": r.get("away_team_abbr")})
+    elif list_type == "awards":
+        cur.execute("""
+            SELECT award_code, person_id, player_name, team FROM award_ballot_items
+            WHERE list_id = %s
+        """, (list_id,))
+        rows = sorted(cur.fetchall(),
+                      key=lambda r: _AWARD_ORDER.index(r["award_code"])
+                      if r["award_code"] in _AWARD_ORDER else len(_AWARD_ORDER))
+        for r in rows[:limit]:
+            items.append({"kind": "player", "playerId": r.get("person_id"),
+                          "playerName": r["player_name"], "team": r.get("team"),
+                          "league": "nba"})
     return items
 
 
@@ -8183,6 +8432,10 @@ def _format_list(row: dict, game_count: int = 0, cover_items: list = None) -> di
         "gameCount":   game_count,
         "createdAt":   str(row.get("created_at", "")),
         "coverItems":  cover_items or [],
+        "league":      row.get("league"),
+        "season":      row.get("season"),
+        "lockedAt":    str(row["locked_at"]) if row.get("locked_at") else None,
+        "isLocked":    _ballot_locked(row),
     }
 
 
@@ -8280,13 +8533,39 @@ def create_list():
     is_ranked = bool(body.get("isRanked", False))
     allow_copy = bool(body.get("allowCopy", True))
     list_type = (body.get("listType") or "games").strip()
-    if list_type not in ("games", "players", "player_seasons", "jerseys", "teams", "team_seasons", "performances"):
+    if list_type not in ("games", "players", "player_seasons", "jerseys", "teams",
+                         "team_seasons", "performances", "awards"):
         list_type = "games"
     conn = get_conn(); cur = conn.cursor()
+
+    league = season = lock = None
+    if list_type == "awards":
+        league = (body.get("league") or "nba").lower()
+        if league not in _AWARD_TEMPLATES:
+            cur.close(); conn.close()
+            return jsonify({"error": "unknown league"}), 400
+        window = _award_window(cur, league)
+        if not window["isOpen"]:
+            cur.close(); conn.close()
+            # Refusing here rather than creating a ballot that is already frozen:
+            # a "prediction" made after tipoff is just a note.
+            return jsonify({
+                "error": ("predictions for the %s season closed on %s" %
+                          (window["season"], window["locksAt"])) if window["season"]
+                         else "the schedule for the next season hasn't been published yet",
+                "isOpen": False,
+            }), 409
+        season, lock = window["season"], window["locksAt"]
+        # A ballot is a sheet, not a ranking, and copying someone's picks is
+        # cheating rather than curation.
+        is_ranked, allow_copy = False, False
+        cur.execute(_AWARD_TABLES); conn.commit()
+
     cur.execute("""
-        INSERT INTO game_lists (user_id, title, description, is_ranked, list_type, allow_copy)
-        VALUES (%s, %s, %s, %s, %s, %s) RETURNING *
-    """, (user["id"], title, desc, is_ranked, list_type, allow_copy))
+        INSERT INTO game_lists (user_id, title, description, is_ranked, list_type,
+                                allow_copy, league, season, locked_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
+    """, (user["id"], title, desc, is_ranked, list_type, allow_copy, league, season, lock))
     row = cur.fetchone()
     conn.commit(); cur.close(); conn.close()
     return jsonify({"list": _format_list(row, 0)}), 201
@@ -8405,6 +8684,12 @@ def get_list_detail(list_id):
     if list_type == "performances":
         performance_items = _fetch_perf_items(cur, list_id, bool(lst.get("is_ranked")))
 
+    # Fetch ballot slots (for awards lists)
+    award_items = []
+    if list_type == "awards":
+        cur.execute(_AWARD_TABLES); conn.commit()
+        award_items = _fetch_award_items(cur, list_id, lst.get("league"), lst.get("season"))
+
     # ── Social: likes + comment count ──
     cur.execute(_LIST_SOCIAL_TABLES); conn.commit()
     cur.execute("SELECT COUNT(*) AS n FROM list_likes WHERE list_id = %s", (list_id,))
@@ -8425,6 +8710,7 @@ def get_list_detail(list_id):
     result["jerseyItems"] = jersey_items
     result["teamItems"] = team_items
     result["performanceItems"] = performance_items
+    result["awardItems"] = award_items
     result["likeCount"] = like_count
     result["likedByMe"] = liked_by_me
     result["commentCount"] = comment_count
@@ -8685,6 +8971,12 @@ def update_list(list_id):
     is_public = body.get("isPublic", True)
     is_ranked = body.get("isRanked")   # None means don't change
     allow_copy = body.get("allowCopy")  # None means don't change
+    # A ballot is never ranked and never copyable. Enforced here as well as at
+    # creation because the generic edit sheet posts both flags back, and an old
+    # client would otherwise quietly re-open a ballot to copying.
+    cur.execute("SELECT list_type FROM game_lists WHERE id = %s", (list_id,))
+    if (cur.fetchone() or {}).get("list_type") == "awards":
+        is_ranked, allow_copy = False, False
     cur.execute("""
         UPDATE game_lists
         SET title = COALESCE(NULLIF(%s,''), title),
@@ -8733,6 +9025,13 @@ def duplicate_list(list_id):
         return jsonify({"error": "This list can't be copied"}), 403
 
     list_type = src.get("list_type") or "games"
+    if list_type == "awards":
+        # Owners bypass the allow_copy check above, so ballots need their own
+        # guard: duplicating picks is cheating, and the copy would carry no
+        # league/season/deadline of its own anyway.
+        cur.close(); conn.close()
+        return jsonify({"error": "Awards ballots can't be copied"}), 403
+
     new_title = (src["title"] or "Untitled")
     if len(new_title) <= 94:
         new_title += " (Copy)"
@@ -9928,15 +10227,8 @@ def update_favorite_team():
             league, abbr = _split_favorite_team(team)
             _set_allegiance(cur, user["id"], league, abbr)
         else:
-            # Clearing predates per-league allegiance and can't say which league
-            # it means, so it clears both — matching what it did when a user
-            # could only have one team.
-            league = None
-            for lg in _ALLEGIANCE_LEAGUES:
-                _set_allegiance(cur, user["id"], lg, None)
-        # prefer_league keeps this endpoint's old contract: the team you send is
-        # the team that comes back, regardless of the other league's allegiance.
-        stored = _sync_favorite_team(cur, user["id"], prefer_league=league)
+            _set_allegiance(cur, user["id"], None, None)
+        stored = _sync_favorite_team(cur, user["id"])
         conn.commit()
         cur.close(); conn.close()
 
@@ -9975,56 +10267,50 @@ def _valid_team_abbr(league: str, abbr: str) -> bool:
     return abbr in _NBA_ABBRS
 
 
-def _sync_favorite_team(cur, user_id: int, prefer_league: str | None = None) -> str:
-    """Recompute users.favorite_team from the open allegiance rows.
+def _sync_favorite_team(cur, user_id: int) -> str:
+    """Mirror the open allegiance into users.favorite_team.
 
-    The column can only hold one team, but ~30 queries still read it for
-    profile badges and feed cards, so one allegiance has to be the primary.
-    Default is NBA when both leagues are set — arbitrary, but stable, so
-    onboarding lands on the same badge no matter what order its screens run in.
-
-    `prefer_league` overrides that for the legacy favorite-team endpoint, whose
-    callers (the web picker, older app builds) expect the team they just sent to
-    become the stored one. Without it, a user with an NBA team who picked a WNBA
-    team would watch their choice apparently do nothing.
-
-    The lasting fix is an explicit primary flag the user controls; this keeps
-    both existing clients and onboarding correct until that exists.
+    The column predates the allegiance table and ~30 queries still read it for
+    profile badges and feed cards, so it stays as a denormalised cache. With one
+    allegiance per user there is nothing left to arbitrate — the old NBA-wins
+    rule and its prefer_league override are gone.
     """
     cur.execute("""
         SELECT league, team_abbr FROM team_allegiance
         WHERE user_id = %s AND ended_at IS NULL
     """, (user_id,))
-    current = {r["league"]: r["team_abbr"] for r in cur.fetchall()}
-    order = ([prefer_league] if prefer_league else []) + ["nba", "wnba"]
+    row = cur.fetchone()
     value = None
-    for lg in order:
-        if lg in current:
-            value = (f"WNBA_{current[lg]}" if lg == "wnba" else current[lg])
-            break
+    if row:
+        value = f"WNBA_{row['team_abbr']}" if row["league"] == "wnba" else row["team_abbr"]
     cur.execute("UPDATE users SET favorite_team = %s, updated_at = NOW() WHERE id = %s",
                 (value, user_id))
     return value or ""
 
 
-def _set_allegiance(cur, user_id: int, league: str, abbr: str | None) -> bool:
-    """Close the open allegiance for `league` and open a new one. Returns
-    whether anything changed.
+def _set_allegiance(cur, user_id: int, league: str | None, abbr: str | None) -> bool:
+    """Close whatever allegiance is open and start the new one. Returns whether
+    anything actually changed.
 
-    Re-picking the same team is a no-op: onboarding shows every screen with the
-    existing choice pre-selected, so confirming your team must not reset the
-    streak the screen is there to display.
+    Closes the open row regardless of league: a user holds exactly one team, so
+    switching from a WNBA team to an NBA one is a switch, not a second slot. A
+    partial unique index on (user_id) enforces that, so a double-write can't
+    leave two live allegiances behind.
+
+    Re-picking the same team is a no-op. Onboarding shows the existing choice
+    pre-selected, so confirming your team must never reset the streak the screen
+    exists to display.
     """
     cur.execute("""
-        SELECT id, team_abbr FROM team_allegiance
-        WHERE user_id = %s AND league = %s AND ended_at IS NULL
-    """, (user_id, league))
+        SELECT id, league, team_abbr FROM team_allegiance
+        WHERE user_id = %s AND ended_at IS NULL
+    """, (user_id,))
     row = cur.fetchone()
-    if row and row["team_abbr"] == abbr:
+    if row and row["team_abbr"] == abbr and row["league"] == league:
         return False
     if row:
         cur.execute("UPDATE team_allegiance SET ended_at = NOW() WHERE id = %s", (row["id"],))
-    if abbr:
+    if abbr and league:
         cur.execute("""
             INSERT INTO team_allegiance (user_id, league, team_abbr)
             VALUES (%s, %s, %s)
@@ -10035,7 +10321,11 @@ def _set_allegiance(cur, user_id: int, league: str, abbr: str | None) -> bool:
 @app.route("/api/me/allegiance", methods=["GET"])
 @login_required
 def get_allegiance():
-    """Current team per league, with how long it's been held, plus past teams."""
+    """The caller's team, how long they've held it, and every team before it.
+
+    `current` stays a list even though it holds at most one entry — clients
+    already decode it as one, and an empty list is the natural "no team yet".
+    """
     user = current_user()
     conn = get_conn(); cur = conn.cursor()
     try:

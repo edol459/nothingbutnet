@@ -95,6 +95,24 @@ body{font-family:var(--ff-sans);background:var(--paper);color:var(--ink);min-hei
   .face.first .rnk{font-size:38px;} .face.first .pic{width:82px;height:82px;} .face.first .nm{font-size:15px;}
   .face.first .duo{height:82px;} .face.first .duo .lg{width:46px;height:46px;}
 }
+
+/* ── Awards ballot ─────────────────────────────────────────── */
+.bstatus{font-family:var(--ff-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ink3);background:var(--paper2,rgba(0,0,0,.03));border:1px solid var(--rule);
+  border-radius:8px;padding:9px 12px;margin:18px 0 6px;}
+.bstatus.graded{color:var(--orange);border-color:var(--orange);}
+.rw.ballot{align-items:flex-start;}
+.rw.ballot .award{flex:0 0 116px;display:flex;flex-direction:column;gap:2px;padding-top:2px;}
+.rw.ballot .award b{font-family:var(--ff-mono);font-size:12px;color:var(--orange);}
+.rw.ballot .award span{font-size:11px;color:var(--ink4);line-height:1.25;}
+.rw.ballot .nm.empty{color:var(--ink4);font-style:italic;}
+.rw.ballot .wonby{font-size:11px;color:var(--ink4);margin-top:3px;}
+.verdict{font-size:16px;line-height:1;margin-left:auto;padding-left:8px;}
+.verdict.ok{color:var(--green);} .verdict.no{color:var(--red);}
+@media(max-width:520px){
+  .rw.ballot{flex-wrap:wrap;}
+  .rw.ballot .award{flex:0 0 100%;flex-direction:row;align-items:baseline;gap:6px;}
+}
 </style>
 <link rel="stylesheet" href="/site-nav.css">
 <script src="/nba-assets.js"></script>
@@ -117,7 +135,7 @@ body{font-family:var(--ff-sans);background:var(--paper);color:var(--ink);min-hei
 <script>
 const esc=s=>(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2200);}
-const TYPES={games:'Games',performances:'Performances',players:'Players',player_seasons:'Player Seasons',teams:'Teams',team_seasons:'Team Seasons',jerseys:'Jerseys'};
+const TYPES={games:'Games',performances:'Performances',players:'Players',player_seasons:'Player Seasons',teams:'Teams',team_seasons:'Team Seasons',jerseys:'Jerseys',awards:'Awards'};
 const m=location.pathname.match(/\/lists?\/(\d+)/); const listId=m?m[1]:null;
 
 // Anyone on iOS with the app installed never reaches this page — the universal
@@ -187,7 +205,49 @@ function itemsOf(list){
   if(t==='players'||t==='player_seasons')return list.playerItems||[];
   if(t==='teams'||t==='team_seasons')return list.teamItems||[];
   if(t==='jerseys')return list.jerseyItems||[];
+  if(t==='awards')return list.awardItems||[];
   return [];
+}
+
+// A ballot is a sheet, not a ranking, so it skips the podium/row machinery
+// entirely. This page is read-only — picks are made in the app — so all it has
+// to do is show the sheet and, once results land, how it scored.
+function ballotStatus(list){
+  const slots=list.awardItems||[];
+  const graded=slots.some(s=>s.correct!=null);
+  if(graded){
+    const right=slots.filter(s=>s.correct===true).length;
+    return {cls:'graded', text:`Final — ${right} of ${slots.length} called right`};
+  }
+  const filled=slots.filter(s=>s.pick).length;
+  if(list.isLocked) return {cls:'', text:`Locked — waiting on the league · ${filled}/${slots.length} filled`};
+  if(list.lockedAt){
+    const d=new Date(String(list.lockedAt).slice(0,10)+'T00:00:00');
+    const when=isNaN(d)?String(list.lockedAt).slice(0,10)
+      :d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
+    return {cls:'', text:`Open until ${when} · ${filled}/${slots.length} filled`};
+  }
+  return {cls:'', text:`${filled}/${slots.length} filled`};
+}
+
+function ballotHtml(list){
+  const slots=list.awardItems||[];
+  if(!slots.length) return '<div class="state">This ballot is empty.</div>';
+  const st=ballotStatus(list);
+  const rows=slots.map(s=>{
+    const p=s.pick;
+    const verdict = s.correct==null ? ''
+      : `<span class="verdict ${s.correct?'ok':'no'}">${s.correct?'✓':'✗'}</span>`;
+    // Naming the winner only helps on a miss — echoing a pick the user already
+    // got right is noise.
+    const missed = (s.correct===false && s.winner)
+      ? `<div class="wonby">Won by ${esc(s.winner.playerName)}</div>` : '';
+    const body = p
+      ? `${picHead(p.personId, list.league||'nba')}<div class="body"><div class="nm">${esc(p.playerName)}</div>${p.team?`<div class="sub">${esc(p.team)}</div>`:''}${missed}</div>`
+      : `<div class="pic"></div><div class="body"><div class="nm empty">No pick</div>${missed}</div>`;
+    return `<li class="rw ballot"><div class="award"><b>${esc(s.short)}</b><span>${esc(s.label)}</span></div>${body}${verdict}</li>`;
+  }).join('');
+  return `<div class="bstatus ${st.cls}">${esc(st.text)}</div><ul class="rows">${rows}</ul>`;
 }
 
 function titleHtml(title){
@@ -245,9 +305,9 @@ async function load(){
     }).join('')}</ul>` : (items.length?'':'<div class="state">This list is empty.</div>');
 
     root.innerHTML = `
-      <div class="eyebrow">${ranked?'Ranked List':'List'} · ${esc(TYPES[type]||type)}</div>
+      <div class="eyebrow">${type==='awards' ? `Awards Ballot${list.season?' · '+esc(list.season):''}` : `${ranked?'Ranked List':'List'} · ${esc(TYPES[type]||type)}`}</div>
       <h1 class="title">${titleHtml(list.title)}</h1>
-      <div class="byline">${avatar}<span class="who">by <b>${esc(list.creatorName||'ydkball')}</b></span><span class="meta">· ${items.length} ${items.length===1?'item':'items'}</span></div>
+      <div class="byline">${avatar}<span class="who">by <b>${esc(list.creatorName||'ydkball')}</b></span><span class="meta">· ${type==='awards' ? `${items.filter(i=>i.pick).length} picks` : `${items.length} ${items.length===1?'item':'items'}`}</span></div>
       ${list.description?`<p class="desc">${esc(list.description)}</p>`:''}
       <div class="actions">
         <button class="btn" id="likeBtn"><span id="likeIcon" style="color:${list.likedByMe?'#e0245e':'inherit'};font-size:16px;line-height:1;">${list.likedByMe?'♥':'♡'}</span> <span id="likeCount">${list.likeCount||0}</span></button>
@@ -255,8 +315,7 @@ async function load(){
         ${IS_IOS?`<a class="btn appbtn" href="${APP_STORE_URL}">${APPLE_MARK} Open in app</a>`
                 :`<a class="btn" href="/">Explore ydkball</a>`}
       </div>
-      ${podiumHtml}
-      ${rowsHtml}
+      ${type==='awards' ? ballotHtml(list) : podiumHtml + rowsHtml}
       <div class="comments" style="margin-top:36px;padding-top:22px;border-top:1px solid var(--rule);">
         <h3 style="font-family:var(--ff-serif);font-size:22px;color:var(--ink);margin-bottom:14px;">Comments <span id="cCount" style="color:var(--ink4);font-size:16px;">(${list.commentCount||0})</span></h3>
         <div id="commentBox"></div>

@@ -130,6 +130,10 @@ function imgHead(pid,league){const u=window.ydkHeadshot&&ydkHeadshot(pid,league)
 function imgGame(it){const lg=it.league||'nba';return `<span class="duo">${imgLogo(it.awayTeamAbbr,lg)}${imgLogo(it.homeTeamAbbr,lg)}</span>`;}
 
 const TYPES={games:'Games',performances:'Performances',players:'Players',player_seasons:'Player Seasons',teams:'Teams',team_seasons:'Team Seasons',jerseys:'Jerseys'};
+// Ballots are created in the app (they need a league and an open season), so
+// `awards` is deliberately absent from TYPES — but existing ones still have to
+// render with a real name rather than the raw slug.
+const TYPE_LABELS={...TYPES, awards:'Awards Ballot'};
 
 const CFG={
   games:{items:l=>l.games||[], idField:'gameId', add:addGamesUI, img:it=>imgGame(it),
@@ -207,7 +211,7 @@ async function renderIndex(){
     box.innerHTML=lists.map(l=>`
       <div class="list-card">
         <div class="grow"><div class="t">${esc(l.title)}</div>
-          <div class="m">${TYPES[l.listType]||l.listType}${l.isRanked?' · ranked':''} · <span class="badge ${l.isPublic?'pub':''}">${l.isPublic?'public':'private'}</span></div></div>
+          <div class="m">${TYPE_LABELS[l.listType]||l.listType}${l.isRanked?' · ranked':''} · <span class="badge ${l.isPublic?'pub':''}">${l.isPublic?'public':'private'}</span></div></div>
         <button class="btn sm" data-manage="${l.id}">Manage</button>
         <a class="btn sm" href="/list/${l.id}" target="_blank">View</a>
       </div>`).join('');
@@ -225,19 +229,74 @@ async function createList(){
 }
 
 // ---------- DETAIL ----------
+// Read-only on the web: picks are made in the app, where the slot picker lives.
+// Showing the filled sheet (and letting it be shared or deleted) is what this
+// page is for.
+function renderBallotDetail(id, list){
+  const root=$('#root');
+  const slots=list.awardItems||[];
+  const graded=slots.some(s=>s.correct!=null);
+  const right=slots.filter(s=>s.correct===true).length;
+  const filled=slots.filter(s=>s.pick).length;
+  const status = graded ? `Final — ${right} of ${slots.length} called right`
+    : list.isLocked ? `Locked — waiting on the league · ${filled}/${slots.length} filled`
+    : `Open · ${filled}/${slots.length} filled`;
+  const rows=slots.map(s=>{
+    const mark = s.correct==null ? '' : (s.correct
+      ? '<span style="color:var(--green);font-size:15px">✓</span>'
+      : '<span style="color:var(--red);font-size:15px">✗</span>');
+    const missed = (s.correct===false && s.winner)
+      ? `<div style="font-size:11px;color:var(--ink4)">Won by ${esc(s.winner.playerName)}</div>` : '';
+    return `<div style="display:flex;align-items:flex-start;gap:12px;padding:11px 0;border-bottom:1px solid var(--rule)">
+      <div style="flex:0 0 110px">
+        <div style="font-family:var(--ff-mono);font-size:12px;color:var(--orange)">${esc(s.short)}</div>
+        <div style="font-size:11px;color:var(--ink4)">${esc(s.label)}</div>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:15px;font-weight:600;${s.pick?'':'color:var(--ink4);font-style:italic'}">${esc(s.pick?s.pick.playerName:'No pick')}</div>
+        ${s.pick&&s.pick.team?`<div style="font-family:var(--ff-mono);font-size:11px;color:var(--ink4)">${esc(s.pick.team)}</div>`:''}
+        ${missed}
+      </div>${mark}
+    </div>`;
+  }).join('');
+
+  root.innerHTML=`
+    <a class="btn sm" id="back" style="margin-bottom:16px">← My Lists</a>
+    <div class="card">
+      <div class="eyebrow">Awards Ballot${list.season?' · '+esc(list.season):''} · <span style="color:var(--ink4)">${list.isPublic?'public':'private'}</span></div>
+      <div style="font-family:var(--ff-serif);font-size:30px;letter-spacing:-.015em;line-height:1.1;margin-bottom:16px">${esc(list.title)}</div>
+      <div class="seg" style="margin-bottom:20px">
+        <button class="btn sm" id="share">Share</button>
+        <a class="btn sm" href="/list/${id}" target="_blank">View page</a>
+        <button class="btn sm danger" id="del">Delete</button>
+      </div>
+      <div class="section-label">${esc(status)}</div>
+      ${rows}
+      ${list.isLocked?'':'<div style="margin-top:14px;font-size:12px;color:var(--ink4)">Make and change picks in the ydkball app — this page is read-only.</div>'}
+    </div>`;
+
+  $('#back').addEventListener('click',renderIndex);
+  $('#share').addEventListener('click',async()=>{const u=location.origin+'/list/'+id;
+    if(navigator.share){try{await navigator.share({title:list.title,url:u});return;}catch(_){}}
+    try{await navigator.clipboard.writeText(u);toast('Link copied');}catch(_){toast(u);}});
+  $('#del').addEventListener('click',async()=>{ if(!confirm('Delete this ballot?'))return;
+    try{await api('/api/lists/'+id,{method:'DELETE'});renderIndex();}catch(e){toast(e.message);}});
+}
+
 async function renderDetail(id){
   const root=$('#root');
   root.innerHTML='<div class="state">Loading list…</div>';
   let list;
   try{ list=(await api('/api/lists/'+id)).list; }catch(e){ root.innerHTML=`<div class="state">${esc(e.message)}</div>`; return; }
   const type=list.listType||'games';
+  if(type==='awards'){ renderBallotDetail(id, list); return; }
   const cfg=CFG[type]||CFG.games;
   const items=cfg.items(list);
 
   root.innerHTML=`
     <a class="btn sm" id="back" style="margin-bottom:16px">← My Lists</a>
     <div class="card">
-      <div class="eyebrow">${TYPES[type]||type}${list.isRanked?' · ranked':''} · <span style="color:var(--ink4)">${list.isPublic?'public':'private'}</span></div>
+      <div class="eyebrow">${TYPE_LABELS[type]||type}${list.isRanked?' · ranked':''} · <span style="color:var(--ink4)">${list.isPublic?'public':'private'}</span></div>
       <div style="font-family:var(--ff-serif);font-size:30px;letter-spacing:-.015em;line-height:1.1;margin-bottom:16px">${esc(list.title)}</div>
       <div class="seg" style="margin-bottom:20px">
         <button class="btn sm" id="share">Share</button>
