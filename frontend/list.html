@@ -96,22 +96,47 @@ body{font-family:var(--ff-sans);background:var(--paper);color:var(--ink);min-hei
   .face.first .duo{height:82px;} .face.first .duo .lg{width:46px;height:46px;}
 }
 
-/* ── Awards ballot ─────────────────────────────────────────── */
-.bstatus{font-family:var(--ff-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
-  color:var(--ink3);background:var(--paper2,rgba(0,0,0,.03));border:1px solid var(--rule);
-  border-radius:8px;padding:9px 12px;margin:18px 0 6px;}
+/* ── Awards ballot — echoes the ranked-list podium ─────────── */
+.bstatus{font-family:var(--ff-mono);font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--ink3);background:var(--bg-card);border:1px solid var(--rule);
+  border-radius:12px;padding:10px 13px;margin:20px 0 16px;}
 .bstatus.graded{color:var(--orange);border-color:var(--orange);}
-.rw.ballot{align-items:flex-start;}
-.rw.ballot .award{flex:0 0 116px;display:flex;flex-direction:column;gap:2px;padding-top:2px;}
-.rw.ballot .award b{font-family:var(--ff-mono);font-size:12px;color:var(--orange);}
-.rw.ballot .award span{font-size:11px;color:var(--ink4);line-height:1.25;}
-.rw.ballot .nm.empty{color:var(--ink4);font-style:italic;}
-.rw.ballot .wonby{font-size:11px;color:var(--ink4);margin-top:3px;}
-.verdict{font-size:16px;line-height:1;margin-left:auto;padding-left:8px;}
-.verdict.ok{color:var(--green);} .verdict.no{color:var(--red);}
+.bhero{background:var(--paper);border:1px solid var(--rule);border-radius:18px;
+  padding:26px 18px 22px;text-align:center;margin-bottom:12px;}
+.bhero.ok{border-color:var(--green);} .bhero.no{border-color:var(--red);}
+.blabel{font-family:var(--ff-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--orange);margin-bottom:14px;}
+.blabel.sm{margin-bottom:10px;letter-spacing:.12em;}
+.bhero.ok .blabel,.bcard.ok .blabel{color:var(--green);}
+.bhero.no .blabel,.bcard.no .blabel{color:var(--red);}
+.bshot{position:relative;border-radius:50%;background-size:cover;background-position:top center;
+  margin:0 auto;border:2px solid var(--orange);}
+.bshot.lg{width:112px;height:112px;} .bshot.sm{width:64px;height:64px;border-width:1.5px;}
+.bshot.empty{border-style:dashed;border-color:var(--ink4);color:var(--ink4);
+  display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:300;}
+.bhero.ok .bshot,.bcard.ok .bshot{border-color:var(--green);}
+.bhero.no .bshot,.bcard.no .bshot{border-color:var(--red);}
+.bmark{position:absolute;right:-2px;bottom:-2px;width:22px;height:22px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;
+  border:2px solid var(--paper);}
+.bmark.ok{background:var(--green);} .bmark.no{background:var(--red);}
+.bname{font-family:var(--ff-serif);font-size:27px;line-height:1.15;color:var(--ink);margin-top:14px;}
+.bname.sm{font-family:var(--ff-sans);font-size:14px;font-weight:600;margin-top:10px;line-height:1.25;}
+.bteam{font-family:var(--ff-mono);font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink4);margin-top:4px;min-height:14px;}
+.bwon{font-size:12px;color:var(--ink4);margin-top:6px;}
+/* The uppercase/tracking treatment is for team abbreviations; a player's name
+   set the same way reads as shouting. */
+.bteam.won{text-transform:none;letter-spacing:0;font-family:var(--ff-sans);font-size:11.5px;}
+/* Two up, matching the app — the templates leave four awards under the hero,
+   which lands as a balanced 2x2 instead of a row of three and an orphan. */
+.bgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.bcard{background:var(--paper);border:1px solid var(--rule);border-radius:14px;
+  padding:16px 10px 14px;text-align:center;}
+.bcard.ok{border-color:var(--green);} .bcard.no{border-color:var(--red);}
 @media(max-width:520px){
-  .rw.ballot{flex-wrap:wrap;}
-  .rw.ballot .award{flex:0 0 100%;flex-direction:row;align-items:baseline;gap:6px;}
+  .bgrid{grid-template-columns:1fr 1fr;gap:10px;}
+  .bshot.lg{width:92px;height:92px;} .bname{font-size:23px;}
 }
 </style>
 <link rel="stylesheet" href="/site-nav.css">
@@ -234,20 +259,36 @@ function ballotHtml(list){
   const slots=list.awardItems||[];
   if(!slots.length) return '<div class="state">This ballot is empty.</div>';
   const st=ballotStatus(list);
-  const rows=slots.map(s=>{
-    const p=s.pick;
-    const verdict = s.correct==null ? ''
-      : `<span class="verdict ${s.correct?'ok':'no'}">${s.correct?'✓':'✗'}</span>`;
-    // Naming the winner only helps on a miss — echoing a pick the user already
-    // got right is noise.
-    const missed = (s.correct===false && s.winner)
-      ? `<div class="wonby">Won by ${esc(s.winner.playerName)}</div>` : '';
-    const body = p
-      ? `${picHead(p.personId, list.league||'nba')}<div class="body"><div class="nm">${esc(p.playerName)}</div>${p.team?`<div class="sub">${esc(p.team)}</div>`:''}${missed}</div>`
-      : `<div class="pic"></div><div class="body"><div class="nm empty">No pick</div>${missed}</div>`;
-    return `<li class="rw ballot"><div class="award"><b>${esc(s.short)}</b><span>${esc(s.label)}</span></div>${body}${verdict}</li>`;
-  }).join('');
-  return `<div class="bstatus ${st.cls}">${esc(st.text)}</div><ul class="rows">${rows}</ul>`;
+  const lg=list.league||'nba';
+  // The first slot is the headline award — raised into a hero card the same way
+  // a ranked list raises its #1, so the sheet reads as a trophy case not a form.
+  const hero=slots[0], rest=slots.slice(1);
+
+  const tone=s=>s.correct==null?'':(s.correct?' ok':' no');
+  const mark=s=>s.correct==null?'':`<span class="bmark${s.correct?' ok':' no'}">${s.correct?'✓':'✗'}</span>`;
+  const shot=(s,size)=>s.pick
+    ? `<div class="bshot ${size}${tone(s)}" style="${bg(window.ydkHeadshot&&ydkHeadshot(s.pick.personId,lg))}">${mark(s)}</div>`
+    : `<div class="bshot ${size} empty">+</div>`;
+  const missed=s=>(s.correct===false&&s.winner)
+    ? `<div class="bwon">Won by ${esc(s.winner.playerName)}</div>` : '';
+
+  const heroHtml=`<div class="bhero${tone(hero)}">
+      <div class="blabel">${esc(hero.label)}</div>
+      ${shot(hero,'lg')}
+      <div class="bname">${esc(hero.pick?hero.pick.playerName:'No pick')}</div>
+      ${hero.pick&&hero.pick.team?`<div class="bteam">${esc(hero.pick.team)}</div>`:''}
+      ${missed(hero)}
+    </div>`;
+
+  const gridHtml=`<div class="bgrid">${rest.map(s=>`
+      <div class="bcard${tone(s)}">
+        <div class="blabel sm">${esc(s.short)}</div>
+        ${shot(s,'sm')}
+        <div class="bname sm">${esc(s.pick?s.pick.playerName:'No pick')}</div>
+        <div class="bteam${s.correct===false&&s.winner?' won':''}">${s.correct===false&&s.winner?esc('Won by '+s.winner.playerName):esc((s.pick&&s.pick.team)||'')}</div>
+      </div>`).join('')}</div>`;
+
+  return `<div class="bstatus ${st.cls}">${esc(st.text)}</div>${heroHtml}${gridHtml}`;
 }
 
 function titleHtml(title){

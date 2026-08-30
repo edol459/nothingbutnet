@@ -8281,6 +8281,136 @@ def get_awards_template():
     })
 
 
+# Slots whose eligible pool is the incoming rookie class rather than the league.
+_ROOKIE_AWARDS = {"ROTY"}
+
+
+def _award_draft_year(season: str) -> int | None:
+    """The draft class eligible for a season's rookie award. '2026-27' and '2026'
+    both mean the players drafted in 2026."""
+    try:
+        return int(str(season).split("-")[0])
+    except (ValueError, AttributeError):
+        return None
+
+
+def _award_player_eligible(cur, league: str, season: str, code: str, person_id) -> bool:
+    """Mirror of the search pools above, used to validate a write.
+
+    A pick with no person_id is allowed through — a hand-typed name carries no
+    identity to check, and the name-match grader already handles those.
+    """
+    if not person_id:
+        return True
+    league = (league or "nba").lower()
+    if code in _ROOKIE_AWARDS and league == "nba":
+        draft_year = _award_draft_year(season)
+        if not draft_year:
+            return True          # unknown season: don't block on a guess
+        cur.execute("SELECT 1 FROM players WHERE player_id = %s AND draft_year = %s",
+                    (person_id, draft_year))
+        return cur.fetchone() is not None
+    if league == "wnba":
+        cur.execute("""SELECT 1 FROM wnba_player_seasons
+                       WHERE player_id = %s
+                         AND season = (SELECT MAX(season) FROM wnba_player_seasons)""",
+                    (person_id,))
+        return cur.fetchone() is not None
+    cur.execute("""SELECT 1 FROM team_rosters
+                   WHERE player_id::int = %s
+                     AND season = (SELECT MAX(season) FROM team_rosters)""",
+                (person_id,))
+    return cur.fetchone() is not None
+
+
+@app.route("/api/awards/players/search")
+def search_award_players():
+    """Players eligible for one award slot.
+
+    Two things separate this from /api/lists/players/search. It only returns
+    players who could actually win — nobody should be able to put Michael Jordan
+    down for 2026-27 MVP — and for Rookie of the Year it returns the incoming
+    draft class instead, who have no stats at all and so are invisible to every
+    other player lookup in the app.
+
+    Eligibility is read from the roster, not from players.is_active: that flag
+    is far looser than it sounds (about a thousand players carry it, only ~540
+    are on a roster), so it would let go retirees through.
+    """
+    league = (request.args.get("league") or "nba").lower()
+    code   = (request.args.get("code") or "").strip()
+    q      = (request.args.get("q") or "").strip()
+    if league not in _AWARD_TEMPLATES:
+        return jsonify({"error": "unknown league"}), 400
+
+    conn = get_conn(); cur = conn.cursor()
+    season = request.args.get("season") or (_award_window(cur, league)["season"] or "")
+    pattern = f"%{q}%"
+    results = []
+
+    # ── Rookie of the Year: the draft class, seeded by fetch_draft_class.py ──
+    # An empty query lists the whole class in pick order, which is how people
+    # actually think about rookies before they've played a game.
+    if code in _ROOKIE_AWARDS and league == "nba":
+        draft_year = _award_draft_year(season)
+        if draft_year:
+            cur.execute("""
+                SELECT player_id, player_name, draft_number
+                FROM players
+                WHERE draft_year = %s
+                  AND (%s = '' OR player_name ILIKE %s)
+                ORDER BY draft_number NULLS LAST, player_name
+                LIMIT 60
+            """, (draft_year, q, pattern))
+            for r in cur.fetchall():
+                pick = r.get("draft_number")
+                results.append({
+                    "playerId":   r["player_id"],
+                    "playerName": r["player_name"],
+                    "team":       None,
+                    "league":     "nba",
+                    "note":       f"#{pick} pick" if pick else "Rookie",
+                })
+        cur.close(); conn.close()
+        return jsonify({"players": results})
+
+    # ── Everything else: players currently on a roster ──
+    if len(q) < 2:
+        cur.close(); conn.close()
+        return jsonify({"players": []})
+
+    if league == "wnba":
+        # No WNBA roster table, so "active" is whoever has played in the newest
+        # season we hold — which during the season is the same set.
+        cur.execute("""
+            SELECT DISTINCT ON (player_id) player_id, player_name, team
+            FROM wnba_player_seasons
+            WHERE season = (SELECT MAX(season) FROM wnba_player_seasons)
+              AND player_name ILIKE %s
+            ORDER BY player_id, season DESC
+            LIMIT 25
+        """, (pattern,))
+        for r in cur.fetchall():
+            results.append({"playerId": r["player_id"], "playerName": r["player_name"],
+                            "team": r.get("team"), "league": "wnba", "note": None})
+    else:
+        cur.execute("""
+            SELECT DISTINCT ON (tr.player_id)
+                   tr.player_id::int AS player_id, tr.player_name, tr.team_abbr
+            FROM team_rosters tr
+            WHERE tr.season = (SELECT MAX(season) FROM team_rosters)
+              AND tr.player_name ILIKE %s
+            ORDER BY tr.player_id, tr.team_abbr
+            LIMIT 25
+        """, (pattern,))
+        for r in cur.fetchall():
+            results.append({"playerId": r["player_id"], "playerName": r["player_name"],
+                            "team": r.get("team_abbr"), "league": "nba", "note": None})
+
+    cur.close(); conn.close()
+    return jsonify({"players": results})
+
+
 @app.route("/api/lists/<int:list_id>/awards/<award_code>", methods=["PUT"])
 @login_required
 def set_award_pick(list_id, award_code):
@@ -8311,6 +8441,12 @@ def set_award_pick(list_id, award_code):
     if award_code not in {s["code"] for s in template}:
         cur.close(); conn.close()
         return jsonify({"error": "unknown award"}), 400
+
+    if not _award_player_eligible(cur, league, lst.get("season"), award_code, body.get("playerId")):
+        cur.close(); conn.close()
+        # The picker only offers eligible players, but the endpoint is public and
+        # a ballot is only worth grading if everyone answered the same question.
+        return jsonify({"error": "that player isn't eligible for this award"}), 400
 
     cur.execute(_AWARD_TABLES); conn.commit()
     cur.execute("""
