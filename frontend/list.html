@@ -130,7 +130,12 @@ body{font-family:var(--ff-sans);background:var(--paper);color:var(--ink);min-hei
 .bteam.won{text-transform:none;letter-spacing:0;font-family:var(--ff-sans);font-size:11.5px;}
 /* Two up, matching the app — the templates leave four awards under the hero,
    which lands as a balanced 2x2 instead of a row of three and an orphan. */
-.bgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+/* Three across: an eight-slot ballot leaves seven under the hero, and 1fr 1fr
+   would run to four rows of dead space on desktop. */
+.bgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+/* Crests are artwork, not portraits — contain them instead of cropping to fill. */
+.bshot.crest{background-size:contain;background-repeat:no-repeat;background-position:center;
+  background-color:transparent;border-style:solid;}
 .bcard{background:var(--paper);border:1px solid var(--rule);border-radius:14px;
   padding:16px 10px 14px;text-align:center;}
 .bcard.ok{border-color:var(--green);} .bcard.no{border-color:var(--red);}
@@ -266,9 +271,14 @@ function ballotHtml(list){
 
   const tone=s=>s.correct==null?'':(s.correct?' ok':' no');
   const mark=s=>s.correct==null?'':`<span class="bmark${s.correct?' ok':' no'}">${s.correct?'✓':'✗'}</span>`;
-  const shot=(s,size)=>s.pick
-    ? `<div class="bshot ${size}${tone(s)}" style="${bg(window.ydkHeadshot&&ydkHeadshot(s.pick.personId,lg))}">${mark(s)}</div>`
-    : `<div class="bshot ${size} empty">+</div>`;
+  const shot=(s,size)=>{
+    if(!s.pick) return `<div class="bshot ${size} empty">+</div>`;
+    const art = s.entity==='team'
+      ? (window.ydkTeamLogo && ydkTeamLogo(s.pick.team, lg))
+      : (window.ydkHeadshot && ydkHeadshot(s.pick.personId, lg));
+    const cls = s.entity==='team' ? ' crest' : '';
+    return `<div class="bshot ${size}${cls}${tone(s)}" style="${bg(art)}">${mark(s)}</div>`;
+  };
   const missed=s=>(s.correct===false&&s.winner)
     ? `<div class="bwon">Won by ${esc(s.winner.playerName)}</div>` : '';
 
@@ -284,7 +294,7 @@ function ballotHtml(list){
       <div class="bcard${tone(s)}">
         <div class="blabel sm">${esc(s.short)}</div>
         ${shot(s,'sm')}
-        <div class="bname sm">${esc(s.pick?s.pick.playerName:'No pick')}</div>
+        <div class="bname sm">${esc(s.pick ? (s.entity==='team' ? (s.pick.team||s.pick.playerName) : s.pick.playerName) : 'No pick')}</div>
         <div class="bteam${s.correct===false&&s.winner?' won':''}">${s.correct===false&&s.winner?esc('Won by '+s.winner.playerName):esc((s.pick&&s.pick.team)||'')}</div>
       </div>`).join('')}</div>`;
 

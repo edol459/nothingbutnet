@@ -8148,26 +8148,48 @@ CREATE TABLE IF NOT EXISTS award_results (
 # Deliberately absent: Coach of the Year (the slot picker searches players and we
 # hold no coach data) and Clutch Player of the Year (nothing upstream reports a
 # winner, so those slots would sit permanently ungraded).
+# `entity` says what fills the slot, which decides three things: what the picker
+# searches, what counts as eligible, and how a pick is matched against the
+# result. It's a property of the award, not of the pick, so it lives here rather
+# than on the ballot row — which is why adding a team and a coach slot needed no
+# schema change.
+#
+# The champion leads because it's the pick everyone has and the one they'll
+# remember making; it also renders better at hero size than a headshot.
+#
+# WNBA has no Clutch Player award, and we hold no WNBA coach data at all, so its
+# sheet is shorter rather than carrying slots that could never be filled.
 _AWARD_TEMPLATES = {
     "nba": [
-        {"code": "MVP",  "label": "Most Valuable Player",         "short": "MVP"},
-        {"code": "ROTY", "label": "Rookie of the Year",           "short": "ROTY"},
-        {"code": "DPOY", "label": "Defensive Player of the Year", "short": "DPOY"},
-        {"code": "6MOY", "label": "Sixth Man of the Year",        "short": "6MOY"},
-        {"code": "MIP",  "label": "Most Improved Player",         "short": "MIP"},
+        {"code": "CHAMPION", "label": "NBA Champion",                "short": "CHAMPION", "entity": "team"},
+        {"code": "MVP",      "label": "Most Valuable Player",        "short": "MVP",      "entity": "player"},
+        {"code": "ROTY",     "label": "Rookie of the Year",          "short": "ROTY",     "entity": "player"},
+        {"code": "DPOY",     "label": "Defensive Player of the Year","short": "DPOY",     "entity": "player"},
+        {"code": "6MOY",     "label": "Sixth Man of the Year",       "short": "6MOY",     "entity": "player"},
+        {"code": "MIP",      "label": "Most Improved Player",        "short": "MIP",      "entity": "player"},
+        {"code": "CPOY",     "label": "Clutch Player of the Year",   "short": "CPOY",     "entity": "player"},
+        {"code": "COY",      "label": "Coach of the Year",           "short": "COY",      "entity": "coach"},
     ],
     "wnba": [
-        {"code": "MVP",  "label": "Most Valuable Player",         "short": "MVP"},
-        {"code": "ROTY", "label": "Rookie of the Year",           "short": "ROTY"},
-        {"code": "DPOY", "label": "Defensive Player of the Year", "short": "DPOY"},
-        {"code": "6WOY", "label": "Sixth Woman of the Year",      "short": "6WOY"},
-        {"code": "MIP",  "label": "Most Improved Player",         "short": "MIP"},
+        {"code": "CHAMPION", "label": "WNBA Champion",               "short": "CHAMPION", "entity": "team"},
+        {"code": "MVP",      "label": "Most Valuable Player",        "short": "MVP",      "entity": "player"},
+        {"code": "ROTY",     "label": "Rookie of the Year",          "short": "ROTY",     "entity": "player"},
+        {"code": "DPOY",     "label": "Defensive Player of the Year","short": "DPOY",     "entity": "player"},
+        {"code": "6WOY",     "label": "Sixth Woman of the Year",     "short": "6WOY",     "entity": "player"},
+        {"code": "MIP",      "label": "Most Improved Player",        "short": "MIP",      "entity": "player"},
     ],
 }
 
+
+def _award_entity(league: str, code: str) -> str:
+    for slot in _AWARD_TEMPLATES.get((league or "nba").lower(), []):
+        if slot["code"] == code:
+            return slot.get("entity", "player")
+    return "player"
+
 # Cover art wants the marquee picks first (MVP, not whichever slot was filled
 # first). Both leagues' codes live in one list so ordering needs no league.
-_AWARD_ORDER = ["MVP", "ROTY", "DPOY", "6MOY", "6WOY", "MIP"]
+_AWARD_ORDER = ["CHAMPION", "MVP", "ROTY", "DPOY", "6MOY", "6WOY", "MIP", "CPOY", "COY"]
 
 
 def _award_window(cur, league: str) -> dict:
@@ -8242,16 +8264,20 @@ def _fetch_award_items(cur, list_id: int, league: str, season: str) -> list:
         winner = results.get(slot["code"])
         correct = None
         if pick and winner:
-            # Match on person_id when both sides have one; WNBA results are
-            # entered by hand and may carry only a name.
-            if pick.get("person_id") and winner.get("person_id"):
+            if slot.get("entity") == "team":
+                # Teams are identified by abbreviation, which is stable; their
+                # display names are not (the row stores whatever the picker sent).
+                correct = (pick.get("team") or "").upper() == (winner.get("team") or "").upper()
+            elif pick.get("person_id") and winner.get("person_id"):
                 correct = pick["person_id"] == winner["person_id"]
             else:
+                # Hand-entered winners (WNBA, Coach of the Year) carry no id.
                 correct = _norm_name(pick["player_name"]) == _norm_name(winner["player_name"])
         out.append({
             "code":    slot["code"],
             "label":   slot["label"],
             "short":   slot["short"],
+            "entity":  slot.get("entity", "player"),
             "pick":    _shape(pick) if pick else None,
             "winner":  _shape(winner) if winner else None,
             "correct": correct,
@@ -8300,9 +8326,24 @@ def _award_player_eligible(cur, league: str, season: str, code: str, person_id) 
     A pick with no person_id is allowed through — a hand-typed name carries no
     identity to check, and the name-match grader already handles those.
     """
+    league = (league or "nba").lower()
+    entity = _award_entity(league, code)
+
+    if entity == "team":
+        # Validated by the caller against the league's current teams, since a
+        # team pick carries an abbreviation rather than an id.
+        return True
+    if entity == "coach":
+        if not person_id:
+            return True
+        cur.execute("""SELECT 1 FROM coaches
+                       WHERE coach_id = %s AND is_head
+                         AND season = (SELECT MAX(season) FROM coaches WHERE league = 'nba')""",
+                    (person_id,))
+        return cur.fetchone() is not None
+
     if not person_id:
         return True
-    league = (league or "nba").lower()
     if code in _ROOKIE_AWARDS and league == "nba":
         draft_year = _award_draft_year(season)
         if not draft_year:
@@ -8490,6 +8531,37 @@ def search_award_players():
     season = request.args.get("season") or (_award_window(cur, league)["season"] or "")
     pattern = f"%{q}%"
     results = []
+    entity = _award_entity(league, code)
+
+    # ── Champion: the league's current teams, listed in full ──
+    # Thirty options is a browse, not a search, so an empty query returns them
+    # all — nobody should have to type "Knicks" to find the Knicks.
+    if entity == "team":
+        teams, _ = _current_teams(cur, league)
+        for t in teams:
+            name = t.get("teamName") or t.get("team_name") or ""
+            abbr = t.get("teamAbbr") or t.get("team_abbr") or ""
+            if q and q.lower() not in name.lower() and q.lower() not in abbr.lower():
+                continue
+            results.append({"playerId": None, "playerName": name, "team": abbr,
+                            "league": league, "note": abbr})
+        cur.close(); conn.close()
+        return jsonify({"players": results})
+
+    # ── Coach of the Year: this season's head coaches ──
+    if entity == "coach":
+        cur.execute("""
+            SELECT coach_id, coach_name, team_abbr FROM coaches
+            WHERE is_head AND league = 'nba'
+              AND season = (SELECT MAX(season) FROM coaches WHERE league = 'nba')
+              AND (%s = '' OR coach_name ILIKE %s)
+            ORDER BY coach_name LIMIT 40
+        """, (q, pattern))
+        for r in cur.fetchall():
+            results.append({"playerId": r["coach_id"], "playerName": r["coach_name"],
+                            "team": r.get("team_abbr"), "league": "nba", "note": None})
+        cur.close(); conn.close()
+        return jsonify({"players": results})
 
     # ── Rookie of the Year: the draft class, seeded by fetch_draft_class.py ──
     # An empty query lists the whole class in pick order, which is how people
@@ -8585,6 +8657,9 @@ def set_award_pick(list_id, award_code):
         cur.close(); conn.close()
         return jsonify({"error": "unknown award"}), 400
 
+    if _award_entity(league, award_code) == "team" and not (body.get("team") or "").strip():
+        cur.close(); conn.close()
+        return jsonify({"error": "a team pick needs a team abbreviation"}), 400
     if not _award_player_eligible(cur, league, lst.get("season"), award_code, body.get("playerId")):
         cur.close(); conn.close()
         # The picker only offers eligible players, but the endpoint is public and
@@ -8684,6 +8759,8 @@ def _list_cover_items(cur, list_id: int, list_type: str, is_ranked: bool, limit:
                           "playerName": r["player_name"], "league": r.get("league") or "nba",
                           "homeTeamAbbr": r.get("home_team_abbr"), "awayTeamAbbr": r.get("away_team_abbr")})
     elif list_type == "awards":
+        cur.execute("SELECT league FROM game_lists WHERE id = %s", (list_id,))
+        lg = (cur.fetchone() or {}).get("league") or "nba"
         cur.execute("""
             SELECT award_code, person_id, player_name, team FROM award_ballot_items
             WHERE list_id = %s
@@ -8692,9 +8769,13 @@ def _list_cover_items(cur, list_id: int, list_type: str, is_ranked: bool, limit:
                       key=lambda r: _AWARD_ORDER.index(r["award_code"])
                       if r["award_code"] in _AWARD_ORDER else len(_AWARD_ORDER))
         for r in rows[:limit]:
-            items.append({"kind": "player", "playerId": r.get("person_id"),
-                          "playerName": r["player_name"], "team": r.get("team"),
-                          "league": "nba"})
+            if _award_entity(lg, r["award_code"]) == "team":
+                items.append({"kind": "team", "team": r.get("team"),
+                              "teamName": r["player_name"], "league": lg})
+            else:
+                items.append({"kind": "player", "playerId": r.get("person_id"),
+                              "playerName": r["player_name"], "team": r.get("team"),
+                              "league": lg})
     return items
 
 

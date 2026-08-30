@@ -157,19 +157,21 @@ def render_ballot_card(league: str, season: str, creator: str, slots: list[dict]
     d.rectangle([PAD, y, PAD + 96, y + 5], fill=ORANGE)
     y += 30
 
-    # Remaining awards, two per row so five slots never run off the card. Rows
-    # are spread across whatever the hero left behind rather than stacked at a
-    # fixed pitch — a short pick name otherwise leaves the bottom third empty.
+    # Remaining awards. Two columns fit five slots; an eight-slot ballot needs
+    # three, or the rows run past the footer. Rows are spread across whatever
+    # the hero left behind rather than stacked at a fixed pitch — a short pick
+    # name otherwise leaves the bottom third of the card empty.
     rest = slots[1:]
-    col_w = (W - 2 * PAD) // 2
+    cols = 3 if len(rest) > 4 else 2
+    col_w = (W - 2 * PAD) // cols
     fa = _font(_MONO, 22)
     fn = _font(_SANS, 32)
     footer_y = H - PAD - 4
-    rows = (len(rest) + 1) // 2
-    step = max(76, (footer_y - 24 - y) // rows) if rows else 0
+    rows = (len(rest) + cols - 1) // cols
+    step = max(70, (footer_y - 24 - y) // rows) if rows else 0
     for i, s in enumerate(rest):
-        cx = PAD + (i % 2) * col_w
-        row_y = y + (i // 2) * step
+        cx = PAD + (i % cols) * col_w
+        row_y = y + (i // cols) * step
         d.text((cx, row_y), s.get("short", "").upper(), font=fa,
                fill=_verdict_fill(s.get("correct")))
         label = _wrap(d, s.get("name") or "No pick", fn, col_w - 20, 1)

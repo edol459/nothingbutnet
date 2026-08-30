@@ -32,6 +32,7 @@ AWARD_MAP = {
     "NBA Defensive Player of the Year":  "DPOY",
     "NBA Sixth Man of the Year":         "6MOY",
     "NBA Most Improved Player":          "MIP",
+    "NBA Clutch Player of the Year":     "CPOY",
     "NBA Finals Most Valuable Player":   "Finals MVP",
     "NBA All-Star":                      "All-Star",
 }
