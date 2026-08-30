@@ -8422,6 +8422,28 @@ def ballot_current():
             out["ballot"] = row["id"]
             out["filled"] = int(cur.fetchone()["n"])
             out["isLocked"] = _ballot_locked(row)
+
+            # Grading state drives the banner's second life: it goes quiet for
+            # the whole season, then comes back when there are results — and
+            # specifically when there is XP still to bank, since that's the only
+            # thing left for the user to *do*.
+            slots = _fetch_award_items(cur, row["id"], league, window["season"])
+            graded = [s for s in slots if s["correct"] is not None]
+            if graded:
+                correct = [s for s in slots if s["correct"] is True]
+                out["graded"] = True
+                out["score"]  = len(correct)
+                expected = {f"{row['id']}:{s['code']}" for s in correct}
+                if out["isLocked"] and slots and all(s["pick"] for s in slots):
+                    expected.add(str(row["id"]))
+                if expected:
+                    cur.execute("""SELECT reference_id FROM xp_events
+                                   WHERE user_id = %s
+                                     AND event_type IN ('ballot_lock', 'ballot_correct')
+                                     AND reference_id = ANY(%s)""",
+                                (user["id"], list(expected)))
+                    banked = {r["reference_id"] for r in cur.fetchall()}
+                    out["xpPending"] = bool(expected - banked)
     cur.close(); conn.close()
     return jsonify(out)
 
