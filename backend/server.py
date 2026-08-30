@@ -8323,6 +8323,127 @@ def _award_player_eligible(cur, league: str, season: str, code: str, person_id) 
     return cur.fetchone() is not None
 
 
+# Ball Knowledge for ballots. Every other XP source in the app pays for
+# attendance — opening it, viewing a game, playing the daily. A ballot is the
+# only mechanic that pays for being *right*, which is what the currency is
+# named after, so it pays more and it pays once a year.
+BALLOT_LOCK_XP    = 50    # a complete ballot, once it locks
+BALLOT_CORRECT_XP = 100   # per pick the league agreed with
+
+
+def _grant_ballot_xp(cur, lst: dict, slots: list) -> int:
+    """Award XP for a locked/graded ballot. Called on read rather than from a
+    scheduled sweep: results are entered by hand once a season, and grading the
+    moment the owner next opens their ballot means there is no job to maintain
+    and no way for the grant to fire before the answer key exists.
+
+    _grant_xp dedupes on (user, event_type, reference_id), so re-reading the
+    same ballot is free. Returns the XP granted by this call.
+    """
+    gained = 0
+    # Locking pays only for a ballot that was actually filled in — half a sheet
+    # isn't a prediction.
+    if _ballot_locked(lst) and slots and all(s["pick"] for s in slots):
+        if _grant_xp(cur, lst["user_id"], "ballot_lock", str(lst["id"]), BALLOT_LOCK_XP) != -1:
+            gained += BALLOT_LOCK_XP
+    for slot in slots:
+        if slot.get("correct") is True:
+            ref = f"{lst['id']}:{slot['code']}"
+            if _grant_xp(cur, lst["user_id"], "ballot_correct", ref, BALLOT_CORRECT_XP) != -1:
+                gained += BALLOT_CORRECT_XP
+    return gained
+
+
+def _open_or_create_ballot(cur, user_id: int, league: str):
+    """The one ballot a user gets for a league's current season, creating it on
+    first ask. Idempotent by design — with one ballot per season there is no
+    meaningful "create" action, only "take me to mine".
+
+    Returns (row, error). error is a (payload, status) tuple when the season
+    can't be predicted.
+    """
+    league = (league or "nba").lower()
+    if league not in _AWARD_TEMPLATES:
+        return None, ({"error": "unknown league"}, 400)
+
+    window = _award_window(cur, league)
+    if not window["season"]:
+        return None, ({"error": "the schedule for the next season hasn't been published yet",
+                       "isOpen": False}, 409)
+
+    cur.execute("""SELECT * FROM game_lists
+                   WHERE user_id = %s AND list_type = 'awards'
+                     AND league = %s AND season = %s""",
+                (user_id, league, window["season"]))
+    existing = cur.fetchone()
+    if existing:
+        return existing, None
+
+    if not window["isOpen"]:
+        return None, ({"error": "predictions for the %s season closed on %s"
+                                % (window["season"], window["locksAt"]),
+                       "isOpen": False}, 409)
+
+    cur.execute(_AWARD_TABLES); cur.connection.commit()
+    title = f"{league.upper()} Awards {window['season']}"
+    cur.execute("""
+        INSERT INTO game_lists (user_id, title, description, is_ranked, list_type,
+                                allow_copy, league, season, locked_at)
+        VALUES (%s, %s, NULL, FALSE, 'awards', FALSE, %s, %s, %s)
+        RETURNING *
+    """, (user_id, title, league, window["season"], window["locksAt"]))
+    return cur.fetchone(), None
+
+
+@app.route("/api/ballots/current")
+def ballot_current():
+    """State of the signed-in user's ballot for a league, plus the window. Backs
+    the seasonal entry point: whether to offer a ballot at all, and whether it
+    reads as "start" or "continue"."""
+    league = (request.args.get("league") or "nba").lower()
+    if league not in _AWARD_TEMPLATES:
+        return jsonify({"error": "unknown league"}), 400
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    window = _award_window(cur, league)
+    out = {"league": league, "season": window["season"],
+           "locksAt": window["locksAt"], "isOpen": window["isOpen"],
+           "ballot": None, "filled": 0, "slots": len(_AWARD_TEMPLATES[league])}
+    if user and window["season"]:
+        cur.execute("""SELECT id, locked_at FROM game_lists
+                       WHERE user_id = %s AND list_type = 'awards'
+                         AND league = %s AND season = %s""",
+                    (user["id"], league, window["season"]))
+        row = cur.fetchone()
+        if row:
+            cur.execute(_AWARD_TABLES); conn.commit()
+            cur.execute("SELECT COUNT(*) AS n FROM award_ballot_items WHERE list_id = %s",
+                        (row["id"],))
+            out["ballot"] = row["id"]
+            out["filled"] = int(cur.fetchone()["n"])
+            out["isLocked"] = _ballot_locked(row)
+    cur.close(); conn.close()
+    return jsonify(out)
+
+
+@app.route("/api/ballots", methods=["POST"])
+@login_required
+def open_ballot():
+    """Open the user's ballot for a league, creating it if this is the first ask."""
+    user = current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    conn = get_conn(); cur = conn.cursor()
+    row, err = _open_or_create_ballot(cur, user["id"], body.get("league") or "nba")
+    if err:
+        conn.rollback(); cur.close(); conn.close()
+        payload, status = err
+        return jsonify(payload), status
+    conn.commit()
+    cover = _list_cover_items(cur, row["id"], "awards", False)
+    cur.close(); conn.close()
+    return jsonify({"list": _format_list(row, 0, cover)}), 200
+
+
 @app.route("/api/awards/players/search")
 def search_award_players():
     """Players eligible for one award slot.
@@ -8674,29 +8795,19 @@ def create_list():
         list_type = "games"
     conn = get_conn(); cur = conn.cursor()
 
-    league = season = lock = None
     if list_type == "awards":
-        league = (body.get("league") or "nba").lower()
-        if league not in _AWARD_TEMPLATES:
-            cur.close(); conn.close()
-            return jsonify({"error": "unknown league"}), 400
-        window = _award_window(cur, league)
-        if not window["isOpen"]:
-            cur.close(); conn.close()
-            # Refusing here rather than creating a ballot that is already frozen:
-            # a "prediction" made after tipoff is just a note.
-            return jsonify({
-                "error": ("predictions for the %s season closed on %s" %
-                          (window["season"], window["locksAt"])) if window["season"]
-                         else "the schedule for the next season hasn't been published yet",
-                "isOpen": False,
-            }), 409
-        season, lock = window["season"], window["locksAt"]
-        # A ballot is a sheet, not a ranking, and copying someone's picks is
-        # cheating rather than curation.
-        is_ranked, allow_copy = False, False
-        cur.execute(_AWARD_TABLES); conn.commit()
+        # Ballots are singular per season, so "create" is really open-or-create.
+        # Routed through the shared helper so this legacy path can't mint a
+        # second ballot and farm the XP.
+        row, err = _open_or_create_ballot(cur, user["id"], body.get("league") or "nba")
+        if err:
+            conn.rollback(); cur.close(); conn.close()
+            payload, status = err
+            return jsonify(payload), status
+        conn.commit(); cur.close(); conn.close()
+        return jsonify({"list": _format_list(row, 0)}), 201
 
+    league = season = lock = None
     cur.execute("""
         INSERT INTO game_lists (user_id, title, description, is_ranked, list_type,
                                 allow_copy, league, season, locked_at)
@@ -8822,9 +8933,17 @@ def get_list_detail(list_id):
 
     # Fetch ballot slots (for awards lists)
     award_items = []
+    xp_gained = 0
     if list_type == "awards":
         cur.execute(_AWARD_TABLES); conn.commit()
         award_items = _fetch_award_items(cur, list_id, lst.get("league"), lst.get("season"))
+        # Grading happens on read rather than in a scheduled sweep — see
+        # _grant_ballot_xp. Owner only: a stranger opening your ballot must not
+        # move your total.
+        if viewer and viewer["id"] == lst["user_id"]:
+            xp_gained = _grant_ballot_xp(cur, lst, award_items)
+            if xp_gained:
+                conn.commit()
 
     # ── Social: likes + comment count ──
     cur.execute(_LIST_SOCIAL_TABLES); conn.commit()
@@ -8847,6 +8966,9 @@ def get_list_detail(list_id):
     result["teamItems"] = team_items
     result["performanceItems"] = performance_items
     result["awardItems"] = award_items
+    # Non-zero only on the read that actually banked it, so the client can show
+    # a "+400 Ball Knowledge" moment exactly once.
+    result["xpGained"] = xp_gained
     result["likeCount"] = like_count
     result["likedByMe"] = liked_by_me
     result["commentCount"] = comment_count
@@ -9076,10 +9198,28 @@ def list_og_image(list_id):
     lst, labels, total, creator = _fetch_public_list(list_id)
     if not lst:
         return "", 404
-    kicker = ("RANKED LIST" if lst.get("is_ranked") else "LIST")
-    noun = "ranked list" if lst.get("is_ranked") else "list"
-    subtitle = f"A {noun} by {creator}  ·  {total} item{'' if total == 1 else 's'}"
-    png = og_image.render_list_card(lst["title"], subtitle, labels, kicker)
+    if (lst.get("list_type") or "games") == "awards":
+        # A ballot's whole point is the set of picks, so its card shows them all
+        # rather than a title and a preview of "items".
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute(_AWARD_TABLES); conn.commit()
+        slots = _fetch_award_items(cur, list_id, lst.get("league"), lst.get("season"))
+        cur.close(); conn.close()
+        graded = [s for s in slots if s["correct"] is not None]
+        png = og_image.render_ballot_card(
+            league=(lst.get("league") or "nba"),
+            season=lst.get("season") or "",
+            creator=creator,
+            slots=[{"short": s["short"], "label": s["label"],
+                    "name": (s["pick"] or {}).get("playerName"),
+                    "team": (s["pick"] or {}).get("team"),
+                    "correct": s["correct"]} for s in slots],
+            score=(sum(1 for s in slots if s["correct"] is True), len(slots)) if graded else None)
+    else:
+        kicker = ("RANKED LIST" if lst.get("is_ranked") else "LIST")
+        noun = "ranked list" if lst.get("is_ranked") else "list"
+        subtitle = f"A {noun} by {creator}  ·  {total} item{'' if total == 1 else 's'}"
+        png = og_image.render_list_card(lst["title"], subtitle, labels, kicker)
     resp = Response(png, mimetype="image/png")
     resp.headers["Cache-Control"] = "public, max-age=300"
     return resp

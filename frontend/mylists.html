@@ -276,9 +276,21 @@ function renderBallotDetail(id, list){
     </div>`;
 
   $('#back').addEventListener('click',renderIndex);
-  $('#share').addEventListener('click',async()=>{const u=location.origin+'/list/'+id;
-    if(navigator.share){try{await navigator.share({title:list.title,url:u});return;}catch(_){}}
-    try{await navigator.clipboard.writeText(u);toast('Link copied');}catch(_){toast(u);}});
+  // Ballots share as a picture, not a link — same card the list page and the
+  // link preview use.
+  $('#share').addEventListener('click',async()=>{
+    const u=location.origin+'/list/'+id+'/og.png';
+    try{
+      const res=await fetch(u);
+      if(res.ok){
+        const file=new File([await res.blob()],'ydkball-ballot.png',{type:'image/png'});
+        if(navigator.canShare && navigator.canShare({files:[file]})){
+          await navigator.share({files:[file],title:list.title}); return;
+        }
+      }
+    }catch(_){}
+    window.open(u,'_blank');
+  });
   $('#del').addEventListener('click',async()=>{ if(!confirm('Delete this ballot?'))return;
     try{await api('/api/lists/'+id,{method:'DELETE'});renderIndex();}catch(e){toast(e.message);}});
 }

@@ -298,6 +298,28 @@ function titleHtml(title){
   return `${esc(words.join(' '))} <em>${esc(last)}</em>`;
 }
 
+// Ballots share as a picture, not a link. A link makes the recipient tap
+// through and sign in before they see anything; the card shows every pick in
+// the conversation itself. Same PNG the link preview uses, so there's one
+// artwork to maintain.
+async function shareBallotImage(title){
+  const url=`${location.origin}/list/${listId}/og.png`;
+  try{
+    const res=await fetch(url);
+    if(res.ok){
+      const blob=await res.blob();
+      const file=new File([blob],'ydkball-ballot.png',{type:'image/png'});
+      if(navigator.canShare && navigator.canShare({files:[file]})){
+        await navigator.share({files:[file], title});
+        return;
+      }
+    }
+  }catch(_){}
+  // No file-share support (most desktop browsers): open the card so it can be
+  // saved or dragged out.
+  window.open(url,'_blank');
+}
+
 async function share(title){
   const u=location.href;
   if(navigator.share){try{await navigator.share({title,url:u});return;}catch(_){}}
@@ -352,7 +374,7 @@ async function load(){
       ${list.description?`<p class="desc">${esc(list.description)}</p>`:''}
       <div class="actions">
         <button class="btn" id="likeBtn"><span id="likeIcon" style="color:${list.likedByMe?'#e0245e':'inherit'};font-size:16px;line-height:1;">${list.likedByMe?'♥':'♡'}</span> <span id="likeCount">${list.likeCount||0}</span></button>
-        <button class="btn primary" id="shareBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>Share</button>
+        <button class="btn primary" id="shareBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>${type==='awards'?'Share image':'Share'}</button>
         ${IS_IOS?`<a class="btn appbtn" href="${APP_STORE_URL}">${APPLE_MARK} Open in app</a>`
                 :`<a class="btn" href="/">Explore ydkball</a>`}
       </div>
@@ -371,7 +393,8 @@ async function load(){
         <p>Rank the players, games, teams and jerseys you'd defend to the grave — and share the card.</p>
         <a class="btn primary" href="/mylists" style="justify-content:center">Make your list — it's free</a>
       </div>`}`;
-    document.getElementById('shareBtn').addEventListener('click',()=>share(list.title));
+    document.getElementById('shareBtn').addEventListener('click',
+      ()=> type==='awards' ? shareBallotImage(list.title) : share(list.title));
     wireLike(list);
     renderCommentBox(myId);
     loadComments(myId, list.userId);

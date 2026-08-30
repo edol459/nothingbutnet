@@ -107,3 +107,89 @@ def render_list_card(title: str, subtitle: str, items: list[str], kicker: str = 
     buf = BytesIO()
     img.save(buf, "PNG")
     return buf.getvalue()
+
+
+# Verdict colours, only used once a ballot has been graded.
+GREEN = (46, 125, 79)
+RED   = (192, 57, 43)
+
+
+def render_ballot_card(league: str, season: str, creator: str, slots: list[dict],
+                       score: tuple | None = None) -> bytes:
+    """An awards ballot as one image — every pick visible without scrolling.
+
+    Typographic on purpose: headshots would mean fetching player art from the
+    NBA CDN at request time, which is the exact call Akamai blocks from Railway
+    (see docs/cdn-akamai-bot-manager.md). The award/name pairing carries the
+    card on its own, and this keeps the endpoint dependency-free and fast.
+
+    `slots` is [{short, label, name, team, correct}] in ballot order; `score` is
+    (right, total) once results are in.
+    """
+    img = Image.new("RGB", (W, H), PAPER)
+    d = ImageDraw.Draw(img)
+    d.rectangle([16, 16, W - 16, H - 16], outline=RULE, width=2)
+
+    kicker = f"{league.upper()} AWARDS" + (f"  ·  {season}" if season else "")
+    d.text((PAD, PAD), kicker, font=_font(_MONO, 26), fill=ORANGE)
+    fw = _font(_SERIF, 36)
+    d.text((W - PAD - d.textlength("ydkball", font=fw), PAD - 8), "ydkball",
+           font=fw, fill=INK)
+
+    y = PAD + 66
+
+    # The headline award gets the display size; the rest are set as a list, so
+    # the hierarchy survives the drop from an interactive sheet to a flat image.
+    if slots:
+        hero = slots[0]
+        d.text((PAD, y), hero.get("label", "").upper(), font=_font(_MONO, 22),
+               fill=_verdict_fill(hero.get("correct")))
+        y += 34
+        fh = _font(_SERIF, 72)
+        name = hero.get("name") or "No pick"
+        line = _wrap(d, name, fh, W - 2 * PAD, 1)
+        d.text((PAD, y), line[0] if line else name, font=fh, fill=INK)
+        y += 84
+        if hero.get("team"):
+            d.text((PAD, y), hero["team"].upper(), font=_font(_MONO, 24), fill=INK3)
+            y += 34
+
+    d.rectangle([PAD, y, PAD + 96, y + 5], fill=ORANGE)
+    y += 30
+
+    # Remaining awards, two per row so five slots never run off the card. Rows
+    # are spread across whatever the hero left behind rather than stacked at a
+    # fixed pitch — a short pick name otherwise leaves the bottom third empty.
+    rest = slots[1:]
+    col_w = (W - 2 * PAD) // 2
+    fa = _font(_MONO, 22)
+    fn = _font(_SANS, 32)
+    footer_y = H - PAD - 4
+    rows = (len(rest) + 1) // 2
+    step = max(76, (footer_y - 24 - y) // rows) if rows else 0
+    for i, s in enumerate(rest):
+        cx = PAD + (i % 2) * col_w
+        row_y = y + (i // 2) * step
+        d.text((cx, row_y), s.get("short", "").upper(), font=fa,
+               fill=_verdict_fill(s.get("correct")))
+        label = _wrap(d, s.get("name") or "No pick", fn, col_w - 20, 1)
+        d.text((cx, row_y + 28), label[0] if label else "No pick", font=fn, fill=INK)
+
+    d.text((PAD, footer_y), f"by {creator}  ·  ydkball.net", font=_font(_MONO, 24), fill=INK3)
+    if score:
+        right, total = score
+        tag = f"{right}/{total} CALLED RIGHT"
+        ft = _font(_MONO, 26)
+        d.text((W - PAD - d.textlength(tag, font=ft), footer_y), tag, font=ft, fill=ORANGE)
+
+    buf = BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _verdict_fill(correct):
+    if correct is True:
+        return GREEN
+    if correct is False:
+        return RED
+    return ORANGE
