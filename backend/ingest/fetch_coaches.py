@@ -24,8 +24,11 @@ import time
 from dotenv import load_dotenv
 import psycopg2
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from nba_api.stats.endpoints import commonteamroster
 from nba_api.stats.static import teams as static_teams
+import season_util
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -48,16 +51,19 @@ def fetch_team(team_id, season, tries=3):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--season", required=True, help="e.g. 2026-27")
+    ap.add_argument("--season", default=None,
+                    help="e.g. 2026-27; defaults to the upcoming season")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+    # Membership, not stats — same rule as rosters.
+    season = args.season or season_util.roster_season()
 
     nba_teams = static_teams.get_teams()
-    print(f"Fetching head coaches for {args.season} across {len(nba_teams)} teams…")
+    print(f"Fetching head coaches for {season} across {len(nba_teams)} teams…")
 
     found = []
     for t in nba_teams:
-        df = fetch_team(t["id"], args.season)
+        df = fetch_team(t["id"], season)
         if df is None or df.empty:
             continue
         # COACH_TYPE distinguishes the head coach from assistants and trainers;
@@ -90,9 +96,9 @@ def main():
                         team_abbr  = EXCLUDED.team_abbr,
                         is_head    = TRUE,
                         updated_at = NOW()
-            """, (cid, args.season, name, abbr))
+            """, (cid, season, name, abbr))
     conn.commit(); conn.close()
-    print(f"Wrote {len(found)} coaches for {args.season}.")
+    print(f"Wrote {len(found)} coaches for {season}.")
 
 
 if __name__ == "__main__":

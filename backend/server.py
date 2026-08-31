@@ -8357,9 +8357,10 @@ def _award_player_eligible(cur, league: str, season: str, code: str, person_id) 
                          AND season = (SELECT MAX(season) FROM wnba_player_seasons)""",
                     (person_id,))
         return cur.fetchone() is not None
-    cur.execute("""SELECT 1 FROM team_rosters
-                   WHERE player_id::int = %s
-                     AND season = (SELECT MAX(season) FROM team_rosters)""",
+    # players.current_team is the roster feed for the upcoming season, so this
+    # tracks offseason trades and signings; team_rosters only moves when the
+    # stats pipeline refetches a season that has actually been played.
+    cur.execute("SELECT 1 FROM players WHERE player_id = %s AND current_team IS NOT NULL",
                 (person_id,))
     return cur.fetchone() is not None
 
@@ -8570,7 +8571,7 @@ def search_award_players():
         draft_year = _award_draft_year(season)
         if draft_year:
             cur.execute("""
-                SELECT player_id, player_name, draft_number
+                SELECT player_id, player_name, draft_number, current_team
                 FROM players
                 WHERE draft_year = %s
                   AND (%s = '' OR player_name ILIKE %s)
@@ -8582,7 +8583,9 @@ def search_award_players():
                 results.append({
                     "playerId":   r["player_id"],
                     "playerName": r["player_name"],
-                    "team":       None,
+                    # Draftees get a team from the roster feed well before they
+                    # play, so prefer it and fall back to the pick number.
+                    "team":       r.get("current_team"),
                     "league":     "nba",
                     "note":       f"#{pick} pick" if pick else "Rookie",
                 })
@@ -8610,17 +8613,15 @@ def search_award_players():
                             "team": r.get("team"), "league": "wnba", "note": None})
     else:
         cur.execute("""
-            SELECT DISTINCT ON (tr.player_id)
-                   tr.player_id::int AS player_id, tr.player_name, tr.team_abbr
-            FROM team_rosters tr
-            WHERE tr.season = (SELECT MAX(season) FROM team_rosters)
-              AND tr.player_name ILIKE %s
-            ORDER BY tr.player_id, tr.team_abbr
+            SELECT player_id, player_name, current_team
+            FROM players
+            WHERE current_team IS NOT NULL AND player_name ILIKE %s
+            ORDER BY player_name
             LIMIT 25
         """, (pattern,))
         for r in cur.fetchall():
             results.append({"playerId": r["player_id"], "playerName": r["player_name"],
-                            "team": r.get("team_abbr"), "league": "nba", "note": None})
+                            "team": r.get("current_team"), "league": "nba", "note": None})
 
     cur.close(); conn.close()
     return jsonify({"players": results})
@@ -9350,12 +9351,15 @@ def update_list(list_id):
     is_public = body.get("isPublic", True)
     is_ranked = body.get("isRanked")   # None means don't change
     allow_copy = body.get("allowCopy")  # None means don't change
-    # A ballot is never ranked and never copyable. Enforced here as well as at
-    # creation because the generic edit sheet posts both flags back, and an old
-    # client would otherwise quietly re-open a ballot to copying.
+    # A ballot is never ranked, never copyable, and never renamed — its title is
+    # derived from its league and season, and two ballots called different things
+    # for the same season would make the feed unreadable. Enforced here as well
+    # as in the client because the generic edit sheet posts every field back, and
+    # an old client would otherwise quietly re-open a ballot to copying.
     cur.execute("SELECT list_type FROM game_lists WHERE id = %s", (list_id,))
     if (cur.fetchone() or {}).get("list_type") == "awards":
         is_ranked, allow_copy = False, False
+        title = ""          # NULLIF below leaves the existing title untouched
     cur.execute("""
         UPDATE game_lists
         SET title = COALESCE(NULLIF(%s,''), title),
@@ -9534,6 +9538,8 @@ def search_list_players():
         out = []
         try:
             if list_type == "player_seasons":
+                # A player-season row is historical by definition, so it keeps
+                # the team he played for that year.
                 cur.execute("""
                     SELECT p.player_id, p.player_name, ps.team_abbr AS team, ps.season
                     FROM players p
@@ -9542,9 +9548,11 @@ def search_list_players():
                     ORDER BY p.player_name, ps.season DESC LIMIT 30
                 """, (pattern,))
             else:
+                # "Who is this player now" — current_team when we have it, the
+                # newest stats row when we don't (retired and historical players).
                 cur.execute("""
                     SELECT DISTINCT ON (p.player_id) p.player_id, p.player_name,
-                           ps.team_abbr AS team, ps.season
+                           COALESCE(p.current_team, ps.team_abbr) AS team, ps.season
                     FROM players p
                     JOIN player_seasons ps ON p.player_id = ps.player_id
                     WHERE p.player_name ILIKE %s
@@ -14601,17 +14609,24 @@ def browse_players():
             cur.execute("SELECT MAX(season) FROM player_seasons WHERE season_type = 'Regular Season'")
             latest = (cur.fetchone() or {}).get("max") or "2024-25"
             if not season: season = latest
+            # Browsing the newest season means "who's on what team now", so it
+            # uses the roster feed and picks up offseason trades. Browsing an
+            # older season is a historical question and keeps that season's team
+            # — both for the label and, importantly, for the team filter.
+            team_expr = ("COALESCE(p.current_team, ps.team_abbr)"
+                         if season == latest else "ps.team_abbr")
             conds  = ["ps.season = %s", "ps.season_type = 'Regular Season'"]
             params = [season]
             if q:        conds.append("p.player_name ILIKE %s");  params.append(f"%{q}%")
-            if team:     conds.append("ps.team_abbr ILIKE %s");   params.append(team)
+            if team:     conds.append(f"{team_expr} ILIKE %s");   params.append(team)
             if position: conds.append("p.position ILIKE %s");     params.append(f"{position}%")
             inner_where = " AND ".join(conds)
             cur.execute(f"""
                 SELECT * FROM (
                     SELECT DISTINCT ON (p.player_id)
                            p.player_id AS person_id, p.player_name, p.position,
-                           ps.team_abbr, ps.pts, ps.reb, ps.ast, ps.stl, ps.blk, ps.gp
+                           {team_expr} AS team_abbr,
+                           ps.pts, ps.reb, ps.ast, ps.stl, ps.blk, ps.gp
                     FROM players p
                     JOIN player_seasons ps ON p.player_id = ps.player_id
                     WHERE {inner_where}
@@ -14747,7 +14762,12 @@ def get_player_profile(person_id):
                 ) s ORDER BY season DESC
             """, (person_id, person_id))
             unique_seasons = [r["season"] for r in cur.fetchall()]
-            # Get team_abbr from the most recent entry (prefer player_seasons, fall back to gamelogs)
+            # The header answers "who does he play for now", so it prefers the
+            # roster feed: the newest player_seasons row is last season's team
+            # all summer, which is how a July trade stayed invisible until
+            # October. Per-season rows below keep their own historical team.
+            cur.execute("SELECT current_team FROM players WHERE player_id = %s", (person_id,))
+            current_team = (cur.fetchone() or {}).get("current_team")
             cur.execute("""
                 SELECT team_abbr FROM player_seasons WHERE player_id = %s
                 ORDER BY season DESC LIMIT 1
@@ -14761,6 +14781,7 @@ def get_player_profile(person_id):
                 ta_row = cur.fetchone()
             team_abbr = ta_row["team_abbr"] if ta_row else None
 
+        current_team = locals().get("current_team")   # WNBA has no roster feed
         wnba_default = _get_wnba_season()
         fallback_season = wnba_default if is_wnba else get_current_season()
         active_season = season if season in unique_seasons else (unique_seasons[0] if unique_seasons else fallback_season)
@@ -14893,6 +14914,12 @@ def get_player_profile(person_id):
             else:
                 avgs_out = None
 
+        # The header answers "who does he play for now", so the roster feed wins
+        # — but only while the viewer is on the newest season. Ask for 2019-20
+        # explicitly and the header follows you there, matching Browse Players.
+        newest_season = unique_seasons[0] if unique_seasons else None
+        if current_team and (not season or season == newest_season):
+            team_abbr = current_team
         player_info["teamAbbr"] = team_abbr
 
         # ── All-time community rating ──────────────────────────────

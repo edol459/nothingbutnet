@@ -69,6 +69,8 @@ def run(script, label, extra_args=None):
 
 def main():
     season, season_type = get_current_season()
+    # Stats resolve from played games; membership resolves from the schedule.
+    roster_season = season_util.roster_season()
 
     print(f"\n{'='*60}")
     print(f"YDKBALL — Local Daily Update")
@@ -116,11 +118,20 @@ def main():
             'Per-game logs (Trends)',
             season_args,
         ),
-        # ── Rosters (nba_api, requires residential IP) ────────
+        # ── Rosters + team membership (nba_api, residential IP) ────
+        # These take roster_season(), not season: the league publishes next
+        # season's rosters months before tipoff, so pinning them to the stats
+        # season refetches last season's roster all summer and every offseason
+        # trade stays invisible until games are played.
         (
             os.path.join(base_backend, 'fetch_roster.py'),
             'Roster data (WoWY)',
-            ['--season', season],
+            ['--season', roster_season],
+        ),
+        (
+            'sync_player_teams.py',
+            'Player team assignments (current_team)',
+            [],
         ),
         # ── WoWY lineups (pbpstats, leverage-filtered) ────────
         (
