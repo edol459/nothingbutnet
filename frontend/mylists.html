@@ -5,7 +5,7 @@
 <script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex">
-<title>My Lists — ydkball</title>
+<title>My Lists &amp; Ballots — ydkball</title>
 <link rel="icon" type="image/png" href="/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -182,8 +182,8 @@ async function boot(){
 async function renderIndex(){
   const root=$('#root');
   root.innerHTML=`
-    <h1>My Lists</h1>
-    <p class="sub" style="margin-bottom:22px">Rank games, players, teams, seasons & jerseys — then share the card.</p>
+    <h1>My Lists &amp; Ballots</h1>
+    <p class="sub" style="margin-bottom:22px">Rank games, players, teams, seasons &amp; jerseys — then share the card. Award ballots are made in the app.</p>
     <div class="card" style="margin-bottom:30px">
       <div class="eyebrow">Create a list</div>
       <input id="nl-title" class="b-title" placeholder="Name your list…" maxlength="100">
@@ -196,7 +196,7 @@ async function renderIndex(){
       </div>
       <button class="btn primary" id="nl-create">Create list</button>
     </div>
-    <div class="section-label">Your lists</div>
+    <div class="section-label">Your lists &amp; ballots</div>
     <div id="mylists"><div class="state">Loading…</div></div>`;
   $('#nl-types').querySelectorAll('[data-t]').forEach(b=>b.addEventListener('click',()=>{
     NEW.type=b.dataset.t; $('#nl-types').querySelectorAll('.pill').forEach(x=>x.classList.toggle('active',x.dataset.t===NEW.type));
@@ -261,7 +261,7 @@ function renderBallotDetail(id, list){
   }).join('');
 
   root.innerHTML=`
-    <a class="btn sm" id="back" style="margin-bottom:16px">← My Lists</a>
+    <a class="btn sm" id="back" style="margin-bottom:16px">← My Lists &amp; Ballots</a>
     <div class="card">
       <div class="eyebrow">Awards Ballot${list.season?' · '+esc(list.season):''} · <span style="color:var(--ink4)">${list.isPublic?'public':'private'}</span></div>
       <div style="font-family:var(--ff-serif);font-size:30px;letter-spacing:-.015em;line-height:1.1;margin-bottom:16px">${esc(list.title)}</div>
@@ -306,7 +306,7 @@ async function renderDetail(id){
   const items=cfg.items(list);
 
   root.innerHTML=`
-    <a class="btn sm" id="back" style="margin-bottom:16px">← My Lists</a>
+    <a class="btn sm" id="back" style="margin-bottom:16px">← My Lists &amp; Ballots</a>
     <div class="card">
       <div class="eyebrow">${TYPE_LABELS[type]||type}${list.isRanked?' · ranked':''} · <span style="color:var(--ink4)">${list.isPublic?'public':'private'}</span></div>
       <div style="font-family:var(--ff-serif);font-size:30px;letter-spacing:-.015em;line-height:1.1;margin-bottom:16px">${esc(list.title)}</div>
