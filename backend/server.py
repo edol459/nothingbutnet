@@ -14609,23 +14609,27 @@ def browse_players():
             cur.execute("SELECT MAX(season) FROM player_seasons WHERE season_type = 'Regular Season'")
             latest = (cur.fetchone() or {}).get("max") or "2024-25"
             if not season: season = latest
-            # Browsing the newest season means "who's on what team now", so it
-            # uses the roster feed and picks up offseason trades. Browsing an
-            # older season is a historical question and keeps that season's team
-            # — both for the label and, importantly, for the team filter.
-            team_expr = ("COALESCE(p.current_team, ps.team_abbr)"
-                         if season == latest else "ps.team_abbr")
+            # `team_abbr` stays the team the stats were earned with — the newest
+            # season with stats is still a *finished* season all summer, so
+            # swapping in a current team would claim LeBron's 2025-26 Lakers
+            # averages were put up in Philadelphia.
+            #
+            # `current_team` rides alongside instead, so a row can show both:
+            # who he played for then, and who he plays for now. The filter stays
+            # on the season's team, because filtering a season-scoped stats table
+            # by today's roster would return players who never suited up for it.
             conds  = ["ps.season = %s", "ps.season_type = 'Regular Season'"]
             params = [season]
             if q:        conds.append("p.player_name ILIKE %s");  params.append(f"%{q}%")
-            if team:     conds.append(f"{team_expr} ILIKE %s");   params.append(team)
+            if team:     conds.append("ps.team_abbr ILIKE %s");   params.append(team)
             if position: conds.append("p.position ILIKE %s");     params.append(f"{position}%")
             inner_where = " AND ".join(conds)
             cur.execute(f"""
                 SELECT * FROM (
                     SELECT DISTINCT ON (p.player_id)
                            p.player_id AS person_id, p.player_name, p.position,
-                           {team_expr} AS team_abbr,
+                           ps.team_abbr,
+                           NULLIF(p.current_team, ps.team_abbr) AS current_team,
                            ps.pts, ps.reb, ps.ast, ps.stl, ps.blk, ps.gp
                     FROM players p
                     JOIN player_seasons ps ON p.player_id = ps.player_id
@@ -14644,6 +14648,9 @@ def browse_players():
                 "player_name": r["player_name"],
                 "position":    r.get("position"),
                 "team_abbr":   r.get("team_abbr"),
+                # Present only when the player has since moved, so the client can
+                # show "then -> now" without having to compare anything itself.
+                "current_team": r.get("current_team"),
                 "pts": _f(r.get("pts")), "reb": _f(r.get("reb")), "ast": _f(r.get("ast")),
                 "stl": _f(r.get("stl")), "blk": _f(r.get("blk")),
                 "gp":  int(r["gp"]) if r.get("gp") is not None else None,
