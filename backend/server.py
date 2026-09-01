@@ -4646,6 +4646,8 @@ def _format_review(r: dict) -> dict:
         # Only present on the ?logs=1 branch, which returns whole game logs rather than
         # bare reviews. Absent (not 0) otherwise so old clients see no change at all.
         **({"grade_count": int(r["grade_count"])} if r.get("grade_count") is not None else {}),
+        # Who this user gave Player of the Game to, when they made a pick.
+        **({"potg_name": r["potg_name"]} if r.get("potg_name") else {}),
     }
 
 
@@ -7344,6 +7346,7 @@ _DIARY_GROUPED_SQL = """
             COALESCE(gr.tags, '[]'::jsonb)   AS tags,
             COALESCE(gr.attended, FALSE)     AS attended,
             COALESCE(pl.grade_count, 0)      AS grade_count,
+            pg.player_name                   AS potg_name,
             GREATEST(COALESCE(gr.updated_at, gr.created_at, pl.last_at),
                      COALESCE(pl.last_at, gr.created_at)) AS activity_at
         FROM (SELECT * FROM game_reviews WHERE user_id = %(uid)s) gr
@@ -7352,6 +7355,11 @@ _DIARY_GROUPED_SQL = """
             FROM performance_reviews WHERE user_id = %(uid)s
             GROUP BY user_id, game_id
         ) pl ON pl.user_id = gr.user_id AND pl.game_id = gr.game_id
+        -- The diary shows who you gave Player of the Game to. LEFT JOIN because a
+        -- log without a pick is still a log.
+        LEFT JOIN potg_picks pg
+               ON pg.user_id = COALESCE(gr.user_id, pl.user_id)
+              AND pg.game_id = COALESCE(gr.game_id, pl.game_id)
     ),
     combined AS (
         SELECT
@@ -7364,7 +7372,7 @@ _DIARY_GROUPED_SQL = """
             l.rating,
             round(l.rating / 2.0, 1)  AS stars,
             l.review_text, l.tags, l.attended,
-            l.grade_count,
+            l.grade_count, l.potg_name,
             l.activity_at             AS created_at,
             u.display_name, u.avatar_url, u.favorite_team,
             u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
@@ -7398,7 +7406,8 @@ def _diary_grouped(user_id, viewer_id, limit, offset, sort, _filter, team):
         params["viewer"] = viewer_id
     # 'games'/'performances' select what a log CONTAINS, not what type a row is.
     if _filter == "games":          where.append("rating IS NOT NULL")
-    elif _filter == "performances": where.append("grade_count > 0")
+    # 'performances' kept as an alias so an older client's saved filter still works.
+    elif _filter in ("potg", "performances"): where.append("potg_name IS NOT NULL")
     elif _filter == "attended":     where.append("attended = TRUE")
     if team:
         where.append("(home_team_abbr = %(team)s OR away_team_abbr = %(team)s)")
@@ -7630,6 +7639,9 @@ def _format_feed_rows(rows) -> list:
             # Grouped feed only: how many players this log graded, so the entry can read
             # "13 players graded" instead of emitting 13 separate rows.
             "grade_count":        d.get("grade_count"),
+            # Who they gave Player of the Game to. The diary shows the name rather
+            # than a count — with one pick per game a count says nothing.
+            "potg_name":          d.get("potg_name"),
         })
     return items
 
@@ -7657,18 +7669,20 @@ def get_user_insights(user_id):
         r = cur.fetchone()
         out["most_watched_team"] = ({"abbr": r["team"], "league": r["league"] or "nba", "count": int(r["n"])} if r else None)
 
-        # Most-rated player, with your average rating for them.
+        # The player you hand Player of the Game to most. Was "most-graded" off
+        # performance_reviews; avg_stars is kept in the payload as 0 so the client
+        # contract doesn't change shape, but it no longer means anything here.
         cur.execute("""
-            SELECT pr.person_id, MAX(pr.player_name) AS name, COUNT(*) AS n,
-                   round(AVG(pr.rating) / 2.0, 1) AS avg_stars, MAX(g.league) AS league
-            FROM performance_reviews pr LEFT JOIN games g ON g.game_id = pr.game_id
-            WHERE pr.user_id = %s
-            GROUP BY pr.person_id ORDER BY n DESC, avg_stars DESC LIMIT 1
+            SELECT p.person_id, MAX(p.player_name) AS name, COUNT(*) AS n,
+                   MAX(g.league) AS league
+            FROM potg_picks p LEFT JOIN games g ON g.game_id = p.game_id
+            WHERE p.user_id = %s
+            GROUP BY p.person_id ORDER BY n DESC, MAX(p.player_name) LIMIT 1
         """, (user_id,))
         r = cur.fetchone()
         out["top_player"] = ({"person_id": r["person_id"], "name": r["name"] or "",
                               "league": r["league"] or "nba", "count": int(r["n"]),
-                              "avg_stars": float(r["avg_stars"] or 0)} if r else None)
+                              "avg_stars": 0.0} if r else None)
 
         # Lifetime totals — games + performances you've logged (all-time). A
         # per-season "vs last" delta is ambiguous with two leagues (NBA seasons
