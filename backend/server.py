@@ -10708,7 +10708,8 @@ def _sync_favorite_team(cur, user_id: int) -> str:
     return value or ""
 
 
-def _set_allegiance(cur, user_id: int, league: str | None, abbr: str | None) -> bool:
+def _set_allegiance(cur, user_id: int, league: str | None, abbr: str | None,
+                    restart: bool = False) -> bool:
     """Close whatever allegiance is open and start the new one. Returns whether
     anything actually changed.
 
@@ -10717,17 +10718,31 @@ def _set_allegiance(cur, user_id: int, league: str | None, abbr: str | None) -> 
     partial unique index on (user_id) enforces that, so a double-write can't
     leave two live allegiances behind.
 
-    Re-picking the same team is a no-op. Onboarding shows the existing choice
-    pre-selected, so confirming your team must never reset the streak the screen
-    exists to display.
+    Re-picking the same team is normally a no-op, so re-confirming your team from
+    the profile never resets the streak.
+
+    `restart` overrides that, and onboarding is the only caller that passes it.
+    The streak should date from the moment someone deliberately chose the team,
+    not from the migration that backfilled it — every existing row currently
+    starts on the same arbitrary afternoon, which is not a loyalty streak, it's a
+    deploy timestamp.
     """
     cur.execute("""
         SELECT id, league, team_abbr FROM team_allegiance
         WHERE user_id = %s AND ended_at IS NULL
     """, (user_id,))
     row = cur.fetchone()
-    if row and row["team_abbr"] == abbr and row["league"] == league:
+    same = row and row["team_abbr"] == abbr and row["league"] == league
+    if same and not restart:
         return False
+    if same and restart:
+        # Move the clock on the existing row rather than closing it and opening
+        # an identical one. Close-and-reopen would leave a closed IND row behind
+        # a current IND row, which reads as "left the team and came back" in the
+        # switch history — a fake switch invented by a timestamp change.
+        cur.execute("UPDATE team_allegiance SET started_at = NOW() WHERE id = %s",
+                    (row["id"],))
+        return True
     if row:
         cur.execute("UPDATE team_allegiance SET ended_at = NOW() WHERE id = %s", (row["id"],))
     if abbr and league:
@@ -10793,9 +10808,12 @@ def set_allegiance():
     if abbr and not _valid_team_abbr(league, abbr):
         return jsonify({"error": f"Unknown {league.upper()} team '{abbr}'"}), 400
 
+    # Onboarding sends restart=true so the streak dates from the pick itself.
+    restart = bool(body.get("restart"))
+
     conn = get_conn(); cur = conn.cursor()
     try:
-        changed = _set_allegiance(cur, user["id"], league, abbr)
+        changed = _set_allegiance(cur, user["id"], league, abbr, restart=restart)
         stored  = _sync_favorite_team(cur, user["id"])
         conn.commit()
 
@@ -11744,6 +11762,24 @@ def get_user_profile(user_id):
             """, (viewer["id"], user_id))
             is_blocked = cur.fetchone() is not None
 
+        # Allegiance is public on purpose: the streak only means anything if
+        # other people can see how long you've held the team.
+        cur.execute("""
+            SELECT league, team_abbr, started_at,
+                   EXTRACT(DAY FROM NOW() - started_at)::int AS days_held
+            FROM team_allegiance
+            WHERE user_id = %s AND ended_at IS NULL
+        """, (user_id,))
+        alg = cur.fetchone()
+        allegiance = None
+        if alg:
+            allegiance = {
+                "league":     alg["league"],
+                "team_abbr":  alg["team_abbr"],
+                "started_at": alg["started_at"].isoformat(),
+                "days_held":  int(alg["days_held"] or 0),
+            }
+
         cur.close(); conn.close()
 
         xp = int(user["xp"] or 0)
@@ -11757,6 +11793,7 @@ def get_user_profile(user_id):
                 "member_since":     str(user["created_at"]),
                 "is_pro":           bool(user["is_pro"]),
             },
+            "allegiance":      allegiance,
             "stats": {
                 "total_reviews":   int(stats["total_reviews"] or 0),
                 "games_watched":   games_watched,
