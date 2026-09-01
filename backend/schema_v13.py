@@ -83,6 +83,22 @@ UPDATE potg_picks p SET player_name = COALESCE(
  WHERE p.player_name = 'Unknown'
 """
 
+# team_abbr was simply omitted from the original backfill — performance_reviews never
+# carried one. Recovered per league: the WNBA box score stores the team directly; NBA
+# gamelogs don't, so resolve through player_seasons, CONSTRAINED to a team actually
+# playing in that game. Without that constraint a player traded mid-season resolves to
+# whichever row came back first, which could be a team that wasn't on the floor.
+REPAIR_TEAMS = """
+UPDATE potg_picks p SET team_abbr = COALESCE(
+        (SELECT w.team FROM wnba_player_game_stats w
+          WHERE w.game_id = p.game_id AND w.player_id = p.person_id LIMIT 1),
+        (SELECT s.team_abbr FROM player_seasons s
+           JOIN games g ON g.game_id = p.game_id
+          WHERE s.player_id = p.person_id AND s.season = g.season
+            AND s.team_abbr IN (g.home_team_abbr, g.away_team_abbr) LIMIT 1))
+ WHERE p.team_abbr IS NULL
+"""
+
 
 def run():
     print("Connecting to database...")
@@ -109,13 +125,18 @@ def run():
         if cur.rowcount:
             print(f"  recovered {cur.rowcount} missing player name(s)")
 
-        cur.execute("SELECT COUNT(*), COUNT(DISTINCT user_id) FROM potg_picks")
-        rows, users = cur.fetchone()
+        cur.execute(REPAIR_TEAMS)
+        if cur.rowcount:
+            print(f"  recovered {cur.rowcount} missing team abbr(s)")
+
+        cur.execute("SELECT COUNT(*), COUNT(DISTINCT user_id), COUNT(team_abbr) FROM potg_picks")
+        rows, users, with_team = cur.fetchone()
         cur.execute("SELECT COUNT(*) FROM performance_reviews")
         after = cur.fetchone()[0]
 
         print(f"\npotg_picks: {rows} pick(s) across {users} user(s)"
               f"  (expected up to {expected} from grades)")
+        print(f"  with a team abbr: {with_team}/{rows}")
         print(f"performance_reviews: {before} -> {after} "
               f"{'✅ untouched' if before == after else '❌ CHANGED'}")
         cur.close(); conn.close()
