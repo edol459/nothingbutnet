@@ -10687,6 +10687,23 @@ def _valid_team_abbr(league: str, abbr: str) -> bool:
     return abbr in _NBA_ABBRS
 
 
+def _team_display_name(cur, league: str, abbr: str) -> str | None:
+    """Franchise name for a team, newest season first.
+
+    Read from team_seasons rather than a hardcoded map so it inherits the name
+    repair that fixed the WNBA rows — and so a new franchise needs no client
+    release. Rows whose name is just the abbreviation are skipped; those are the
+    placeholder writes that caused the stale-record bug.
+    """
+    cur.execute("""
+        SELECT team_name FROM team_seasons
+        WHERE league = %s AND team_abbr = %s AND team_name <> team_abbr
+        ORDER BY season DESC LIMIT 1
+    """, (league, abbr))
+    row = cur.fetchone()
+    return row["team_name"] if row else None
+
+
 def _sync_favorite_team(cur, user_id: int) -> str:
     """Mirror the open allegiance into users.favorite_team.
 
@@ -10771,9 +10788,11 @@ def get_allegiance():
             WHERE user_id = %s AND ended_at IS NULL
             ORDER BY league
         """, (user["id"],))
+        rows = cur.fetchall()
         current = [{"league": r["league"], "team_abbr": r["team_abbr"],
+                    "team_name": _team_display_name(cur, r["league"], r["team_abbr"]),
                     "started_at": r["started_at"].isoformat(),
-                    "days_held": r["days_held"]} for r in cur.fetchall()]
+                    "days_held": r["days_held"]} for r in rows]
 
         cur.execute("""
             SELECT league, team_abbr, started_at, ended_at
@@ -11776,6 +11795,7 @@ def get_user_profile(user_id):
             allegiance = {
                 "league":     alg["league"],
                 "team_abbr":  alg["team_abbr"],
+                "team_name":  _team_display_name(cur, alg["league"], alg["team_abbr"]),
                 "started_at": alg["started_at"].isoformat(),
                 "days_held":  int(alg["days_held"] or 0),
             }
