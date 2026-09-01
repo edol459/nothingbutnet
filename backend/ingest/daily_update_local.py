@@ -133,6 +133,14 @@ def main():
             'Player team assignments (current_team)',
             [],
         ),
+        # Gates itself: does nothing unless locked ballots exist for a season
+        # whose winners aren't recorded yet, so it sleeps all year and wakes for
+        # the fortnight around the announcements.
+        (
+            'grade_awards.py',
+            'Award winners (grades ballots)',
+            [],
+        ),
         # ── WoWY lineups (pbpstats, leverage-filtered) ────────
         (
             'fetch_wowy_lineups.py',

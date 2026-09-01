@@ -965,11 +965,28 @@ def _grant_xp(cur, user_id: int, event_type: str, reference_id: str, amount: int
         "INSERT INTO xp_events (user_id, event_type, reference_id, xp_amount) VALUES (%s, %s, %s, %s)",
         (user_id, event_type, reference_id, amount)
     )
+    cur.execute("SELECT xp FROM users WHERE id = %s", (user_id,))
+    before = int((cur.fetchone() or {}).get("xp") or 0)
     cur.execute(
         "UPDATE users SET xp = xp + %s WHERE id = %s RETURNING xp",
         (amount, user_id)
     )
-    return cur.fetchone()["xp"]
+    after = int(cur.fetchone()["xp"])
+
+    # Crossing a rank is the moment the currency means something, and it happens
+    # about ten times in a lifetime — worth a notification, unlike the +5s. There
+    # is nowhere else to detect it after the fact (users.xp is a running total
+    # with no history), so it's recorded here as a zero-value marker event: it
+    # sums into users.xp harmlessly and gives the notifications feed something to
+    # read. reference_id is the level, so it can never fire twice for the same one.
+    if _xp_to_level(after) > _xp_to_level(before):
+        cur.execute("""INSERT INTO xp_events (user_id, event_type, reference_id, xp_amount)
+                       SELECT %s, 'level_up', %s, 0
+                       WHERE NOT EXISTS (SELECT 1 FROM xp_events
+                                          WHERE user_id = %s AND event_type = 'level_up'
+                                            AND reference_id = %s)""",
+                    (user_id, str(_xp_to_level(after)), user_id, str(_xp_to_level(after))))
+    return after
 
 
 # ── Product analytics ─────────────────────────────────────────
@@ -8247,12 +8264,21 @@ def _fetch_award_items(cur, list_id: int, league: str, season: str) -> list:
     cur.execute("""SELECT award_code, person_id, player_name, team
                    FROM award_ballot_items WHERE list_id = %s""", (list_id,))
     picks = {r["award_code"]: r for r in cur.fetchall()}
+    # The answer key is all-or-nothing. Most winners arrive automatically the
+    # week the league announces, but Coach of the Year has no feed and is typed
+    # in by hand — so a season sits half-recorded for a day or two. Grading
+    # through that gap would show everyone "4 of 8" while a slot was still
+    # undecided, hand out XP in two instalments, and fire the collect banner
+    # twice. Holding until every slot has a winner makes the last hand-entered
+    # award the release switch, with no separate flag to remember.
     results = {}
     if season:
         cur.execute("""SELECT award_code, person_id, player_name, team
                        FROM award_results WHERE league = %s AND season = %s""",
                     (league, season))
-        results = {r["award_code"]: r for r in cur.fetchall()}
+        recorded = {r["award_code"]: r for r in cur.fetchall()}
+        if len(recorded) >= len(template):
+            results = recorded
 
     def _shape(r):
         return {"personId": r.get("person_id"), "playerName": r["player_name"],
@@ -8451,11 +8477,15 @@ def ballot_current():
     out = {"league": league, "season": window["season"],
            "locksAt": window["locksAt"], "isOpen": window["isOpen"],
            "ballot": None, "filled": 0, "slots": len(_AWARD_TEMPLATES[league])}
-    if user and window["season"]:
-        cur.execute("""SELECT id, locked_at FROM game_lists
-                       WHERE user_id = %s AND list_type = 'awards'
-                         AND league = %s AND season = %s""",
-                    (user["id"], league, window["season"]))
+    if user:
+        # Found WITHOUT reference to the window. Awards are announced after the
+        # regular season ends, by which point _award_window has no season at all
+        # — so keying this lookup on it hid the results banner during exactly the
+        # weeks it exists to fire, and the XP could never be collected.
+        cur.execute("""SELECT id, locked_at, season FROM game_lists
+                       WHERE user_id = %s AND list_type = 'awards' AND league = %s
+                       ORDER BY season DESC LIMIT 1""",
+                    (user["id"], league))
         row = cur.fetchone()
         if row:
             cur.execute(_AWARD_TABLES); conn.commit()
@@ -8464,12 +8494,15 @@ def ballot_current():
             out["ballot"] = row["id"]
             out["filled"] = int(cur.fetchone()["n"])
             out["isLocked"] = _ballot_locked(row)
+            # A ballot from a finished season still names its own year, so the
+            # banner reads "2026-27 results" rather than borrowing the window's.
+            out["season"] = row["season"]
 
             # Grading state drives the banner's second life: it goes quiet for
             # the whole season, then comes back when there are results — and
             # specifically when there is XP still to bank, since that's the only
             # thing left for the user to *do*.
-            slots = _fetch_award_items(cur, row["id"], league, window["season"])
+            slots = _fetch_award_items(cur, row["id"], league, row["season"])
             graded = [s for s in slots if s["correct"] is not None]
             if graded:
                 correct = [s for s in slots if s["correct"] is True]
@@ -11405,6 +11438,9 @@ def get_notifications():
     uid   = user["id"]
     limit = min(int(request.args.get("limit", 50)), 100)
     include_lists = request.args.get("include_lists") in ("1", "true")
+    # Opt-in for the same reason list_published is: an unknown `type` makes an
+    # older build fail to decode the whole array, not just skip the row.
+    include_xp = request.args.get("include_xp") in ("1", "true")
     try:
         conn = get_conn()
         cur  = conn.cursor()
@@ -11445,6 +11481,58 @@ def get_notifications():
                        + (SELECT COUNT(*) FROM team_list_items   WHERE list_id = gl.id) ) > 0
             """
             list_params = [uid, uid]
+
+        # Ball Knowledge worth telling someone about. Deliberately not every
+        # grant: app opens, both dailies and live-game views each fire a toast
+        # where they happen, so repeating them here would bury the tab in "+10"
+        # rows. What's left is the two you'd otherwise miss entirely — a ballot
+        # paying out months after you filled it in, and crossing a rank.
+        xp_arm = ""
+        xp_params: list = []
+        if include_xp:
+            xp_arm = """
+                UNION ALL
+
+                -- A ballot paid out. Grouped by ballot, because one payout is a
+                -- lock row plus a row per correct pick — up to nine events that
+                -- are all the same moment.
+                -- (ballot id in review_id, total XP in reply_text)
+                SELECT
+                    'ballot_payout'         AS type,
+                    MAX(xe.created_at)      AS created_at,
+                    u.id                    AS actor_id,
+                    u.display_name          AS actor_name,
+                    u.avatar_url            AS actor_avatar,
+                    SPLIT_PART(xe.reference_id, ':', 1)::int AS review_id,
+                    NULL::text              AS game_id,
+                    NULL::text              AS home_team_abbr,
+                    NULL::text              AS away_team_abbr,
+                    NULL::date              AS game_date,
+                    SUM(xe.xp_amount)::text AS reply_text,
+                    NULL::text              AS league
+                FROM xp_events xe
+                JOIN users u ON u.id = xe.user_id
+                WHERE xe.user_id = %s
+                  AND xe.event_type IN ('ballot_lock', 'ballot_correct')
+                GROUP BY SPLIT_PART(xe.reference_id, ':', 1), u.id, u.display_name, u.avatar_url
+
+                UNION ALL
+
+                -- Crossed into a new Ball Knowledge rank.
+                -- (level in review_id)
+                SELECT
+                    'level_up'              AS type,
+                    xe.created_at,
+                    u.id, u.display_name, u.avatar_url,
+                    xe.reference_id::int    AS review_id,
+                    NULL::text, NULL::text, NULL::text, NULL::date,
+                    NULL::text, NULL::text
+                FROM xp_events xe
+                JOIN users u ON u.id = xe.user_id
+                WHERE xe.user_id = %s AND xe.event_type = 'level_up'
+            """
+            xp_params = [uid, uid]
+
         cur.execute(f"""
             SELECT type, created_at, actor_id, actor_name, actor_avatar,
                    review_id, game_id, home_team_abbr, away_team_abbr,
@@ -11512,10 +11600,11 @@ def get_notifications():
                 JOIN users u ON u.id = f.sender_id
                 WHERE f.receiver_id = %s AND f.status = 'pending'
                 {list_arm}
+                {xp_arm}
             ) n
             ORDER BY created_at DESC
             LIMIT %s
-        """, (uid, uid, uid, uid, uid, *list_params, limit))
+        """, (uid, uid, uid, uid, uid, *list_params, *xp_params, limit))
 
         rows = cur.fetchall()
         cur.close(); conn.close()

@@ -48,9 +48,14 @@ def ensure_column(conn):
     conn.commit()
 
 
-def player_ids(conn):
+def player_ids(conn, season=None):
+    """Every player we hold, or just the ones who played a given season."""
     with conn.cursor() as cur:
-        cur.execute("SELECT DISTINCT player_id FROM player_seasons ORDER BY player_id")
+        if season:
+            cur.execute("""SELECT DISTINCT player_id FROM player_seasons
+                           WHERE season = %s ORDER BY player_id""", (season,))
+        else:
+            cur.execute("SELECT DISTINCT player_id FROM player_seasons ORDER BY player_id")
         return [r[0] for r in cur.fetchall()]
 
 
@@ -102,6 +107,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--player", type=int, default=None)
     ap.add_argument("--pause", type=float, default=0.6)
+    ap.add_argument("--refresh-season", default=None, metavar="2026-27",
+                    help="re-fetch everyone who played that season, ignoring the "
+                         "progress file — this is how a newly announced award "
+                         "gets picked up")
     args = ap.parse_args()
 
     conn = connect()
@@ -114,10 +123,20 @@ def main():
         conn.close()
         return
 
-    ids = player_ids(conn)
-    done = load_done()
-    todo = [p for p in ids if p not in done]
-    print(f"Awards backfill: {len(todo)} players to fetch ({len(done)} already done)", flush=True)
+    # The progress file exists so a multi-thousand-player backfill can resume,
+    # but it also means a plain re-run after the league announces fetches nobody:
+    # every winner is already "done" from last year. --refresh-season ignores it
+    # for the players who actually could have won something that season.
+    if args.refresh_season:
+        ids = player_ids(conn, args.refresh_season)
+        todo = ids
+        done = load_done()
+        print(f"Awards refresh for {args.refresh_season}: {len(todo)} players", flush=True)
+    else:
+        ids = player_ids(conn)
+        done = load_done()
+        todo = [p for p in ids if p not in done]
+        print(f"Awards backfill: {len(todo)} players to fetch ({len(done)} already done)", flush=True)
     found = 0
     for i, pid in enumerate(todo, 1):
         bs = fetch_player_awards(pid)              # API only — no DB

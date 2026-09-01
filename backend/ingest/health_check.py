@@ -286,6 +286,56 @@ class Health:
                          f"generated for {self.today} (someone has played)")
 
     # ──────────────────────────────────────────────────────────────────────────
+    #  CHECK — awards ballots waiting to be graded.
+    #  Grading is deliberately manual and lazy: the league announces, someone
+    #  runs record_award_results.py, and each ballot grades itself the next time
+    #  its owner opens it. That design has one failure mode — nobody remembers to
+    #  run it, and every ballot silently never pays out. This is the alarm for
+    #  that, and it only speaks up once locked ballots exist with no answer key,
+    #  so it stays quiet all season.
+    # ──────────────────────────────────────────────────────────────────────────
+    def check_ballot_grading(self):
+        sec = "Awards ballots"
+        if not self.table_exists("game_lists") or not self.table_exists("award_results"):
+            return
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                SELECT gl.league, gl.season, COUNT(*) AS ballots,
+                       (SELECT COUNT(*) FROM award_results ar
+                         WHERE ar.league = gl.league AND ar.season = gl.season) AS results
+                FROM game_lists gl
+                WHERE gl.list_type = 'awards'
+                  AND gl.locked_at IS NOT NULL AND gl.locked_at < NOW()
+                GROUP BY gl.league, gl.season
+                ORDER BY gl.season DESC
+            """)
+            rows = cur.fetchall()
+        if not rows:
+            self.add(sec, INFO, "Grading", "no locked ballots yet — nothing to grade")
+            return
+        # Slot counts per league, mirroring _AWARD_TEMPLATES in server.py.
+        expected = {"nba": 8, "wnba": 6}
+        for league, season, ballots, results in rows:
+            label = f"{str(league).upper()} {season}"
+            want = expected.get(str(league), 8)
+            if results == 0:
+                self.add(sec, WARN, label,
+                         f"{ballots} locked ballot(s), no winners recorded — run "
+                         f"grade_awards.py, then add Coach of the Year by hand")
+            elif results < want:
+                # Nothing grades until the key is complete, so a partial season
+                # is a stall, not progress — most likely the hand-entered Coach
+                # of the Year is still missing.
+                self.add(sec, WARN, label,
+                         f"{ballots} locked ballot(s), {results}/{want} winners recorded "
+                         f"— NOTHING grades until the set is complete. Missing the "
+                         f'hand-entered one? record_award_results.py --season {season} '
+                         f'--set COY="Name"')
+            else:
+                self.add(sec, OK, label,
+                         f"{ballots} locked ballot(s), all {results} winners recorded — graded")
+
+    # ──────────────────────────────────────────────────────────────────────────
     #  CHECK 2b — data completeness: did the per-game data actually LAND?
     #  Run-tracking proves a pipeline *ran* (exit 0); anomaly detection proves
     #  counts didn't drop. NEITHER proves the rows that SHOULD exist do — a fetch
@@ -670,6 +720,7 @@ def collect(conn, today=None, write_snapshot=True):
     h.check_freshness()
     h.check_pipeline_runs()
     h.check_daily_puzzles()
+    h.check_ballot_grading()
     h.check_data_completeness()
     h.check_anomalies()
     h.check_known_gaps()
@@ -711,6 +762,7 @@ def main():
     h.check_freshness()
     h.check_pipeline_runs()
     h.check_daily_puzzles()
+    h.check_ballot_grading()
     h.check_data_completeness()
     h.check_anomalies()
     h.check_known_gaps()

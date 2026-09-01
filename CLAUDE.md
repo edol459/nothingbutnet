@@ -89,6 +89,75 @@ Three jobs, see `DATABASE_MAP.md` for the full table-by-table map.
 All NBA/WNBA CDN calls go through `_cdn_get()` with curl_cffi Chrome impersonation
 to defeat Akamai TLS fingerprinting on Railway IPs — see `docs/cdn-akamai-bot-manager.md`.
 
+## Awards ballots ("Ballots")
+
+A preseason prediction sheet: one per user, per league, per season. Code says
+`list_type = 'awards'` on `game_lists`; user-facing name is **Ballot**.
+
+**Why it reuses `game_lists`:** ballots inherit likes, comments, the public
+`/list/<id>` page and its OG card for free. What they don't inherit is item
+shape — a ballot is fixed slots, not an ordered bag — so picks live in
+`award_ballot_items`, keyed `(list_id, award_code)`. That primary key *is* the
+"one pick per award" rule.
+
+- **Slots** — `_AWARD_TEMPLATES` in server.py. NBA has 8 (CHAMPION, MVP, ROTY,
+  DPOY, 6MOY, MIP, CPOY, COY); WNBA has 6 (no Clutch Player award exists, and we
+  hold no WNBA coach data). Each slot has an `entity` — `player`, `team` or
+  `coach` — which decides what the picker offers, what counts as eligible, and
+  how a pick is graded. It's a property of the award, so adding the team and
+  coach slots needed no schema change.
+- **One per season** — partial unique index (schema_v10). Not cosmetic: ballots
+  pay XP, so being able to make ten and cover every MVP candidate is an exploit.
+- **Open/closed is automatic.** `_award_window()` reads `scheduled_games` at
+  request time — never `get_current_season()`, which returns the season that just
+  *ended* all summer. `locked_at` is stamped at creation from the first scheduled
+  tipoff. No cron, nothing to toggle.
+- **Ball Knowledge** — 50 for a complete locked ballot, 100 per correct pick,
+  granted lazily when the owner next opens it (`_grant_ballot_xp`). `_grant_xp`
+  dedupes on `(user, type, reference_id)`, so re-reads are free.
+- **Not copyable, not rankable, not renamable** — enforced in `update_list` as
+  well as the client, because the generic edit sheet posts every field back.
+
+### Grading (once a year, mostly automatic)
+
+`backend/ingest/grade_awards.py` runs in `daily_update_local.py` and gates
+itself: it does nothing unless locked ballots exist for a season whose winners
+aren't recorded. When they are announced it runs `fetch_awards.py
+--refresh-season` (needed because that script's progress file otherwise skips
+everyone) then `record_award_results.py`.
+
+That covers 7 of 8 NBA awards. **Coach of the Year has no upstream feed** and is
+entered by hand — as are all WNBA player awards:
+
+```bash
+python backend/ingest/record_award_results.py --season 2026-27 --set COY="Name"
+```
+
+The champion needs no feed at all: it's the winner of the season's last playoff
+game. `health_check.py` warns whenever locked ballots have no answer key, so the
+annual step nags you rather than the reverse.
+
+### Testing it
+
+Every state is date-driven and so unreachable by waiting.
+`backend/dev_ballot_scenarios.py you@example.com --state graded` stages any of
+`empty · partial · complete · locked · graded · claimed` (plus `--league wnba`,
+otherwise unreachable until spring) and prints what to expect in the app. Always
+`--reset` after: it plants fabricated winners that would grade real ballots.
+
+### Player teams in the offseason
+
+`players.current_team` (schema_v12) answers "who does this player play for now",
+which the stats tables can't — `player_seasons.team_abbr` only moves when a
+player takes the floor, so every summer trade was invisible until October.
+Filled daily by `sync_player_teams.py` from one CommonAllPlayers call.
+`season_util.roster_season()` is the rule: **stats resolve from played games,
+membership resolves from the schedule.**
+
+Identity surfaces (search, pickers, profile header) read `current_team`; stat
+rows keep the team the stats were earned with. Browse Players sends both, so a
+row can read "LAL → PHI".
+
 ## Monitoring (admin + health)
 
 - `/admin` (admin-gated) → **Insights** dashboard + **Moderation**. Insights are
