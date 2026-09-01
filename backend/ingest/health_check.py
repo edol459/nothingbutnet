@@ -379,6 +379,82 @@ class Health:
                 landed_noun="box scores",
                 empty_msg="no WNBA box scores landed yet — pipeline not landing data")
 
+        # ── Season-average tables vs games actually played ──
+        # Both arms above watch the PER-GAME tables. The season-AVERAGE tables
+        # are filled by a different fetch entirely, so they can freeze solid
+        # while every check above stays green. That is exactly how
+        # wnba_player_seasons sat two months stale in Aug 2026 — its fetch was
+        # in neither pipeline, so profiles showed Caitlin Clark at 17 GP of the
+        # 36 she had played, and nothing on the dashboard went red.
+        self._season_totals_arm(sec, "NBA season averages",
+                                "player_seasons", "nba")
+        self._season_totals_arm(sec, "WNBA season averages",
+                                "wnba_player_seasons", "wnba")
+
+    def _season_totals_arm(self, sec, label, table, league):
+        """Compare the GP leader in a season-average table against the most
+        games any one team has actually finished.
+
+        Anchored on the schedule, not on updated_at: a table nobody refreshes
+        still gets a fresh timestamp the moment any other job touches a row, so
+        a timestamp check can pass on data that is months out of date. Games
+        played can't be faked that way. Quiet out of season by the same
+        self-calibrating rule the arms above use."""
+        if not (self.table_exists(table) and self.table_exists("games")):
+            return
+
+        season = self._scalar(
+            "SELECT MAX(season) FROM games WHERE league=%s AND status='Final' "
+            "AND season_type='Regular Season'", (league,))
+        if season is None:
+            self.add(sec, INFO, label, "no finished games on record yet")
+            return
+
+        last_final = self._scalar(
+            "SELECT MAX(game_date) FROM games WHERE league=%s AND season=%s "
+            "AND status='Final' AND season_type='Regular Season'",
+            (league, season))
+        if last_final is None or (self.today - last_final).days > 3:
+            self.add(sec, INFO, label,
+                     f"{season} regular season finished {last_final} — nothing due")
+            return
+
+        played = self._scalar("""
+            SELECT MAX(n) FROM (
+                SELECT COUNT(*) AS n FROM (
+                    SELECT home_team_abbr AS t FROM games
+                     WHERE league=%s AND season=%s AND status='Final'
+                       AND season_type='Regular Season'
+                    UNION ALL
+                    SELECT away_team_abbr FROM games
+                     WHERE league=%s AND season=%s AND status='Final'
+                       AND season_type='Regular Season'
+                ) g GROUP BY t
+            ) c""", (league, season, league, season))
+        recorded = self._scalar(
+            f"SELECT MAX(gp) FROM {table} WHERE season=%s "
+            "AND season_type='Regular Season'", (season,))
+
+        if recorded is None:
+            self.add(sec, FAIL, label,
+                     f"{season}: teams have played {played} games but "
+                     f"{table} has no rows for the season")
+            return
+
+        behind = (played or 0) - recorded
+        detail = (f"{season}: GP leader at {recorded}, "
+                  f"most games played by a team {played}")
+        # Tolerance is loose on purpose: the leading team need not have an
+        # ironman, so a couple of games' gap is normal roster attrition, not rot.
+        if behind <= 2:
+            self.add(sec, OK, label, f"current — {detail}")
+        elif behind <= 4:
+            self.add(sec, WARN, label, f"{behind} games behind — {detail}")
+        else:
+            self.add(sec, FAIL, label,
+                     f"{behind} games behind — {table} is not being refreshed "
+                     f"({detail})")
+
     def _completeness_arm(self, sec, label, last_final, last_landed,
                           landed_noun, empty_msg):
         """Compare a league's landed per-game data against its finished-game

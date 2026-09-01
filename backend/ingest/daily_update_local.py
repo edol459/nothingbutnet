@@ -15,6 +15,7 @@ Steps:
   4.  fetch_matchups.py        — opponent-adjusted matchup defensive metric
   5.  fetch_nba_stats.py       — gravity, shot quality, leverage
   6.  fetch_gamelogs.py        — per-game logs for Trends page
+  6b. fetch_wnba_player_stats.py — WNBA season averages (stats.wnba.com)
   7.  fetch_lineups.py         — 5-man lineup data for WoWY tool
   8.  compute_pctiles.py       — recompute percentiles for Builder
 
@@ -71,6 +72,7 @@ def main():
     season, season_type = get_current_season()
     # Stats resolve from played games; membership resolves from the schedule.
     roster_season = season_util.roster_season()
+    wnba_season  = season_util.wnba_current_season()
 
     print(f"\n{'='*60}")
     print(f"YDKBALL — Local Daily Update")
@@ -117,6 +119,25 @@ def main():
             'fetch_gamelogs.py',
             'Per-game logs (Trends)',
             season_args,
+        ),
+        # ── WNBA season averages ──────────────────────────────
+        # The WNBA twin of fetch_season.py above, and it lives here for the
+        # same reason: stats.wnba.com sits behind the same Akamai gate as
+        # stats.nba.com, so it needs the residential IP. It was in NEITHER
+        # pipeline until 2026-09-01 — wnba_player_seasons only ever moved when
+        # someone ran the script by hand, so the whole 2026 season sat frozen
+        # at the 6/27 backfill (Caitlin Clark showing 17 GP of the 36 she'd
+        # played). The playoffs arm returns an empty set and no-ops until the
+        # WNBA postseason tips in September.
+        (
+            'fetch_wnba_player_stats.py',
+            'WNBA season averages',
+            ['--season', wnba_season],
+        ),
+        (
+            'fetch_wnba_player_stats.py',
+            'WNBA season averages (playoffs)',
+            ['--season', wnba_season, '--season-type', 'Playoffs'],
         ),
         # ── Rosters + team membership (nba_api, residential IP) ────
         # These take roster_season(), not season: the league publishes next

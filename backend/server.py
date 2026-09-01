@@ -5271,28 +5271,40 @@ def game_potg(game_id):
 
 @app.route("/api/players/<int:person_id>/potg")
 def player_potg(person_id):
-    """Career and per-season POTG counts, plus the games won, for a player page."""
+    """Games this player WON Player of the Game in, by season and career.
+
+    Same definition as the leaderboard: a win is being the top vote-getter in a
+    game, ties counting as co-wins. Counting raw votes here instead would make a
+    player's profile disagree with the leaderboard they appear on.
+    """
     conn = get_conn(); cur = conn.cursor()
+    # One CTE reused by all three queries below — a win has to mean the same
+    # thing in the season counts, the career total and the game list.
+    won_cte = """
+        WITH tallies AS (
+            SELECT p.game_id, p.person_id, COUNT(*) AS votes
+              FROM potg_picks p GROUP BY p.game_id, p.person_id
+        ),
+        tops AS (SELECT game_id, MAX(votes) AS topv FROM tallies GROUP BY game_id),
+        won AS (
+            SELECT t.game_id, t.votes
+              FROM tallies t JOIN tops o USING (game_id)
+             WHERE t.person_id = %s AND t.votes = o.topv
+        )
+    """
     try:
-        # Season comes from the game, not the pick: a pick made in October about a
-        # June game belongs to June's season.
-        cur.execute("""
+        cur.execute(won_cte + """
             SELECT g.season, COUNT(*) AS wins
-            FROM potg_picks p JOIN games g ON g.game_id = p.game_id
-            WHERE p.person_id = %s
-            GROUP BY g.season ORDER BY g.season DESC
+              FROM won w JOIN games g ON g.game_id = w.game_id
+             GROUP BY g.season ORDER BY g.season DESC
         """, (person_id,))
         seasons = [{"season": r["season"], "wins": int(r["wins"])} for r in cur.fetchall()]
 
-        cur.execute("""
-            SELECT p.game_id, g.game_date, g.season,
-                   g.home_team_abbr, g.away_team_abbr, g.home_score, g.away_score,
-                   COUNT(*) AS votes
-            FROM potg_picks p JOIN games g ON g.game_id = p.game_id
-            WHERE p.person_id = %s
-            GROUP BY p.game_id, g.game_date, g.season, g.home_team_abbr,
-                     g.away_team_abbr, g.home_score, g.away_score
-            ORDER BY g.game_date DESC LIMIT 20
+        cur.execute(won_cte + """
+            SELECT w.game_id, w.votes, g.game_date, g.season,
+                   g.home_team_abbr, g.away_team_abbr, g.home_score, g.away_score
+              FROM won w JOIN games g ON g.game_id = w.game_id
+             ORDER BY g.game_date DESC LIMIT 20
         """, (person_id,))
         games = [{
             "game_id":   r["game_id"],
@@ -5319,24 +5331,57 @@ def potg_leaderboard():
     limit  = min(int(request.args.get("limit", 10) or 10), 50)
     league = (request.args.get("league") or "").strip().lower()
 
-    clause, params = "", [days]
+    params = {"days": days}
+    clause = ""
     if league in ("nba", "wnba"):
-        clause = " AND g.league = %s"; params.append(league)
+        clause = " AND g.league = %(league)s"
+        params["league"] = league
 
     conn = get_conn(); cur = conn.cursor()
     try:
+        # Ranked by games WON, not votes received.
+        #
+        # "Player of the Game" is an award: in each game the player with the most
+        # votes wins it. Ranking on raw vote count instead lets three votes in one
+        # game outrank one vote in three separate games, which is a claim about
+        # popularity rather than about performances. Votes are still returned as a
+        # secondary figure so the two are never confused.
+        #
+        # Ties are CO-WINS. A genuinely tied vote has no single winner, and any
+        # tiebreak here would be invented.
         cur.execute(f"""
-            SELECT p.person_id,
-                   MAX(p.player_name) AS player_name,
-                   MAX(p.team_abbr)   AS team_abbr,
-                   MAX(g.league)      AS league,
-                   COUNT(*)           AS wins,
-                   COUNT(DISTINCT p.game_id) AS games
-            FROM potg_picks p JOIN games g ON g.game_id = p.game_id
-            WHERE g.game_date >= CURRENT_DATE - %s::int {clause}
-            GROUP BY p.person_id
-            ORDER BY wins DESC, MAX(p.player_name)
-            LIMIT {limit}
+            WITH tallies AS (
+                SELECT p.game_id, p.person_id,
+                       MAX(p.player_name) AS player_name,
+                       MAX(p.team_abbr)   AS team_abbr,
+                       MAX(g.league)      AS league,
+                       g.game_date, g.away_team_abbr, g.home_team_abbr,
+                       COUNT(*) AS votes
+                  FROM potg_picks p JOIN games g ON g.game_id = p.game_id
+                 WHERE g.game_date >= CURRENT_DATE - %(days)s::int {clause}
+                 GROUP BY p.game_id, p.person_id, g.game_date,
+                          g.away_team_abbr, g.home_team_abbr
+            ),
+            tops AS (SELECT game_id, MAX(votes) AS topv FROM tallies GROUP BY game_id)
+            SELECT t.person_id,
+                   MAX(t.player_name) AS player_name,
+                   MAX(t.team_abbr)   AS team_abbr,
+                   MAX(t.league)      AS league,
+                   COUNT(*) FILTER (WHERE t.votes = o.topv) AS wins,
+                   SUM(t.votes)                             AS votes,
+                   (ARRAY_AGG(
+                        JSONB_BUILD_OBJECT(
+                            'game_id',   t.game_id,
+                            'away',      t.away_team_abbr,
+                            'home',      t.home_team_abbr,
+                            'game_date', t.game_date::text
+                        ) ORDER BY t.game_date DESC
+                    ) FILTER (WHERE t.votes = o.topv))[1:4] AS recent_games
+              FROM tallies t JOIN tops o USING (game_id)
+             GROUP BY t.person_id
+            HAVING COUNT(*) FILTER (WHERE t.votes = o.topv) > 0
+             ORDER BY wins DESC, votes DESC, MAX(t.player_name)
+             LIMIT {limit}
         """, params)
         return jsonify({"days": days, "players": [{
             "person_id":   int(r["person_id"]),
@@ -5344,7 +5389,9 @@ def potg_leaderboard():
             "team_abbr":   r["team_abbr"],
             "league":      r["league"],
             "wins":        int(r["wins"]),
-            "games":       int(r["games"]),
+            "votes":       int(r["votes"] or 0),
+            "games":       int(r["wins"]),
+            "recent_games": r["recent_games"] or [],
         } for r in cur.fetchall()]})
     except Exception as e:
         return jsonify({"days": days, "players": [], "error": str(e)})

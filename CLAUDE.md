@@ -82,7 +82,8 @@ Three jobs, see `DATABASE_MAP.md` for the full table-by-table map.
   work from a datacenter IP (team records, players sync, DARKO/LEBRON/Net-Pts).
 - `backend/ingest/daily_update_local.py` — **Windows Task Scheduler** (`local_daily`):
   steps that need a residential IP because stats.nba.com blocks Railway
-  (season stats, PBP, gamelogs, lineups, pctiles). Writes straight to Railway PG.
+  (season stats, PBP, gamelogs, lineups, pctiles, **WNBA season averages** —
+  stats.wnba.com is behind the same gate). Writes straight to Railway PG.
 - `backend/games/generate_daily.py` — **Railway cron** (`puzzle_gen`): pre-generates
   the Higher-or-Lower daily. Guess Who is generated lazily on first request (no cron).
 
