@@ -283,6 +283,10 @@ _PERF_TABLE = """
     )
 """
 _PERF_MIGRATE = "ALTER TABLE performance_reviews ADD COLUMN IF NOT EXISTS player_name TEXT"
+# A drafted Player of the Game pick: {"person_id": 1630169, "player_name": "...",
+# "team_abbr": "IND"}. A blob like `grades`, for the same reason — one author, edited
+# as a unit, nothing aggregates across drafts.
+_DRAFT_POTG_MIGRATE = "ALTER TABLE game_log_drafts ADD COLUMN IF NOT EXISTS potg JSONB"
 
 
 # Player performances: letter grades. INTERIM 10 — becomes 11 (adding C-) once
@@ -856,6 +860,7 @@ def _ensure_tables():
         # concurrent /api/feed calls queue on each other until statement_timeout.
         cur.execute(_PERF_TABLE)
         cur.execute(_PERF_MIGRATE)
+        cur.execute(_DRAFT_POTG_MIGRATE)
         # Same reasoning as above: these two used to run inside the POST
         # /api/games/<id>/reviews handler, so every single review submission took an
         # ACCESS EXCLUSIVE lock on game_reviews and serialized against every reader.
@@ -5209,6 +5214,142 @@ def _clean_tags(raw):
     return out
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Player of the Game — reads
+#
+# Tallies are public and unauthenticated on purpose. Plenty of people will never
+# log a game but still want to know who the room picked, and gating that behind
+# voting would hide the most shareable thing the feature produces. The pick is
+# never shown beside the picker on the log sheet, which is where anchoring would
+# actually distort the vote.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@app.route("/api/games/<game_id>/potg")
+def game_potg(game_id):
+    """Vote tally for one game, plus the caller's own pick when signed in."""
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT person_id,
+                   MAX(player_name) AS player_name,
+                   MAX(team_abbr)   AS team_abbr,
+                   COUNT(*)         AS votes
+            FROM potg_picks WHERE game_id = %s
+            GROUP BY person_id
+            ORDER BY votes DESC, MAX(player_name)
+        """, (game_id,))
+        rows  = cur.fetchall()
+        total = sum(int(r["votes"]) for r in rows) or 0
+
+        mine = None
+        if user:
+            cur.execute("SELECT person_id FROM potg_picks WHERE user_id = %s AND game_id = %s",
+                        (user["id"], game_id))
+            row = cur.fetchone()
+            mine = int(row["person_id"]) if row else None
+
+        return jsonify({
+            "total_votes": total,
+            "my_pick": mine,
+            "results": [{
+                "person_id":   int(r["person_id"]),
+                "player_name": r["player_name"] or "",
+                "team_abbr":   r["team_abbr"],
+                "votes":       int(r["votes"]),
+                # Rounded here so three clients don't each invent their own rule.
+                "share":       round(int(r["votes"]) / total, 3) if total else 0.0,
+            } for r in rows],
+        })
+    except Exception as e:
+        return jsonify({"total_votes": 0, "my_pick": None, "results": [], "error": str(e)})
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/players/<int:person_id>/potg")
+def player_potg(person_id):
+    """Career and per-season POTG counts, plus the games won, for a player page."""
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        # Season comes from the game, not the pick: a pick made in October about a
+        # June game belongs to June's season.
+        cur.execute("""
+            SELECT g.season, COUNT(*) AS wins
+            FROM potg_picks p JOIN games g ON g.game_id = p.game_id
+            WHERE p.person_id = %s
+            GROUP BY g.season ORDER BY g.season DESC
+        """, (person_id,))
+        seasons = [{"season": r["season"], "wins": int(r["wins"])} for r in cur.fetchall()]
+
+        cur.execute("""
+            SELECT p.game_id, g.game_date, g.season,
+                   g.home_team_abbr, g.away_team_abbr, g.home_score, g.away_score,
+                   COUNT(*) AS votes
+            FROM potg_picks p JOIN games g ON g.game_id = p.game_id
+            WHERE p.person_id = %s
+            GROUP BY p.game_id, g.game_date, g.season, g.home_team_abbr,
+                     g.away_team_abbr, g.home_score, g.away_score
+            ORDER BY g.game_date DESC LIMIT 20
+        """, (person_id,))
+        games = [{
+            "game_id":   r["game_id"],
+            "game_date": r["game_date"].isoformat() if r["game_date"] else None,
+            "season":    r["season"],
+            "home":      r["home_team_abbr"], "away": r["away_team_abbr"],
+            "home_score": r["home_score"], "away_score": r["away_score"],
+            "votes":     int(r["votes"]),
+        } for r in cur.fetchall()]
+
+        return jsonify({"career": sum(s["wins"] for s in seasons),
+                        "seasons": seasons, "games": games})
+    except Exception as e:
+        return jsonify({"career": 0, "seasons": [], "games": [], "error": str(e)})
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/potg/leaderboard")
+def potg_leaderboard():
+    """Most-picked players over a window. Replaces the Top Performances rail,
+    which was fed by letter grades and loses its source with them."""
+    days   = min(max(int(request.args.get("days", 30) or 30), 1), 365)
+    limit  = min(int(request.args.get("limit", 10) or 10), 50)
+    league = (request.args.get("league") or "").strip().lower()
+
+    clause, params = "", [days]
+    if league in ("nba", "wnba"):
+        clause = " AND g.league = %s"; params.append(league)
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            SELECT p.person_id,
+                   MAX(p.player_name) AS player_name,
+                   MAX(p.team_abbr)   AS team_abbr,
+                   MAX(g.league)      AS league,
+                   COUNT(*)           AS wins,
+                   COUNT(DISTINCT p.game_id) AS games
+            FROM potg_picks p JOIN games g ON g.game_id = p.game_id
+            WHERE g.game_date >= CURRENT_DATE - %s::int {clause}
+            GROUP BY p.person_id
+            ORDER BY wins DESC, MAX(p.player_name)
+            LIMIT {limit}
+        """, params)
+        return jsonify({"days": days, "players": [{
+            "person_id":   int(r["person_id"]),
+            "player_name": r["player_name"] or "",
+            "team_abbr":   r["team_abbr"],
+            "league":      r["league"],
+            "wins":        int(r["wins"]),
+            "games":       int(r["games"]),
+        } for r in cur.fetchall()]})
+    except Exception as e:
+        return jsonify({"days": days, "players": [], "error": str(e)})
+    finally:
+        cur.close(); conn.close()
+
+
 @app.route("/api/games/<game_id>/log", methods=["POST"])
 @login_required
 def submit_game_log(game_id):
@@ -5244,8 +5385,15 @@ def submit_game_log(game_id):
     if len(raw_perfs) > _LOG_MAX_PERFORMANCES:
         return jsonify({"error": f"At most {_LOG_MAX_PERFORMANCES} player grades per log."}), 400
 
-    if rating is None and not raw_perfs and not (body.get("remove_grades") or []):
-        return jsonify({"error": "Nothing to log — rate the game or grade a player."}), 400
+    # A pick alone is a log, and so is "I watched this" — the sheet now offers both
+    # as one-tap paths. `watched` must be explicit rather than inferred from an
+    # empty body, so a malformed client can't silently mark games as watched.
+    _has_potg    = bool(body.get("potg"))
+    _watched_only = bool(body.get("watched"))
+    if (rating is None and not raw_perfs and not (body.get("remove_grades") or [])
+            and not _has_potg and not _watched_only):
+        return jsonify({"error": "Nothing to log — rate it, pick a player, "
+                                 "or mark it watched."}), 400
     # Review text has nowhere to live without a game_reviews row, so don't silently drop it.
     if rating is None and review_text:
         return jsonify({"error": "A written review needs a game rating."}), 400
@@ -5367,6 +5515,29 @@ def submit_game_log(game_id):
                 WHERE user_id = %s AND game_id = %s AND person_id = ANY(%s)
             """, (user["id"], game_id, removed_ids))
             removed_count = cur.rowcount
+
+        # Player of the Game — a fourth independent write, matching how grades and
+        # watches sit alongside the review rather than inside it. Absent key means
+        # "don't touch"; explicit null means "clear my pick", so a client that
+        # doesn't send it can't silently wipe one.
+        potg = body.get("potg", "__absent__")
+        if potg != "__absent__":
+            if potg:
+                cur.execute("""
+                    INSERT INTO potg_picks (user_id, game_id, person_id, player_name, team_abbr)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (user_id, game_id) DO UPDATE SET
+                        person_id   = EXCLUDED.person_id,
+                        player_name = EXCLUDED.player_name,
+                        team_abbr   = EXCLUDED.team_abbr,
+                        updated_at  = NOW()
+                """, (user["id"], game_id,
+                      int(potg.get("person_id") or 0),
+                      str(potg.get("player_name") or "")[:60],
+                      str(potg.get("team_abbr") or "")[:5] or None))
+            else:
+                cur.execute("DELETE FROM potg_picks WHERE user_id = %s AND game_id = %s",
+                            (user["id"], game_id))
 
         # Only when a review was written — these counters are derived from game_reviews and
         # recomputing them on a grades-only log is pure lock contention for no change.
@@ -5609,6 +5780,7 @@ def _format_draft(r: dict) -> dict:
         # them back. Non-numeric keys are dropped rather than trusted.
         "grades":      {str(k): v for k, v in (r.get("grades") or {}).items()
                         if str(k).lstrip("-").isdigit()},
+        "potg":        r.get("potg"),
         "updated_at":  str(r.get("updated_at") or ""),
     }
 
@@ -5659,6 +5831,16 @@ def put_game_draft(game_id):
             return jsonify({"error": "grade values must be integers"}), 400
         grades[str(pid)] = v
 
+    # Same shape the publish path accepts, so a draft can be submitted verbatim.
+    raw_potg = body.get("potg")
+    potg = None
+    if isinstance(raw_potg, dict) and raw_potg.get("person_id"):
+        potg = {
+            "person_id":   int(raw_potg.get("person_id") or 0),
+            "player_name": str(raw_potg.get("player_name") or "")[:60],
+            "team_abbr":   str(raw_potg.get("team_abbr") or "")[:5] or None,
+        }
+
     text = body.get("review_text")
     if text is not None and not isinstance(text, str):
         return jsonify({"error": "review_text must be a string or null"}), 400
@@ -5672,8 +5854,8 @@ def put_game_draft(game_id):
         cur.execute("""
             INSERT INTO game_log_drafts
                 (user_id, game_id, league, home_abbr, away_abbr,
-                 rating, review_text, tags, attended, grades, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                 rating, review_text, tags, attended, grades, potg, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (user_id, game_id) DO UPDATE SET
                 league      = EXCLUDED.league,
                 home_abbr   = COALESCE(EXCLUDED.home_abbr, game_log_drafts.home_abbr),
@@ -5683,6 +5865,7 @@ def put_game_draft(game_id):
                 tags        = EXCLUDED.tags,
                 attended    = EXCLUDED.attended,
                 grades      = EXCLUDED.grades,
+                potg        = EXCLUDED.potg,
                 updated_at  = NOW()
             -- xmax is 0 on a genuine INSERT and non-zero when ON CONFLICT took the UPDATE
             -- path. The client re-PUTs the whole draft every couple of seconds while you
@@ -5694,7 +5877,8 @@ def put_game_draft(game_id):
               rating, (text or None) if text != "" else None,
               _json.dumps(_clean_tags(body.get("tags"))),
               bool(body.get("attended", False)),
-              _json.dumps(grades)))
+              _json.dumps(grades),
+              _json.dumps(potg) if potg else None))
         row = dict(cur.fetchone())
         conn.commit(); cur.close(); conn.close()
         if row.pop("was_insert", False):
@@ -5833,7 +6017,14 @@ def delete_game_log(game_id):
                     (user["id"], game_id))
         grades_deleted = cur.rowcount or 0
 
-        if not review_deleted and grades_deleted == 0:
+        # A pick is part of the log, so deleting the log takes it too — same
+        # reasoning that made grades follow the review. game_watches still
+        # deliberately survives: you did still watch the game.
+        cur.execute("DELETE FROM potg_picks WHERE user_id = %s AND game_id = %s",
+                    (user["id"], game_id))
+        potg_deleted = cur.rowcount or 0
+
+        if not review_deleted and grades_deleted == 0 and potg_deleted == 0:
             conn.rollback(); cur.close(); conn.close()
             return jsonify({"error": "Nothing logged for this game"}), 404
 
@@ -5859,6 +6050,7 @@ def delete_game_log(game_id):
 
         cur.close(); conn.close()
         return jsonify({"ok": True,
+                        "potg_deleted": potg_deleted,
                         "review_deleted": review_deleted,
                         "grades_deleted": grades_deleted})
     except Exception as e:
