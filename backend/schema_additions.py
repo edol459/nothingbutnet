@@ -102,7 +102,9 @@ CREATE TABLE IF NOT EXISTS game_reviews (
     id              SERIAL PRIMARY KEY,
     user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
     game_id         TEXT    REFERENCES games(game_id) ON DELETE CASCADE,
-    rating          INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 10),
+    -- Nullable since schema_v14: a written note can stand without a star rating.
+    -- The CHECK still rejects 0 and 11 — a CHECK passes on NULL.
+    rating          INTEGER CHECK (rating BETWEEN 1 AND 10),
     review_text     TEXT,                        -- optional written review
     created_at      TIMESTAMP DEFAULT NOW(),
     updated_at      TIMESTAMP DEFAULT NOW(),

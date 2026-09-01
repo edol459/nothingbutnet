@@ -640,7 +640,7 @@ def _ensure_tables():
             SET review_count = agg.cnt,
                 rating_sum   = agg.rsum
             FROM (
-                SELECT game_id, COUNT(*) AS cnt, COALESCE(SUM(rating), 0) AS rsum
+                SELECT game_id, COUNT(rating) AS cnt, COALESCE(SUM(rating), 0) AS rsum
                 FROM game_reviews
                 GROUP BY game_id
             ) agg
@@ -2461,7 +2461,7 @@ def _enrich_games_with_records(games):
         if game_ids:
             cur.execute("""
                 SELECT game_id,
-                       COUNT(*)                          AS review_count,
+                       COUNT(rating)                     AS review_count,
                        ROUND((AVG(rating) / 2.0)::numeric, 2)::float AS avg_stars
                 FROM game_reviews
                 WHERE game_id = ANY(%s)
@@ -5156,7 +5156,7 @@ def submit_review(game_id):
 
         cur.execute("""
             UPDATE games
-            SET review_count = (SELECT COUNT(*) FROM game_reviews WHERE game_id = %s),
+            SET review_count = (SELECT COUNT(rating) FROM game_reviews WHERE game_id = %s),
                 rating_sum   = (SELECT COALESCE(SUM(rating), 0) FROM game_reviews WHERE game_id = %s)
             WHERE game_id = %s
         """, (game_id, game_id, game_id))
@@ -5439,13 +5439,14 @@ def submit_game_log(game_id):
     # empty body, so a malformed client can't silently mark games as watched.
     _has_potg    = bool(body.get("potg"))
     _watched_only = bool(body.get("watched"))
+    # A note stands alone as of schema_v14, which made game_reviews.rating nullable.
+    # It used to be rejected ("a written review needs a game rating") purely because
+    # NOT NULL left review text nowhere to live.
+    _has_text    = bool(review_text)
     if (rating is None and not raw_perfs and not (body.get("remove_grades") or [])
-            and not _has_potg and not _watched_only):
+            and not _has_potg and not _watched_only and not _has_text):
         return jsonify({"error": "Nothing to log — rate it, pick a player, "
-                                 "or mark it watched."}), 400
-    # Review text has nowhere to live without a game_reviews row, so don't silently drop it.
-    if rating is None and review_text:
-        return jsonify({"error": "A written review needs a game rating."}), 400
+                                 "write a note, or mark it watched."}), 400
 
     # Dedupe on person_id, last one wins. Required, not just tidy: a multi-row INSERT
     # ... ON CONFLICT DO UPDATE errors with "cannot affect row a second time" if the
@@ -5514,11 +5515,14 @@ def submit_game_log(game_id):
         u = cur.fetchone()
         avatar_url = (u["avatar_url"] if u else None) or ""
 
-        # Only touch game_reviews when a game rating was actually given. A grades-only log
-        # must NOT create (or silently delete) a review row — if the user already reviewed
-        # this game and is now just adding grades, their review has to survive untouched.
+        # Touch game_reviews when the submit carries anything the row actually holds —
+        # rating, note, tags or attendance. A log that carries none of them (a pick
+        # alone, or grades alone) must NOT create or silently delete a review row: if
+        # the user already reviewed this game, their review has to survive untouched.
         review = None
-        if rating is not None:
+        _review_tags = _clean_tags(body.get("tags"))
+        _review_attended = bool(body.get("attended", False))
+        if rating is not None or review_text or _review_tags or _review_attended:
             cur.execute("""
                 INSERT INTO game_reviews (user_id, game_id, rating, review_text, tags, attended)
                 VALUES (%s, %s, %s, %s, %s, %s)
@@ -5530,7 +5534,7 @@ def submit_game_log(game_id):
                     updated_at  = NOW()
                 RETURNING *
             """, (user["id"], game_id, rating, review_text,
-                  _json.dumps(_clean_tags(body.get("tags"))), bool(body.get("attended", False))))
+                  _json.dumps(_review_tags), _review_attended))
             review = dict(cur.fetchone())
             review["display_name"]  = user["display_name"]
             review["avatar_url"]    = avatar_url
@@ -5593,7 +5597,7 @@ def submit_game_log(game_id):
         if review is not None:
             cur.execute("""
                 UPDATE games
-                SET review_count = (SELECT COUNT(*) FROM game_reviews WHERE game_id = %s),
+                SET review_count = (SELECT COUNT(rating) FROM game_reviews WHERE game_id = %s),
                     rating_sum   = (SELECT COALESCE(SUM(rating), 0) FROM game_reviews WHERE game_id = %s)
                 WHERE game_id = %s
             """, (game_id, game_id, game_id))
@@ -5667,7 +5671,7 @@ def delete_review(game_id):
         if deleted:
             cur.execute("""
                 UPDATE games
-                SET review_count = (SELECT COUNT(*) FROM game_reviews WHERE game_id = %s),
+                SET review_count = (SELECT COUNT(rating) FROM game_reviews WHERE game_id = %s),
                     rating_sum   = (SELECT COALESCE(SUM(rating), 0) FROM game_reviews WHERE game_id = %s)
                 WHERE game_id = %s
             """, (game_id, game_id, game_id))
@@ -6081,7 +6085,7 @@ def delete_game_log(game_id):
         if review_deleted:
             cur.execute("""
                 UPDATE games
-                SET review_count = (SELECT COUNT(*) FROM game_reviews WHERE game_id = %s),
+                SET review_count = (SELECT COUNT(rating) FROM game_reviews WHERE game_id = %s),
                     rating_sum   = (SELECT COALESCE(SUM(rating), 0) FROM game_reviews WHERE game_id = %s)
                 WHERE game_id = %s
             """, (game_id, game_id, game_id))
@@ -12069,7 +12073,7 @@ def get_user_profile(user_id):
         # Rating distribution (1–10 buckets → displayed as ½–5 stars)
         cur.execute("""
             SELECT rating, COUNT(*) AS cnt
-            FROM game_reviews WHERE user_id = %s
+            FROM game_reviews WHERE user_id = %s AND rating IS NOT NULL
             GROUP BY rating ORDER BY rating
         """, (user_id,))
         dist = {r["rating"]: r["cnt"] for r in cur.fetchall()}
@@ -13946,7 +13950,7 @@ def _enrich_wnba_games(games: list):
         cur  = conn.cursor()
         cur.execute("""
             SELECT game_id,
-                   COUNT(*) AS review_count,
+                   COUNT(rating) AS review_count,
                    ROUND((AVG(rating) / 2.0)::numeric, 2)::float AS avg_stars
             FROM game_reviews
             WHERE game_id = ANY(%s)
