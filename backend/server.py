@@ -10905,8 +10905,13 @@ def rewatch_suggestions():
     Shaped like scoreboard games on purpose — the client renders them with the
     same card component as a live slate rather than a lookalike.
     """
-    user  = current_user()
-    limit = min(int(request.args.get("limit", 10) or 10), 20)
+    user   = current_user()
+    limit  = min(int(request.args.get("limit", 10) or 10), 20)
+    league = (request.args.get("league") or "").strip().lower()
+    # Matches the home page's league pills: an empty/`all` scope spans both.
+    lg_clause, lg_params = "", []
+    if league in ("nba", "wnba"):
+        lg_clause, lg_params = " AND league = %s", [league]
 
     conn = get_conn(); cur = conn.cursor()
     try:
@@ -10915,6 +10920,10 @@ def rewatch_suggestions():
             cur.execute("SELECT league, team_abbr FROM watchlist_teams WHERE user_id = %s",
                         (user["id"],))
             teams = cur.fetchall()
+            # Narrow the team preference too — under a WNBA scope, preferring an
+            # NBA team can only produce rows the league filter then discards.
+            if league in ("nba", "wnba"):
+                teams = [t for t in teams if t["league"] == league]
 
         # A couple of reviews before a rating means anything — a single 5-star
         # from one person is not a recommendation.
@@ -10932,15 +10941,15 @@ def rewatch_suggestions():
             params = []
             for t in teams:
                 params += [t["league"], t["team_abbr"], t["team_abbr"]]
-            cur.execute(base + f" AND ({conds}) ORDER BY bayesian_rating DESC LIMIT %s",
-                        params + [limit])
+            cur.execute(base + lg_clause + f" AND ({conds}) ORDER BY bayesian_rating DESC LIMIT %s",
+                        lg_params + params + [limit])
             rows = cur.fetchall()
 
         # Top up from the league at large when a team's own history is thin.
         if len(rows) < limit:
             have = [r["game_id"] for r in rows] or [""]
-            cur.execute(base + " AND NOT (game_id = ANY(%s)) ORDER BY bayesian_rating DESC LIMIT %s",
-                        (have, limit - len(rows)))
+            cur.execute(base + lg_clause + " AND NOT (game_id = ANY(%s)) ORDER BY bayesian_rating DESC LIMIT %s",
+                        lg_params + [have, limit - len(rows)])
             rows += cur.fetchall()
 
         games = [{
