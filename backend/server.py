@@ -10894,6 +10894,42 @@ def _game_covered_by_subscription(cur, user_id: int, game_id: str) -> bool:
     return cur.fetchone() is not None
 
 
+@app.route("/api/schedule/next")
+def next_slate_date():
+    """First date after `date` that actually has games.
+
+    Powers the home page's empty-slate signpost. Without it a quiet day is a
+    dead end — the page says "no games" and offers a generic Explore button,
+    when it now knows the whole schedule and can say when basketball resumes.
+
+    Unauthenticated: the answer is the same for everybody.
+    """
+    from datetime import date as _date
+    day    = (request.args.get("date") or "").strip() or _date.today().isoformat()
+    league = (request.args.get("league") or "all").strip().lower()
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        params = [day]
+        clause = "game_date > %s"
+        if league in ("nba", "wnba"):
+            clause += " AND league = %s"; params.append(league)
+        cur.execute(f"""
+            SELECT game_date, COUNT(*) AS n FROM scheduled_games
+            WHERE {clause}
+            GROUP BY game_date ORDER BY game_date LIMIT 1
+        """, params)
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"date": None, "count": 0})
+        return jsonify({"date": row["game_date"].isoformat(), "count": int(row["n"])})
+    except Exception as e:
+        # An empty state that fails to load should stay quiet, not error.
+        return jsonify({"date": None, "count": 0, "error": str(e)})
+    finally:
+        cur.close(); conn.close()
+
+
 @app.route("/api/me/watchlist", methods=["GET"])
 @login_required
 def get_watchlist():
