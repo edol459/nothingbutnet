@@ -10894,6 +10894,74 @@ def _game_covered_by_subscription(cur, user_id: int, game_id: str) -> bool:
     return cur.fetchone() is not None
 
 
+@app.route("/api/games/rewatch")
+def rewatch_suggestions():
+    """Highly-rated past games worth revisiting, for the home page's quiet days.
+
+    Prefers games involving the caller's watchlist teams, so an Indiana fan gets
+    the Pacers' Finals run rather than a generic league leaderboard; falls back
+    to the best-rated games overall for signed-out or team-less users.
+
+    Shaped like scoreboard games on purpose — the client renders them with the
+    same card component as a live slate rather than a lookalike.
+    """
+    user  = current_user()
+    limit = min(int(request.args.get("limit", 10) or 10), 20)
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        teams = []
+        if user:
+            cur.execute("SELECT league, team_abbr FROM watchlist_teams WHERE user_id = %s",
+                        (user["id"],))
+            teams = cur.fetchall()
+
+        # A couple of reviews before a rating means anything — a single 5-star
+        # from one person is not a recommendation.
+        base = """
+            SELECT game_id, season, game_date, league,
+                   home_team_abbr, away_team_abbr, home_score, away_score,
+                   bayesian_rating, review_count
+            FROM games
+            WHERE status = 'Final' AND review_count >= 2
+              AND bayesian_rating IS NOT NULL
+        """
+        rows = []
+        if teams:
+            conds = " OR ".join(["(league = %s AND (home_team_abbr = %s OR away_team_abbr = %s))"] * len(teams))
+            params = []
+            for t in teams:
+                params += [t["league"], t["team_abbr"], t["team_abbr"]]
+            cur.execute(base + f" AND ({conds}) ORDER BY bayesian_rating DESC LIMIT %s",
+                        params + [limit])
+            rows = cur.fetchall()
+
+        # Top up from the league at large when a team's own history is thin.
+        if len(rows) < limit:
+            have = [r["game_id"] for r in rows] or [""]
+            cur.execute(base + " AND NOT (game_id = ANY(%s)) ORDER BY bayesian_rating DESC LIMIT %s",
+                        (have, limit - len(rows)))
+            rows += cur.fetchall()
+
+        games = [{
+            "gameId":         r["game_id"],
+            "gameStatus":     3,
+            "gameStatusText": "Final",
+            "gameDate":       r["game_date"].isoformat() if r["game_date"] else None,
+            "league":         r["league"],
+            "season":         r["season"],
+            "away": {"abbr": r["away_team_abbr"], "score": int(r["away_score"] or 0)},
+            "home": {"abbr": r["home_team_abbr"], "score": int(r["home_score"] or 0)},
+            "avg_stars":      round(float(r["bayesian_rating"] or 0) / 2, 2),
+            "review_count":   int(r["review_count"] or 0),
+        } for r in rows]
+        return jsonify({"games": games})
+    except Exception as e:
+        return jsonify({"games": [], "error": str(e)})
+    finally:
+        cur.close(); conn.close()
+
+
 @app.route("/api/schedule/next")
 def next_slate_date():
     """First date after `date` that actually has games.
