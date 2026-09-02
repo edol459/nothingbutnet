@@ -1,5 +1,7 @@
 # ydkball Database Map
-*Generated 2026-06-27. Re-audit with the query scripts in `backend/ingest/` when adding new features.*
+*Generated 2026-06-27. App & User Data Layer re-audited 2026-09-02; the NBA/WNBA data
+layer sections below still carry June figures. Re-audit with the query scripts in
+`backend/ingest/` when adding new features.*
 
 ---
 
@@ -264,30 +266,61 @@ Updated daily by Railway cron. Has seasons 2021–2026 and a long historical tai
 ### `users` — 264 registered users
 219 have avatars set (83%).
 
-### `game_reviews` — 1,214 reviews
+### `game_reviews` — 1,295 reviews
 Active since April 2026. Growing daily.
 
-### `performance_reviews` — 0 rows
-New table for player performance ratings (iOS feature just built). No user data yet — will populate as the feature is used.
+`rating` is **nullable** as of `schema_v14` — a written note no longer requires stars, so
+a row can hold text with no rating. Currently 0 such rows. This matters to any query that
+averages: use `COUNT(rating)`, never `COUNT(*)`, as the denominator, or ratingless rows
+drag every game's average down. `games.review_count` is that `COUNT(rating)` and is what
+the app labels "N ratings".
 
-### `player_follows` — 1 row
-New table (IF NOT EXISTS, created lazily). Will grow as players use the Follow button on player profiles.
+### `game_watches` — 1,336 watches from 142 users
+The diary's spine: every submitted log writes one, so a game can be "watched" with no
+review, no pick and no grades.
 
-### `friendships` — 102 total
-77 accepted, 25 pending.
+### `potg_picks` — 62 picks from 8 users across 56 games
+Player of the Game: **one pick per user per game**, enforced by the primary key
+`(user_id, game_id)`. Replaced per-player letter grading in September 2026. `player_name`
+and `team_abbr` are denormalised so a tally never has to join across two leagues' player
+tables. All 62 rows are backfilled conversions of the old grades (each user's
+highest-graded player per game), so every historical report card has exactly one pick.
 
-### `review_likes` — 570 likes
+Created and repaired by `backend/schema_v13.py`, which is idempotent and re-runnable.
+
+### `performance_reviews` — 258 rows from 8 users
+The old letter-grading data. **Preserved deliberately, not dead weight**: grading never
+shipped past TestFlight, and the table plus `GradeReportCard.swift`, `perf_gpa_sql`,
+`/api/performances/*` and `/api/top-performers` all stay so it can be revived. Nothing
+writes to it any more. Its `rating` is still `NOT NULL` — the nullable change was
+`game_reviews` only.
+
+### `player_follows` — 108 follows from 9 users
+Created lazily (IF NOT EXISTS). Grows via the Follow button on player profiles.
+
+### `friendships` — 119 total
+85 accepted, 34 pending.
+
+### `review_likes` — 602 likes
 ### `review_replies` — 11 replies
 
 ### `xp_events` — engagement tracking
 
 | Event Type | Count |
 |-----------|-------|
-| review_like | 542 |
-| app_open | 449 |
-| live_game_view | 274 |
-| survival_daily (Higher or Lower) | 4 |
-| poeltl_daily (Guess Who) | 4 |
+| app_open | 915 |
+| live_game_view | 620 |
+| review_like | 576 |
+| survival_daily (Higher or Lower) | 240 |
+| poeltl_daily (Guess Who) | 214 |
+| list_like | 13 |
+| list_comment | 6 |
+
+Note what is **absent**: logging a game — the product's core action — grants no Ball
+Knowledge at all. Neither grading nor Player of the Game ever paid XP.
+
+Product analytics belong in `analytics_events`, never here: `xp_events.xp_amount` feeds
+`users.xp` and its writes dedupe on `(user, type, reference_id)`.
 
 ---
 
@@ -303,8 +336,40 @@ New table (IF NOT EXISTS, created lazily). Will grow as players use the Follow b
 ### `poeltl_results` — Guess Who play history
 4 results from 3 users.
 
-### `game_lists` — user-created lists
-4 lists from 2 users. 21 player list items.
+### `game_lists` — user-created lists — 74 lists
+By `list_type`: 52 `games`, 12 `teams`, 6 `players`, 3 `jerseys`, 1 `awards`.
+
+`awards` is a **Ballot** — a preseason prediction sheet, one per user per league per
+season. It reuses this table to inherit likes, comments and the public `/list/<id>` page;
+its picks live in `award_ballot_items` keyed `(list_id, award_code)`. See CLAUDE.md.
+
+### `award_ballot_items` — 0 rows
+The one ballot above has no picks saved yet.
+
+---
+
+## Onboarding, Allegiance & Watchlist
+
+### `scheduled_games` — 1,616 games (1,266 NBA, 350 WNBA)
+Covering 2026-04-25 → 2027-04-11. Deliberately **separate from `games`**, which only ever
+holds completed games — about a dozen `FROM games` queries carry no status filter and
+would have started returning unplayed games. Refreshed daily by
+`backend/ingest/fetch_scheduled_games.py` (upsert + prune) in the `cloud_daily` pipeline.
+
+### `team_allegiance` — 178 rows from 176 users
+167 NBA, 11 WNBA. **One allegiance per user**, enforced by a partial unique index
+(`schema_v11`); switching teams updates in place rather than appending history. Backfilled
+from `users.favorite_team`, which is kept in sync as the display field.
+
+### `watchlist_teams` — 5 rows from 3 users
+### `watchlist_games` — 0 rows
+Quick-add a team's whole upcoming season (`watchlist_teams`), plus per-game overrides in
+`watchlist_games` where `action` is `'add'` or `'remove'`. The pair resolves against
+`scheduled_games`, so a team subscription picks up newly scheduled games automatically.
+
+### `users.onboarded_at` — 3 of 311 users
+Stamped on completing first-run onboarding (`schema_v7`). Null for everyone who registered
+before it shipped, which is intentional: they get the flow on next launch.
 
 ### `jerseys` — 1,116 jersey records
 No league column — NBA only.
@@ -333,3 +398,6 @@ The odds/predictions feature appears to be dormant.
 | 🟢 Low | `player_pctiles` missing 2023-24 | Run `compute_pctiles.py --season 2023-24` |
 | 🟢 Low | `game_odds` / `game_predictions` stale | Feature appears inactive — ignore or remove |
 | 🟢 Low | `wnba_player_seasons` `ALL_SEASONS` cap at 2025 | Update script to include 2026 for future `--season all` runs |
+| 🟡 Medium | `health_check.py` doesn't know `potg_picks` | Add it to the row-count checks so picks silently stopping gets flagged |
+| 🟡 Medium | Web (`frontend/game.html`) still speaks grading, and renders `★ 0.0` for a note-only review | Convert to Player of the Game; suppress stars when `rating` is null |
+| 🟢 Low | NBA/WNBA data-layer counts above are from 2026-06-27 | Re-audit when convenient |

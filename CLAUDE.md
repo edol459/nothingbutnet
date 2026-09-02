@@ -90,6 +90,54 @@ Three jobs, see `DATABASE_MAP.md` for the full table-by-table map.
 All NBA/WNBA CDN calls go through `_cdn_get()` with curl_cffi Chrome impersonation
 to defeat Akamai TLS fingerprinting on Railway IPs — see `docs/cdn-akamai-bot-manager.md`.
 
+## Player of the Game (the log sheet)
+
+Replaced per-player letter grading in September 2026. Grading asked for up to 26 decisions
+per game; this asks for one. Code and user-facing name agree — both say **POTG** /
+"Player of the Game" — so there is no naming gotcha here.
+
+- **One pick per user per game**, enforced by `potg_picks`' primary key, not by the
+  endpoint. **Final games only**: a pick at halftime is a different claim from one at the
+  buzzer, and mixing them corrupts the tally. Drafts still hold a pick made earlier.
+- **Tallies are always visible in the game's Community tab, never on the log sheet** —
+  lurkers should see the crowd's pick; nobody should see "Haliburton 62%" while choosing.
+- **Grading is preserved, not deleted.** `performance_reviews` (258 rows),
+  `GradeReportCard.swift`, `perf_gpa_sql`, `/api/performances/*`, `/api/top-performers`,
+  `PERF_RATING_MAX`, plus the now-unreferenced `GradeReportCardSection`, `reportCard` in
+  `GameLogDetailView` and `ratingSection`/`trendChart`/`reviewsSection` in
+  `PlayerProfileView`. Reverting is re-wiring a couple of `if` blocks.
+  **`GradeReportCard.swift` is not dead** — it also holds `ReviewTextEditor` and
+  `ReviewTextView`, the live note composer. Don't delete the file.
+
+### Every field stands alone
+
+A rating, a pick, a note, or "I watched this" is each a complete log on its own. That
+symmetry cost a migration: `game_reviews.rating` was `NOT NULL`, so a note needed stars.
+`schema_v14` made it nullable.
+
+**The trap that creates:** anything averaging ratings must use `COUNT(rating)`, never
+`COUNT(*)` — `AVG`/`SUM` skip nulls and `COUNT(*)` doesn't, so a ratingless row silently
+drags a game's average down (measured: 4.55 → 4.46). `games.review_count` is now that
+count, which is also what the app labels "N ratings". Anything dividing `rating / 2` for
+stars needs a null guard.
+
+`GameLogState.swift` is the client's rule engine for what's submittable and what counts as
+a pending change — pure data, no SwiftUI, exercised by `tests/run.sh` (79 cases, `swiftc`
+only, no simulator). Add a case there when you change submit rules; the client and server
+disagreeing is how "submit" starts returning 400s.
+
+### Three grouped queries, one shape
+
+`_GAME_LOGS_SQL` (game page Community tab), `_FEED_GROUPED_SQL` (feed) and
+`_DIARY_GROUPED_SQL` (own diary) each build a `logs` CTE by `FULL OUTER JOIN`-ing
+`game_reviews`, `performance_reviews` and `potg_picks`. **All three must stay in sync.**
+`potg_picks` is a `FULL OUTER JOIN` on purpose: with `LEFT JOIN`, a log that is only a pick
+— now the most likely kind — appears in none of these surfaces at all.
+
+If you backfill `potg_picks`, write `updated_at` explicitly. Letting it default to `NOW()`
+stamps every row with the migration instant, and these queries sort on it, so the whole
+feed reorders to "everything happened just now".
+
 ## Awards ballots ("Ballots")
 
 A preseason prediction sheet: one per user, per league, per season. Code says
