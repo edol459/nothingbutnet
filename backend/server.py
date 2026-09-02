@@ -5764,6 +5764,30 @@ def get_game_log(game_id, log_user_id):
             "pts": _i(r["pts"]), "reb": _i(r["reb"]), "ast": _i(r["ast"]),
         } for r in cur.fetchall()]
 
+        # Their Player of the Game, with the same stat line the grades carry, so the
+        # pick can be shown as a performance rather than just a name.
+        cur.execute("""
+            SELECT pp.person_id, pp.player_name, pp.team_abbr,
+                   COALESCE(pgl.pts, wgs.pts) AS pts,
+                   COALESCE(pgl.reb, wgs.reb) AS reb,
+                   COALESCE(pgl.ast, wgs.ast) AS ast,
+                   COALESCE(pgl.min, wgs.min) AS min
+            FROM potg_picks pp
+            LEFT JOIN player_gamelogs pgl
+                   ON pgl.game_id = pp.game_id AND pgl.player_id = pp.person_id
+            LEFT JOIN wnba_player_game_stats wgs
+                   ON wgs.game_id = pp.game_id AND wgs.player_id = pp.person_id
+            WHERE pp.user_id = %s AND pp.game_id = %s
+        """, (log_user_id, game_id))
+        _p = cur.fetchone()
+        potg = {
+            "person_id":   _p["person_id"],
+            "player_name": _p["player_name"] or "",
+            "team_abbr":   _p["team_abbr"],
+            "min": _i(_p["min"]),
+            "pts": _i(_p["pts"]), "reb": _i(_p["reb"]), "ast": _i(_p["ast"]),
+        } if _p else None
+
         cur.execute("""
             SELECT game_id, game_date, league, home_team_abbr, away_team_abbr,
                    home_score, away_score, status
@@ -5772,9 +5796,10 @@ def get_game_log(game_id, log_user_id):
         g = cur.fetchone()
         cur.close(); conn.close()
 
-        # A log with neither a review nor grades doesn't exist — say so rather than
-        # returning an empty shell the client has to special-case.
-        if not review and not grades:
+        # A log with none of a review, a pick or grades doesn't exist — say so rather than
+        # returning an empty shell the client has to special-case. `potg` counts: a pick
+        # alone is a complete log, and without it those 404'd.
+        if not review and not grades and not potg:
             return jsonify({"error": "No log found"}), 404
 
         return jsonify({
@@ -5793,10 +5818,12 @@ def get_game_log(game_id, log_user_id):
                 "home_score": g["home_score"], "away_score": g["away_score"],
                 "status": g["status"],
             } if g else None),
+            "potg": potg,
             "review": ({
                 "id": review["id"],
                 "rating": review["rating"],
-                "stars": round(review["rating"] / 2.0, 1),
+                # None for a note-only log — game_reviews.rating is nullable (schema_v14).
+                "stars": round(review["rating"] / 2.0, 1) if review["rating"] is not None else None,
                 "review_text": review["review_text"],
                 "tags": review.get("tags") or [],
                 "attended": bool(review.get("attended", False)),
@@ -6634,7 +6661,7 @@ def admin_list_reviews():
                 "id":           d["id"],
                 "game_id":      d["game_id"],
                 "rating":       d["rating"],
-                "stars":        d["rating"] / 2,
+                "stars":        (d["rating"] / 2) if d["rating"] is not None else None,
                 "review_text":  d["review_text"],
                 "created_at":   str(d["created_at"]),
                 "user_id":      d["user_id"],
@@ -7931,8 +7958,13 @@ def get_user_games(user_id):
         result = []
         for r in rows:
             d = dict(r)
-            is_rated    = d["review_id"] is not None
-            is_reviewed = is_rated and bool((d.get("review_text") or "").strip())
+            # Three different questions, previously conflated into one. A note-only log
+            # (schema_v14) HAS a review row and text but NO rating, so gating the payload
+            # on is_rated dropped its note, tags and likes — and dividing its null rating
+            # by 2 raised a 500.
+            has_review  = d["review_id"] is not None
+            is_rated    = d["rating"] is not None
+            is_reviewed = has_review and bool((d.get("review_text") or "").strip())
             entry = {
                 "game_id":        d["game_id"],
                 "watched_at":     str(d["watched_at"]),
@@ -7954,11 +7986,11 @@ def get_user_games(user_id):
                 "is_reviewed":    is_reviewed,
                 "user_id":        user_id,
             }
-            if is_rated:
+            if has_review:
                 entry.update({
                     "review_id":   d["review_id"],
                     "rating":      d["rating"],
-                    "stars":       d["rating"] / 2,
+                    "stars":       (d["rating"] / 2) if is_rated else None,
                     "review_text": d.get("review_text"),
                     "attended":    bool(d.get("attended", False)),
                     "tags":        d.get("tags") or [],
