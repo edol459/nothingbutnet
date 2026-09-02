@@ -61,11 +61,14 @@ CREATE INDEX IF NOT EXISTS idx_potg_person
 # highest grade wins; person_id breaks ties deterministically, which matters for
 # a migration that may be re-run.
 BACKFILL = """
-INSERT INTO potg_picks (user_id, game_id, person_id, player_name, created_at)
+INSERT INTO potg_picks (user_id, game_id, person_id, player_name, created_at, updated_at)
 SELECT DISTINCT ON (user_id, game_id)
        user_id, game_id, person_id,
        COALESCE(NULLIF(player_name, ''), 'Unknown'),
-       created_at
+       -- updated_at explicitly, NOT its NOW() default: a converted grade was never
+       -- edited, and letting it default stamped all 62 rows with the migration instant.
+       -- The feed sorts on this, so it made every historical log look brand new.
+       created_at, created_at
 FROM performance_reviews
 WHERE rating IS NOT NULL
 ORDER BY user_id, game_id, rating DESC, person_id
@@ -100,6 +103,18 @@ UPDATE potg_picks p SET team_abbr = COALESCE(
 """
 
 
+# Repairs rows written before the backfill set updated_at. Scoped by the EXISTS: it only
+# touches a pick that IS still the grade it was converted from, so a pick the user has
+# since changed keeps its real edit time.
+REPAIR_STAMPS = """
+UPDATE potg_picks p SET updated_at = created_at
+ WHERE p.updated_at > p.created_at
+   AND EXISTS (SELECT 1 FROM performance_reviews pr
+                WHERE pr.user_id = p.user_id AND pr.game_id = p.game_id
+                  AND pr.person_id = p.person_id)
+"""
+
+
 def run():
     print("Connecting to database...")
     try:
@@ -128,6 +143,10 @@ def run():
         cur.execute(REPAIR_TEAMS)
         if cur.rowcount:
             print(f"  recovered {cur.rowcount} missing team abbr(s)")
+
+        cur.execute(REPAIR_STAMPS)
+        if cur.rowcount:
+            print(f"  reset {cur.rowcount} migration-stamped updated_at value(s)")
 
         cur.execute("SELECT COUNT(*), COUNT(DISTINCT user_id), COUNT(team_abbr) FROM potg_picks")
         rows, users, with_team = cur.fetchone()

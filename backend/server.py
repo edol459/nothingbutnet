@@ -4947,20 +4947,28 @@ def get_game(game_id):
 _GAME_LOGS_SQL = """
     WITH logs AS (
         SELECT
-            COALESCE(gr.user_id, pl.user_id) AS user_id,
+            COALESCE(gr.user_id, pl.user_id, pg.user_id) AS user_id,
             gr.id                            AS review_id,
             gr.rating, gr.review_text, gr.created_at, gr.updated_at,
             COALESCE(gr.tags, '[]'::jsonb)   AS tags,
             COALESCE(gr.attended, FALSE)     AS attended,
             COALESCE(pl.grade_count, 0)      AS grade_count,
-            GREATEST(COALESCE(gr.updated_at, gr.created_at, pl.last_at),
-                     COALESCE(pl.last_at, gr.created_at)) AS activity_at
+            pg.player_name                   AS potg_name,
+            GREATEST(COALESCE(gr.updated_at, gr.created_at, pl.last_at, pg.updated_at),
+                     COALESCE(pl.last_at, gr.created_at, pg.updated_at),
+                     pg.updated_at) AS activity_at
         FROM (SELECT * FROM game_reviews WHERE game_id = %(gid)s) gr
         FULL OUTER JOIN (
             SELECT user_id, COUNT(*) AS grade_count, MAX(created_at) AS last_at
             FROM performance_reviews WHERE game_id = %(gid)s
             GROUP BY user_id
         ) pl ON pl.user_id = gr.user_id
+        -- FULL OUTER, not LEFT: a pick with no rating and no grades is now the most
+        -- likely kind of log there is, and a LEFT JOIN would keep it out of this list
+        -- entirely rather than merely leaving its name off the row. At most one row per
+        -- (user, game) — the potg_picks primary key — so this cannot fan out.
+        FULL OUTER JOIN (SELECT * FROM potg_picks WHERE game_id = %(gid)s) pg
+               ON pg.user_id = COALESCE(gr.user_id, pl.user_id)
     )
     SELECT
         COALESCE(l.review_id, 0) AS id,
@@ -4969,7 +4977,7 @@ _GAME_LOGS_SQL = """
         -- 0, not NULL: `Review.rating` is non-optional on the client and a grades-only log
         -- is exactly the "no game rating" case the feed already encodes as 0.
         COALESCE(l.rating, 0)                      AS rating,
-        l.review_text, l.tags, l.attended, l.grade_count,
+        l.review_text, l.tags, l.attended, l.grade_count, l.potg_name,
         -- A grades-only log has no game_reviews row, so no created_at of its own.
         COALESCE(l.created_at, l.activity_at)      AS created_at,
         COALESCE(l.updated_at, l.activity_at)      AS updated_at,
@@ -7022,23 +7030,32 @@ def get_recent_reviews():
 _FEED_GROUPED_SQL = """
     WITH logs AS (
         SELECT
-            COALESCE(gr.user_id, pl.user_id)  AS user_id,
-            COALESCE(gr.game_id, pl.game_id)  AS game_id,
+            COALESCE(gr.user_id, pl.user_id, pg.user_id)  AS user_id,
+            COALESCE(gr.game_id, pl.game_id, pg.game_id)  AS game_id,
             gr.id                             AS review_id,
             gr.rating, gr.review_text,
             COALESCE(gr.tags, '[]'::jsonb)    AS tags,
             COALESCE(gr.attended, FALSE)      AS attended,
             COALESCE(pl.grade_count, 0)       AS grade_count,
+            pg.player_name                    AS potg_name,
             -- Most recent activity, so editing a log resurfaces it instead of leaving a
             -- stale entry or creating a second one.
-            GREATEST(COALESCE(gr.updated_at, gr.created_at, pl.last_at),
-                     COALESCE(pl.last_at, gr.created_at))  AS activity_at
+            GREATEST(COALESCE(gr.updated_at, gr.created_at, pl.last_at, pg.updated_at),
+                     COALESCE(pl.last_at, gr.created_at, pg.updated_at),
+                     pg.updated_at)  AS activity_at
         FROM game_reviews gr
         FULL OUTER JOIN (
             SELECT user_id, game_id, COUNT(*) AS grade_count, MAX(created_at) AS last_at
             FROM performance_reviews
             GROUP BY user_id, game_id
         ) pl ON pl.user_id = gr.user_id AND pl.game_id = gr.game_id
+        -- FULL OUTER, not LEFT: a pick with no rating and no grades is now the most
+        -- likely kind of log there is, and a LEFT JOIN would keep it out of this list
+        -- entirely rather than merely leaving its name off the row. At most one row per
+        -- (user, game) — the potg_picks primary key — so this cannot fan out.
+        FULL OUTER JOIN potg_picks pg
+               ON pg.user_id = COALESCE(gr.user_id, pl.user_id)
+              AND pg.game_id = COALESCE(gr.game_id, pl.game_id)
     )
     SELECT
         'game_log'::text AS type,
@@ -7046,7 +7063,7 @@ _FEED_GROUPED_SQL = """
         l.game_id, l.user_id, l.rating,
         round(l.rating / 2.0, 1)  AS stars,
         l.review_text, l.tags, l.attended,
-        l.grade_count,
+        l.grade_count, l.potg_name,
         l.activity_at             AS created_at,
         u.display_name, u.avatar_url, u.favorite_team,
         u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
@@ -7417,25 +7434,27 @@ def browse_lists():
 _DIARY_GROUPED_SQL = """
     WITH logs AS (
         SELECT
-            COALESCE(gr.user_id, pl.user_id) AS user_id,
-            COALESCE(gr.game_id, pl.game_id) AS game_id,
+            COALESCE(gr.user_id, pl.user_id, pg.user_id) AS user_id,
+            COALESCE(gr.game_id, pl.game_id, pg.game_id) AS game_id,
             gr.id                            AS review_id,
             gr.rating, gr.review_text,
             COALESCE(gr.tags, '[]'::jsonb)   AS tags,
             COALESCE(gr.attended, FALSE)     AS attended,
             COALESCE(pl.grade_count, 0)      AS grade_count,
             pg.player_name                   AS potg_name,
-            GREATEST(COALESCE(gr.updated_at, gr.created_at, pl.last_at),
-                     COALESCE(pl.last_at, gr.created_at)) AS activity_at
+            GREATEST(COALESCE(gr.updated_at, gr.created_at, pl.last_at, pg.updated_at),
+                     COALESCE(pl.last_at, gr.created_at, pg.updated_at),
+                     pg.updated_at) AS activity_at
         FROM (SELECT * FROM game_reviews WHERE user_id = %(uid)s) gr
         FULL OUTER JOIN (
             SELECT user_id, game_id, COUNT(*) AS grade_count, MAX(created_at) AS last_at
             FROM performance_reviews WHERE user_id = %(uid)s
             GROUP BY user_id, game_id
         ) pl ON pl.user_id = gr.user_id AND pl.game_id = gr.game_id
-        -- The diary shows who you gave Player of the Game to. LEFT JOIN because a
-        -- log without a pick is still a log.
-        LEFT JOIN potg_picks pg
+        -- The diary shows who you gave Player of the Game to. FULL OUTER rather than
+        -- LEFT, which meant a log that is ONLY a pick — no rating, no grades — never
+        -- appeared in your own diary at all.
+        FULL OUTER JOIN (SELECT * FROM potg_picks WHERE user_id = %(uid)s) pg
                ON pg.user_id = COALESCE(gr.user_id, pl.user_id)
               AND pg.game_id = COALESCE(gr.game_id, pl.game_id)
     ),
