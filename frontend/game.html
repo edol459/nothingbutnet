@@ -166,6 +166,10 @@ table.box-table tfoot td:first-child{text-align:left;}
   background:var(--bg-card); color:var(--ink); font-family:var(--ff-sans); font-size:14px;
   margin-bottom:12px; cursor:pointer; }
 .potg-select:focus { border-color: var(--orange); outline:none; }
+.review-charcount { font-family:var(--ff-mono); font-size:11px; color:var(--ink4);
+  text-align:right; margin:-6px 0 8px; }
+.review-charcount.near { color:var(--orange); }
+.review-charcount.at { color:var(--red,#C0392B); }
 .potg-tally { padding:12px 0 4px; }
 .potg-tally-title { font-family:var(--ff-mono); font-size:10px; letter-spacing:.08em;
   color:var(--ink4); margin-bottom:8px; }
@@ -1049,6 +1053,7 @@ let _reviewUser    = null;
 let _reviewUserLoaded = false;
 let _currentTags   = [];
 let _attended      = false;
+const FREE_REVIEW_LIMIT = 500;   // mirrors _FREE_REVIEW_LIMIT in server.py
 let _potgPick      = null;   // {person_id, player_name, team_abbr} — null means no pick
 let _potgTally     = null;   // GET /api/games/<id>/potg
 let _watched       = false;
@@ -1229,7 +1234,8 @@ function renderReviewsContent(g, reviews, hasMore) {
         <select class="potg-select" id="potg-select"><option value="">— No pick —</option></select>
         <div class="reviews-write-title" id="write-title">Rate This Game</div>
         <div class="star-picker-inline" id="star-picker-inline"></div>
-        <textarea class="review-write-textarea" id="review-textarea" placeholder="Write a review (optional)…"></textarea>
+        <textarea class="review-write-textarea" id="review-textarea" placeholder="Write a review (optional)…"${_reviewUser.is_pro ? '' : ` maxlength="${FREE_REVIEW_LIMIT}"`}></textarea>
+        ${_reviewUser.is_pro ? '' : `<div class="review-charcount" id="review-charcount">0/${FREE_REVIEW_LIMIT}</div>`}
         <div class="write-tags-row" id="write-tags-row"></div>
         <div class="reviews-write-actions">
           <button class="btn-watch${g.is_watched ? ' on' : ''}" id="btn-watch" type="button">${_EYE_SVG}<span id="btn-watch-label">${g.is_watched ? 'Watched' : 'Mark watched'}</span></button>
@@ -1445,6 +1451,9 @@ function wireWriteSection() {
   // Initial empty tag row
   renderWriteTags();
   renderPotgSelect();
+  const ta0 = document.getElementById('review-textarea');
+  if (ta0) ta0.addEventListener('input', updateCharCount);
+  updateCharCount();
   const potgSel = document.getElementById('potg-select');
   if (potgSel) potgSel.addEventListener('change', () => {
     const id = potgSel.value;
@@ -1466,7 +1475,7 @@ function wireWriteSection() {
         const ta = document.getElementById('review-textarea');
         const title = document.getElementById('write-title');
         const btn = document.getElementById('btn-review-submit');
-        if (ta) ta.value = existing.review_text || '';
+        if (ta) { ta.value = existing.review_text || ''; updateCharCount(); }
         if (title) title.textContent = 'Your Review';
         if (btn) {
           btn.textContent = 'Update';
@@ -1575,6 +1584,18 @@ function _applyPickerColors(rating) {
 function applyStarColors(rating) { _applyPickerColors(rating); }
 
 // ── Submit / Delete ───────────────────────────────────────
+function updateCharCount() {
+  const el = document.getElementById('review-charcount');
+  if (!el) return;                       // Pro: no cap, no counter
+  const n = (document.getElementById('review-textarea')?.value || '').length;
+  el.className = 'review-charcount' + (n >= FREE_REVIEW_LIMIT ? ' at' : n >= FREE_REVIEW_LIMIT * 0.9 ? ' near' : '');
+  // No link: subscriptions are RevenueCat/in-app only, so there is nothing on the
+  // web to send them to. State the fact and leave it there.
+  el.textContent = n >= FREE_REVIEW_LIMIT
+    ? `${n}/${FREE_REVIEW_LIMIT} · Pro removes this limit`
+    : `${n}/${FREE_REVIEW_LIMIT}`;
+}
+
 async function submitReview() {
   const btn  = document.getElementById('btn-review-submit');
   const text = document.getElementById('review-textarea')?.value.trim() || null;

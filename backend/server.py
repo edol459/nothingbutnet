@@ -7373,9 +7373,20 @@ def browse_lists():
         " + (SELECT COUNT(*) FROM player_list_items WHERE list_id = gl.id)"
         " + (SELECT COUNT(*) FROM jersey_list_items WHERE list_id = gl.id)"
         " + (SELECT COUNT(*) FROM performance_list_items WHERE list_id = gl.id)"
-        " + (SELECT COUNT(*) FROM team_list_items   WHERE list_id = gl.id) )"
+        " + (SELECT COUNT(*) FROM team_list_items   WHERE list_id = gl.id)"
+        " + (SELECT COUNT(*) FROM award_ballot_items WHERE list_id = gl.id) )"
     )
     like_count_expr = "(SELECT COUNT(*) FROM list_likes WHERE list_id = gl.id)"
+
+    # ?type=awards for the ballots surface, ?type=lists for everything else.
+    # Absent, it returns both, which is what older clients expect.
+    kind = (request.args.get("type") or "").strip().lower()
+    if kind == "awards":
+        type_where = "AND COALESCE(gl.list_type, 'games') = 'awards'"
+    elif kind == "lists":
+        type_where = "AND COALESCE(gl.list_type, 'games') <> 'awards'"
+    else:
+        type_where = ""
     block_where  = ""
     block_params = []
     if user_id:
@@ -7403,6 +7414,7 @@ def browse_lists():
         JOIN users u ON u.id = gl.user_id
         WHERE gl.is_public = TRUE {block_where}
           AND {item_count_expr} > 0
+          {type_where}
         ORDER BY {order_by}
         LIMIT %s OFFSET %s
     """
@@ -9492,8 +9504,11 @@ def add_list_comment(list_id):
         cur.execute("INSERT INTO list_comments (list_id, user_id, text) VALUES (%s, %s, %s) RETURNING id",
                     (list_id, user["id"], text))
         new_id = cur.fetchone()["id"]
-        if lst["user_id"] != user["id"]:
-            _grant_xp(cur, lst["user_id"], "list_comment", f"{new_id}", 3)
+        # No XP for comments. Every other award dedupes on a bounded key — review_like
+        # and list_like use "<id>:<actor>", so one person can pay you at most once —
+        # but this keyed on the COMMENT id, so the same person commenting again minted
+        # more XP with no ceiling. Removed rather than re-keyed: capping it per commenter
+        # would still pay list owners for other people's typing.
         conn.commit()
         cur.execute("""
             SELECT lc.*, u.display_name, u.avatar_url
@@ -11942,7 +11957,8 @@ def get_notifications():
                        + (SELECT COUNT(*) FROM player_list_items WHERE list_id = gl.id)
                        + (SELECT COUNT(*) FROM jersey_list_items WHERE list_id = gl.id)
                        + (SELECT COUNT(*) FROM performance_list_items WHERE list_id = gl.id)
-                       + (SELECT COUNT(*) FROM team_list_items   WHERE list_id = gl.id) ) > 0
+                       + (SELECT COUNT(*) FROM team_list_items   WHERE list_id = gl.id)
+                       + (SELECT COUNT(*) FROM award_ballot_items WHERE list_id = gl.id) ) > 0
             """
             list_params = [uid, uid]
 
