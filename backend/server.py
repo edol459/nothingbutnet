@@ -5451,8 +5451,14 @@ def submit_game_log(game_id):
     # It used to be rejected ("a written review needs a game rating") purely because
     # NOT NULL left review text nowhere to live.
     _has_text    = bool(review_text)
+    # An explicit `"potg": null` is an instruction ("drop my pick"), not an empty body.
+    # Without this, removing a pick from a log that holds nothing else was impossible:
+    # the submit tripped the guard below and 400'd, so the only way out was deleting
+    # the whole log.
+    _clears_potg = "potg" in body and not _has_potg
     if (rating is None and not raw_perfs and not (body.get("remove_grades") or [])
-            and not _has_potg and not _watched_only and not _has_text):
+            and not _has_potg and not _watched_only and not _has_text
+            and not _clears_potg):
         return jsonify({"error": "Nothing to log — rate it, pick a player, "
                                  "write a note, or mark it watched."}), 400
 
