@@ -11920,6 +11920,12 @@ def get_notifications():
     # Opt-in for the same reason list_published is: an unknown `type` makes an
     # older build fail to decode the whole array, not just skip the row.
     include_xp = request.args.get("include_xp") in ("1", "true")
+    # Ballots used to arrive as 'list_published' and read "published a list",
+    # which is wrong for a ballot. Splitting them off needs its own type, and a
+    # new type needs its own opt-in — an older build switching on `type` would
+    # fail to decode the whole array. When this is off, ballots keep coming
+    # through the list arm exactly as before.
+    include_ballots = request.args.get("include_ballots") in ("1", "true")
     try:
         conn = get_conn()
         cur  = conn.cursor()
@@ -11928,7 +11934,11 @@ def get_notifications():
         list_arm = ""
         list_params: list = []
         if include_lists:
-            list_arm = """
+            # With the ballot arm active, ballots come through there instead —
+            # otherwise they'd appear twice.
+            not_ballot = ("AND COALESCE(gl.list_type, 'games') <> 'awards'"
+                          if include_ballots else "")
+            list_arm = f"""
                 UNION ALL
 
                 -- A friend published a public list.
@@ -11959,8 +11969,42 @@ def get_notifications():
                        + (SELECT COUNT(*) FROM performance_list_items WHERE list_id = gl.id)
                        + (SELECT COUNT(*) FROM team_list_items   WHERE list_id = gl.id)
                        + (SELECT COUNT(*) FROM award_ballot_items WHERE list_id = gl.id) ) > 0
+                  {not_ballot}
             """
             list_params = [uid, uid]
+
+        # A friend filled in a ballot. Same shape as list_published, different
+        # word — and it carries the league so the row can say which one.
+        ballot_arm = ""
+        ballot_params: list = []
+        if include_ballots:
+            ballot_arm = """
+                UNION ALL
+
+                SELECT
+                    'ballot_published'      AS type,
+                    gl.created_at,
+                    u.id,
+                    u.display_name,
+                    u.avatar_url,
+                    gl.id                   AS review_id,
+                    NULL::text              AS game_id,
+                    NULL::text              AS home_team_abbr,
+                    NULL::text              AS away_team_abbr,
+                    NULL::date              AS game_date,
+                    gl.title                AS reply_text,
+                    gl.league               AS league
+                FROM game_lists gl
+                JOIN users u ON u.id = gl.user_id
+                JOIN friendships f ON (
+                    (f.sender_id = %s AND f.receiver_id = gl.user_id)
+                    OR (f.receiver_id = %s AND f.sender_id = gl.user_id)
+                ) AND f.status = 'accepted'
+                WHERE gl.is_public = TRUE
+                  AND COALESCE(gl.list_type, 'games') = 'awards'
+                  AND (SELECT COUNT(*) FROM award_ballot_items WHERE list_id = gl.id) > 0
+            """
+            ballot_params = [uid, uid]
 
         # Ball Knowledge worth telling someone about. Deliberately not every
         # grant: app opens, both dailies and live-game views each fire a toast
@@ -12080,11 +12124,12 @@ def get_notifications():
                 JOIN users u ON u.id = f.sender_id
                 WHERE f.receiver_id = %s AND f.status = 'pending'
                 {list_arm}
+                {ballot_arm}
                 {xp_arm}
             ) n
             ORDER BY created_at DESC
             LIMIT %s
-        """, (uid, uid, uid, uid, uid, *list_params, *xp_params, limit))
+        """, (uid, uid, uid, uid, uid, *list_params, *ballot_params, *xp_params, limit))
 
         rows = cur.fetchall()
         cur.close(); conn.close()
