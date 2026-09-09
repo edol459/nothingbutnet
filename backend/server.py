@@ -1458,7 +1458,21 @@ def get_seasons():
         league = request.args.get("league", "nba").lower().strip()
         conn = get_conn()
         cur  = conn.cursor()
-        if source == "games":
+        if source == "all":
+            # Everything a user could pick from: seasons already played AND ones only
+            # scheduled so far. `games` stops at the last completed season and
+            # `scheduled_games` starts at the current one, so neither covers the range
+            # on its own.
+            cur.execute("""
+                SELECT DISTINCT season, season_type FROM (
+                    SELECT season, season_type, league FROM games
+                    UNION
+                    SELECT season, season_type, league FROM scheduled_games
+                ) t
+                WHERE league = %s
+                ORDER BY season DESC, season_type
+            """, (league,))
+        elif source == "games":
             cur.execute("""
                 SELECT DISTINCT season, season_type
                 FROM games
@@ -11354,6 +11368,7 @@ def browse_scheduled_games():
     user_id = user["id"] if user else None
     q       = (request.args.get("q") or "").strip()
     league  = (request.args.get("league") or "").strip().lower()
+    season  = (request.args.get("season") or "").strip()
     date_from = (request.args.get("from") or "").strip()
     date_to   = (request.args.get("to") or "").strip()
     try:
@@ -11364,9 +11379,16 @@ def browse_scheduled_games():
     # Past games live in `games` (they leave scheduled_games and gain a score), future
     # ones in `scheduled_games`. The picker searches whichever the date range implies,
     # so "find me that game from March" works the same as finding one in January.
-    include_past = bool(date_from) and date_from < date.today().isoformat()
+    # A season selection means "every game in it", so the default forward-only
+    # window has to come off and completed games have to be searched — a past season
+    # exists only in `games`, an upcoming one only in `scheduled_games`.
+    include_past = bool(season) or (bool(date_from) and date_from < date.today().isoformat())
 
-    where, params = ["sg.game_date >= CURRENT_DATE"], {"limit": limit}
+    where, params = [], {"limit": limit}
+    if season:
+        where.append("sg.season = %(season)s"); params["season"] = season
+    else:
+        where.append("sg.game_date >= CURRENT_DATE")
     if date_from:
         where[0] = "sg.game_date >= %(from)s"; params["from"] = date_from
     if date_to:
@@ -11414,12 +11436,12 @@ def browse_scheduled_games():
     source = "scheduled_games sg"
     if include_past:
         source = """(
-            SELECT game_id, league, game_date, game_time_utc, home_team_abbr,
+            SELECT game_id, league, season, game_date, game_time_utc, home_team_abbr,
                    away_team_abbr, status, status_text, arena_name, game_label,
                    season_type, NULL::int AS home_score, NULL::int AS away_score
               FROM scheduled_games WHERE game_date >= CURRENT_DATE
             UNION ALL
-            SELECT game_id, league, game_date, NULL, home_team_abbr,
+            SELECT game_id, league, season, game_date, NULL, home_team_abbr,
                    away_team_abbr, status, NULL, NULL, NULL,
                    season_type, home_score, away_score
               FROM games WHERE game_date < CURRENT_DATE
