@@ -11361,6 +11361,11 @@ def browse_scheduled_games():
     except ValueError:
         limit = 60
 
+    # Past games live in `games` (they leave scheduled_games and gain a score), future
+    # ones in `scheduled_games`. The picker searches whichever the date range implies,
+    # so "find me that game from March" works the same as finding one in January.
+    include_past = bool(date_from) and date_from < date.today().isoformat()
+
     where, params = ["sg.game_date >= CURRENT_DATE"], {"limit": limit}
     if date_from:
         where[0] = "sg.game_date >= %(from)s"; params["from"] = date_from
@@ -11392,7 +11397,8 @@ def browse_scheduled_games():
         params["uid"] = user_id
         watching = """(
             (EXISTS (SELECT 1 FROM watchlist_teams wt
-                      WHERE wt.user_id = %(uid)s AND wt.league = sg.league
+                      WHERE sg.game_date >= CURRENT_DATE AND wt.user_id = %(uid)s
+                        AND wt.league = sg.league
                         AND (wt.team_abbr = sg.home_team_abbr
                              OR wt.team_abbr = sg.away_team_abbr))
              OR EXISTS (SELECT 1 FROM watchlist_games wg
@@ -11403,14 +11409,32 @@ def browse_scheduled_games():
                                AND wg.action = 'remove')
         ) AS watching"""
 
+    # `games` has no game_time_utc / arena / label, so those come back NULL for a
+    # completed game — the picker shows a final score there instead of a tip time.
+    source = "scheduled_games sg"
+    if include_past:
+        source = """(
+            SELECT game_id, league, game_date, game_time_utc, home_team_abbr,
+                   away_team_abbr, status, status_text, arena_name, game_label,
+                   season_type, NULL::int AS home_score, NULL::int AS away_score
+              FROM scheduled_games WHERE game_date >= CURRENT_DATE
+            UNION ALL
+            SELECT game_id, league, game_date, NULL, home_team_abbr,
+                   away_team_abbr, status, NULL, NULL, NULL,
+                   season_type, home_score, away_score
+              FROM games WHERE game_date < CURRENT_DATE
+        ) sg"""
+
     conn = get_conn(); cur = conn.cursor()
     try:
         cur.execute(f"""
             SELECT sg.game_id, sg.league, sg.game_date, sg.game_time_utc,
                    sg.home_team_abbr, sg.away_team_abbr, sg.status,
                    sg.status_text, sg.arena_name, sg.game_label, sg.season_type,
+                   {'sg.home_score, sg.away_score,' if include_past else
+                    'NULL::int AS home_score, NULL::int AS away_score,'}
                    {watching}
-              FROM scheduled_games sg
+              FROM {source}
              WHERE {' AND '.join(where)}
              ORDER BY sg.game_date, sg.game_time_utc NULLS LAST
              LIMIT %(limit)s
@@ -11427,6 +11451,8 @@ def browse_scheduled_games():
             "arena":       r["arena_name"],
             "label":       r["game_label"],
             "seasonType":  r["season_type"],
+            "homeScore":   r["home_score"],
+            "awayScore":   r["away_score"],
             "watching":    bool(r["watching"]),
         } for r in cur.fetchall()]
         return jsonify({"games": games, "count": len(games)})
@@ -11488,6 +11514,28 @@ def get_watchlist():
             "explicitlyAdded": r["explicitly_added"],
         } for r in cur.fetchall()]
 
+        # Completed games the user deliberately added. Explicit only, and never from a
+        # team subscription — following the Pacers means "their upcoming games", not
+        # every game they have ever played. Read from `games` because a finished game
+        # leaves `scheduled_games` behind and gains a score.
+        cur.execute("""
+            SELECT g.game_id, g.league, g.game_date, g.home_team_abbr, g.away_team_abbr,
+                   g.home_score, g.away_score, g.season_type
+              FROM watchlist_games wg
+              JOIN games g ON g.game_id = wg.game_id
+             WHERE wg.user_id = %s AND wg.action = 'add'
+               AND g.game_date < CURRENT_DATE
+             ORDER BY g.game_date DESC
+             LIMIT 100
+        """, (user["id"],))
+        rewatch = [{
+            "gameId": r["game_id"], "league": r["league"],
+            "gameDate": r["game_date"].isoformat(),
+            "home": r["home_team_abbr"], "away": r["away_team_abbr"],
+            "homeScore": r["home_score"], "awayScore": r["away_score"],
+            "seasonType": r["season_type"],
+        } for r in cur.fetchall()]
+
         cur.execute("""
             SELECT wt.league, wt.team_abbr,
                    (SELECT COUNT(*) FROM scheduled_games sg
@@ -11501,7 +11549,8 @@ def get_watchlist():
         teams = [{"league": r["league"], "teamAbbr": r["team_abbr"],
                   "upcoming": r["upcoming"]} for r in cur.fetchall()]
 
-        return jsonify({"games": games, "teams": teams, "count": len(games)})
+        return jsonify({"games": games, "teams": teams, "rewatch": rewatch,
+                        "count": len(games)})
     finally:
         cur.close(); conn.close()
 
