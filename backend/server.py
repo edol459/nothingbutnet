@@ -11336,6 +11336,106 @@ def next_slate_date():
         cur.close(); conn.close()
 
 
+@app.route("/api/schedule/games", methods=["GET"])
+def browse_scheduled_games():
+    """Upcoming games to pick from, for adding one to a watchlist by hand.
+
+    Deliberately NOT the watchlist endpoint with a flag: that one answers "what am
+    I already watching", this one answers "what could I watch", and the second has
+    to include everything.
+
+    `watching` is resolved per row so the picker can show what is already on the
+    list — either explicitly added or pulled in by a team subscription — rather
+    than letting someone add the same game twice and wonder why nothing changed.
+
+    Query params: q (team abbr or name), league, from / to (YYYY-MM-DD), limit.
+    """
+    user    = current_user()
+    user_id = user["id"] if user else None
+    q       = (request.args.get("q") or "").strip()
+    league  = (request.args.get("league") or "").strip().lower()
+    date_from = (request.args.get("from") or "").strip()
+    date_to   = (request.args.get("to") or "").strip()
+    try:
+        limit = min(int(request.args.get("limit", 60)), 200)
+    except ValueError:
+        limit = 60
+
+    where, params = ["sg.game_date >= CURRENT_DATE"], {"limit": limit}
+    if date_from:
+        where[0] = "sg.game_date >= %(from)s"; params["from"] = date_from
+    if date_to:
+        where.append("sg.game_date <= %(to)s"); params["to"] = date_to
+    if league in ("nba", "wnba"):
+        where.append("sg.league = %(league)s"); params["league"] = league
+    if q:
+        # Abbreviation OR full team name, so "IND", "Indiana" and "Pacers" all work.
+        # team_seasons carries the names; DISTINCT ON picks the most recent season's
+        # spelling, since a franchise can be renamed (and CHH/CHA both exist).
+        where.append("""(
+            sg.home_team_abbr ILIKE %(qexact)s OR sg.away_team_abbr ILIKE %(qexact)s
+            OR EXISTS (
+                SELECT 1 FROM (
+                    SELECT DISTINCT ON (league, team_abbr) league, team_abbr, team_name
+                      FROM team_seasons WHERE team_name IS NOT NULL
+                     ORDER BY league, team_abbr, season DESC
+                ) tn
+                 WHERE tn.league = sg.league
+                   AND tn.team_abbr IN (sg.home_team_abbr, sg.away_team_abbr)
+                   AND tn.team_name ILIKE %(qlike)s)
+        )""")
+        params["qexact"] = q
+        params["qlike"]  = f"%{q}%"
+
+    watching = "FALSE AS watching"
+    if user_id:
+        params["uid"] = user_id
+        watching = """(
+            (EXISTS (SELECT 1 FROM watchlist_teams wt
+                      WHERE wt.user_id = %(uid)s AND wt.league = sg.league
+                        AND (wt.team_abbr = sg.home_team_abbr
+                             OR wt.team_abbr = sg.away_team_abbr))
+             OR EXISTS (SELECT 1 FROM watchlist_games wg
+                         WHERE wg.user_id = %(uid)s AND wg.game_id = sg.game_id
+                           AND wg.action = 'add'))
+            AND NOT EXISTS (SELECT 1 FROM watchlist_games wg
+                             WHERE wg.user_id = %(uid)s AND wg.game_id = sg.game_id
+                               AND wg.action = 'remove')
+        ) AS watching"""
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            SELECT sg.game_id, sg.league, sg.game_date, sg.game_time_utc,
+                   sg.home_team_abbr, sg.away_team_abbr, sg.status,
+                   sg.status_text, sg.arena_name, sg.game_label, sg.season_type,
+                   {watching}
+              FROM scheduled_games sg
+             WHERE {' AND '.join(where)}
+             ORDER BY sg.game_date, sg.game_time_utc NULLS LAST
+             LIMIT %(limit)s
+        """, params)
+        games = [{
+            "gameId":      r["game_id"],
+            "league":      r["league"],
+            "gameDate":    str(r["game_date"]),
+            "gameTimeUTC": r["game_time_utc"].isoformat() if r["game_time_utc"] else None,
+            "home":        r["home_team_abbr"],
+            "away":        r["away_team_abbr"],
+            "status":      r["status"] or "scheduled",
+            "statusText":  r["status_text"],
+            "arena":       r["arena_name"],
+            "label":       r["game_label"],
+            "seasonType":  r["season_type"],
+            "watching":    bool(r["watching"]),
+        } for r in cur.fetchall()]
+        return jsonify({"games": games, "count": len(games)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
 @app.route("/api/me/watchlist", methods=["GET"])
 @login_required
 def get_watchlist():
