@@ -11539,6 +11539,173 @@ def watchlist_add_game(game_id):
         cur.close(); conn.close()
 
 
+# ── Push notifications ───────────────────────────────────────────────────────
+#
+# A device token identifies a DEVICE, not a person. Sign out on a phone and sign in
+# as someone else and the same token must move to the new user — which is why the
+# table is keyed on the token and this is an upsert on it rather than an insert per
+# user. Getting that wrong sends one person's notifications to another's phone.
+
+@app.route("/api/me/device-token", methods=["POST"])
+@login_required
+def register_device_token():
+    user = current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    token = (body.get("token") or "").strip()
+    # APNs tokens are 64 hex chars today, but Apple has changed the length before and
+    # says not to hardcode it — so this is a sanity bound, not a format check.
+    if not token or len(token) > 200:
+        return jsonify({"error": "token is required"}), 400
+    env = body.get("environment")
+    if env not in ("sandbox", "production"):
+        env = "production"
+    platform = (body.get("platform") or "ios")[:16]
+    # IANA name, e.g. "America/New_York". Refreshed on every registration so the digest
+    # follows the user if they move; validated below before it reaches a query.
+    tz = (body.get("timezone") or "").strip()[:64]
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO device_tokens (token, user_id, platform, environment)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (token) DO UPDATE SET
+                user_id     = EXCLUDED.user_id,
+                platform    = EXCLUDED.platform,
+                environment = EXCLUDED.environment,
+                -- Re-registering is proof the token is alive again: a reinstall can
+                -- reissue a token Apple previously reported as Unregistered.
+                invalid_at  = NULL,
+                updated_at  = NOW()
+        """, (token, user["id"], platform, env))
+        if tz and _valid_timezone(cur, tz):
+            cur.execute("UPDATE users SET timezone = %s WHERE id = %s", (tz, user["id"]))
+        conn.commit()
+        return jsonify({"ok": True, "environment": env})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/me/device-token", methods=["DELETE"])
+@login_required
+def unregister_device_token():
+    """Called on sign-out so the next owner of the device doesn't inherit the feed."""
+    user = current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    token = (body.get("token") or "").strip()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        if token:
+            cur.execute("DELETE FROM device_tokens WHERE token = %s AND user_id = %s",
+                        (token, user["id"]))
+        else:
+            cur.execute("DELETE FROM device_tokens WHERE user_id = %s", (user["id"],))
+        conn.commit()
+        return jsonify({"ok": True, "removed": cur.rowcount})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
+def _valid_timezone(cur, name: str) -> bool:
+    """Check against the database's own zone table.
+
+    Postgres is what will do the conversion at send time, so its list is the one that
+    matters — and this keeps an unrecognised string out of a query that would otherwise
+    raise mid-send for every user in that zone.
+    """
+    try:
+        cur.execute("SELECT 1 FROM pg_timezone_names WHERE name = %s", (name,))
+        return cur.fetchone() is not None
+    except Exception:
+        return False
+
+
+_NOTIFY_PREFS = ("notify_final", "notify_tipoff", "notify_digest")
+
+
+@app.route("/api/me/notification-prefs", methods=["GET"])
+@login_required
+def get_notification_prefs():
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute(f"SELECT {', '.join(_NOTIFY_PREFS)}, notify_digest_at, timezone "
+                    f"FROM users WHERE id = %s", (user["id"],))
+        row = cur.fetchone() or {}
+        cur.execute("""SELECT COUNT(*) AS n FROM device_tokens
+                        WHERE user_id = %s AND invalid_at IS NULL""", (user["id"],))
+        devices = int((cur.fetchone() or {}).get("n") or 0)
+        return jsonify({
+            "final":  bool(row.get("notify_final")),
+            "tipoff": bool(row.get("notify_tipoff")),
+            "digest": bool(row.get("notify_digest")),
+            # "HH:MM" local wall-clock. The client renders it in a time picker; the
+            # sender reads it alongside `timezone`.
+            "digestAt": row["notify_digest_at"].strftime("%H:%M") if row.get("notify_digest_at") else "08:00",
+            "timezone": row.get("timezone"),
+            # The app shows prefs as inert until at least one device is registered —
+            # toggles that cannot possibly fire are worse than no toggles.
+            "devices": devices,
+        })
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/me/notification-prefs", methods=["PUT"])
+@login_required
+def set_notification_prefs():
+    user = current_user()
+    body = request.get_json(force=True, silent=True) or {}
+    sets, params = [], []
+    for key, col in (("final", "notify_final"), ("tipoff", "notify_tipoff"),
+                     ("digest", "notify_digest")):
+        if key in body:
+            sets.append(f"{col} = %s")
+            params.append(bool(body[key]))
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        if "digestAt" in body:
+            raw = str(body.get("digestAt") or "").strip()
+            try:
+                hh, mm = raw.split(":")[:2]
+                hh, mm = int(hh), int(mm)
+                if not (0 <= hh < 24 and 0 <= mm < 60): raise ValueError
+            except Exception:
+                cur.close(); conn.close()
+                return jsonify({"error": "digestAt must be HH:MM"}), 400
+            sets.append("notify_digest_at = %s"); params.append(f"{hh:02d}:{mm:02d}")
+        if "timezone" in body:
+            tz = str(body.get("timezone") or "").strip()[:64]
+            if tz and not _valid_timezone(cur, tz):
+                cur.close(); conn.close()
+                return jsonify({"error": "unknown timezone"}), 400
+            sets.append("timezone = %s"); params.append(tz or None)
+        if not sets:
+            cur.close(); conn.close()
+            return jsonify({"error": "nothing to update"}), 400
+        params.append(user["id"])
+        cur.execute(f"UPDATE users SET {', '.join(sets)} WHERE id = %s "
+                    f"RETURNING {', '.join(_NOTIFY_PREFS)}, notify_digest_at, timezone", params)
+        row = cur.fetchone() or {}
+        conn.commit()
+        return jsonify({"final":  bool(row.get("notify_final")),
+                        "tipoff": bool(row.get("notify_tipoff")),
+                        "digest": bool(row.get("notify_digest")),
+                        "digestAt": row["notify_digest_at"].strftime("%H:%M") if row.get("notify_digest_at") else "08:00",
+                        "timezone": row.get("timezone")})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
 @app.route("/api/me/watchlist/games/<game_id>", methods=["DELETE"])
 @login_required
 def watchlist_remove_game(game_id):
