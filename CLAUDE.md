@@ -4,6 +4,51 @@ NBA & WNBA scores, stats, game reviews, and daily games. Flask backend + static
 frontend, Postgres (Railway), plus an iOS app that shares the same API.
 Public site: ydkball.net. Code/repo name is "nothingbutnet"; product is "ydkball".
 
+## ⛔ NEVER DELETE OR MODIFY REAL USER DATA
+
+**`DATABASE_URL` in `.env` points at PRODUCTION. There is no local database and
+no staging copy. Every query you run touches live user data.**
+
+**Railway has NO backups on this plan** — backups and PITR are Pro-only, and the
+one snapshot that exists is a manual "Pre-Security-Patch" volume nobody can
+restore without upgrading. Deleted rows are gone permanently. There is no undo.
+
+### The rules
+
+1. **Never run `DELETE` or `UPDATE` against a real user's rows without asking
+   first.** Show the exact statement, get a yes, then run it. "It's just test
+   cleanup" is not an exemption — it is the exact reasoning that caused the
+   incident below.
+2. **Test with user id 83** — `ydkbball@gmail.com`, display name "ydkball!". The
+   official testing account, deliberately empty. Any test that writes user data
+   uses 83 and only 83.
+3. **User id 1 is Ethan's real account.** Treat it as production data belonging
+   to a person, because it is.
+4. **Never use a user-scoped predicate for cleanup.** `WHERE user_id = X` means
+   "everything this person ever wrote", not "the rows my test just made".
+5. **Prefer a transaction that rolls back.** Stage rows, assert, `ROLLBACK`.
+   Nothing is written, nothing needs cleaning up. When a real commit is
+   unavoidable, capture the exact ids you inserted and delete only those.
+6. **Read-only verification is always fine.** `SELECT` freely.
+
+### What happened (2026-09-09)
+
+A test of XP-on-log opened with `DELETE FROM game_reviews WHERE user_id=1` to get
+a "clean slate". That destroyed **57 real game reviews**, 13 POTG picks and all
+`game_watches` belonging to Ethan's account — four months of diary history, from
+April 4 onward.
+
+The picks and watches were rebuilt from surviving `performance_reviews` via
+`schema_v13.py`. **The 57 reviews were unrecoverable**: the denormalised
+`games.review_count`/`rating_sum` trace was erased by the server's own startup
+re-sync, and `analytics_events` only began on Sep 1 and stores `has_rating`, not
+the rating.
+
+The same session had already run two staged tests *correctly* — one inside a
+transaction that rolled back, one deleting only the specific fake ids it created.
+The safe pattern was known and not used. That is why rule 1 is a hard stop rather
+than a preference.
+
 ## Run it
 
 ```bash

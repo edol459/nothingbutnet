@@ -5640,6 +5640,32 @@ def submit_game_log(game_id):
         cur.execute("DELETE FROM game_log_drafts WHERE user_id = %s AND game_id = %s",
                     (user["id"], game_id))
 
+        # ── Ball Knowledge for logging ──────────────────────────────────────────
+        # The core action of the product paid nothing until now, while merely opening
+        # the app paid 10.
+        #
+        # Keyed on game_id, so editing a log never pays twice — _grant_xp dedupes on
+        # (user, type, reference_id).
+        #
+        # Capped per day, and the cap is the whole point. There are ~21k games in the
+        # DB and one user has logged 104 in a single day, so an uncapped per-game grant
+        # is an XP faucet: a few hours of backfilling would outrun every other source
+        # combined. Five covers 95% of real logging days (581 of 612 in the history),
+        # so the cap is invisible to anyone using the app normally.
+        #
+        # Content required. A bare "I watched this" is one tap; paying for it would
+        # reward the gesture rather than the diary.
+        log_xp_granted = 0
+        _has_content = (rating is not None) or _has_potg or _has_text
+        if _has_content:
+            cur.execute("""SELECT COUNT(*) AS n FROM xp_events
+                            WHERE user_id = %s AND event_type = 'game_log'
+                              AND created_at >= CURRENT_DATE""", (user["id"],))
+            todays = int((cur.fetchone() or {}).get("n") or 0)
+            if todays < LOG_XP_DAILY_CAP:
+                if _grant_xp(cur, user["id"], "game_log", game_id, LOG_XP) != -1:
+                    log_xp_granted = LOG_XP
+
         conn.commit()
 
         # Cache invalidation AFTER the commit — if the write rolled back we must not
@@ -5671,6 +5697,9 @@ def submit_game_log(game_id):
             "performances":      saved_perfs,
             "performance_count": len(saved_perfs),
             "removed_count":     removed_count,
+            # 0 when the game was already logged, the daily cap is reached, or the
+            # log carries no content. The client only toasts when this is non-zero.
+            "xp_gained":         log_xp_granted,
         }), 201
     except Exception as e:
         try:
@@ -8735,6 +8764,8 @@ def _award_player_eligible(cur, league: str, season: str, code: str, person_id) 
 # attendance — opening it, viewing a game, playing the daily. A ballot is the
 # only mechanic that pays for being *right*, which is what the currency is
 # named after, so it pays more and it pays once a year.
+LOG_XP            = 25    # per game logged, once per game ever
+LOG_XP_DAILY_CAP  = 5     # games per day that can earn it — see submit_game_log
 BALLOT_LOCK_XP    = 50    # a complete ballot, once it locks
 BALLOT_CORRECT_XP = 100   # per pick the league agreed with
 
