@@ -11573,6 +11573,26 @@ def get_watchlist():
             SELECT sg.game_id, sg.league, sg.game_date, sg.game_time_utc,
                    sg.home_team_abbr, sg.away_team_abbr, sg.status,
                    sg.status_text, sg.arena_name, sg.game_label, sg.season_type,
+                   -- Scalar subqueries, not joins: _WATCHLIST_RESOLVE is shared with
+                   -- the calendar query, which ARRAY_AGGs — a join that fanned out
+                   -- there would silently double-count a day's games.
+                   --
+                   -- Matched on league AND season. The abbr alone is ambiguous (IND is
+                   -- both the Pacers and the Fever), and a season that hasn't started
+                   -- has no row yet, so preseason games correctly report no record
+                   -- rather than 0-0.
+                   (SELECT ts.wins FROM team_seasons ts
+                     WHERE ts.league = sg.league AND ts.team_abbr = sg.home_team_abbr
+                       AND ts.season = sg.season LIMIT 1) AS home_wins,
+                   (SELECT ts.losses FROM team_seasons ts
+                     WHERE ts.league = sg.league AND ts.team_abbr = sg.home_team_abbr
+                       AND ts.season = sg.season LIMIT 1) AS home_losses,
+                   (SELECT ts.wins FROM team_seasons ts
+                     WHERE ts.league = sg.league AND ts.team_abbr = sg.away_team_abbr
+                       AND ts.season = sg.season LIMIT 1) AS away_wins,
+                   (SELECT ts.losses FROM team_seasons ts
+                     WHERE ts.league = sg.league AND ts.team_abbr = sg.away_team_abbr
+                       AND ts.season = sg.season LIMIT 1) AS away_losses,
                    EXISTS (SELECT 1 FROM watchlist_games wg
                            WHERE wg.user_id = %(uid)s AND wg.game_id = sg.game_id
                              AND wg.action = 'add') AS explicitly_added
@@ -11588,6 +11608,8 @@ def get_watchlist():
             "status": r["status"], "statusText": r["status_text"],
             "arena": r["arena_name"], "label": r["game_label"],
             "seasonType": r["season_type"],
+            "homeWins": r["home_wins"], "homeLosses": r["home_losses"],
+            "awayWins": r["away_wins"], "awayLosses": r["away_losses"],
             "explicitlyAdded": r["explicitly_added"],
         } for r in cur.fetchall()]
 
