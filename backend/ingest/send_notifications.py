@@ -119,7 +119,7 @@ def _tokens_for(cur, user_id):
     return cur.fetchall()
 
 
-def _deliver(cur, user_id, kind, reference, title, body, data, dry, images=None):
+def _deliver(cur, user_id, kind, reference, title, body, data, dry):
     """Claim the send, then push. Claiming first is what makes a re-run safe."""
     if dry:
         print(f"  [dry] user {user_id} {kind}/{reference}: {title} — {body}")
@@ -135,7 +135,7 @@ def _deliver(cur, user_id, kind, reference, title, body, data, dry, images=None)
         by_env.setdefault(row["environment"], []).append(row["token"])
     for env, tokens in by_env.items():
         for res in push.send(tokens, title, body, data=data, environment=env,
-                             collapse_id=f"{kind}:{reference}", images=images):
+                             collapse_id=f"{kind}:{reference}"):
             if res["dead"]:
                 cur.execute("UPDATE device_tokens SET invalid_at = NOW() WHERE token = %s",
                             (res["token"],))
@@ -165,14 +165,9 @@ def run_digest(conn, dry=False):
         if len(games) > 3:
             matchups += f" +{len(games) - 3}"
         n = len(games)
-        first = games[0]
         total += _deliver(cur, row["user_id"], "digest", str(row["local_date"]),
                           f"{n} game{'' if n == 1 else 's'} on your watchlist today",
-                          matchups, {"kind": "digest", "date": str(row["local_date"])}, dry,
-                          # iOS shows one thumbnail however many you attach, so this
-                          # is the first game's matchup rather than all of them.
-                          images=[push.team_logo_url(first["away_team_abbr"], first.get("league")),
-                                  push.team_logo_url(first["home_team_abbr"], first.get("league"))])
+                          matchups, {"kind": "digest", "date": str(row["local_date"])}, dry)
         conn.commit()
     print(f"digest: {total} push(es) delivered")
     cur.close()
@@ -195,9 +190,7 @@ def run_final(conn, dry=False):
         total += _deliver(cur, g["user_id"], "final", g["game_id"],
                           f"Final · {line}",
                           "Log it and pick your Player of the Game.",
-                          {"kind": "final", "game_id": g["game_id"], "league": g["league"]}, dry,
-                          images=[push.team_logo_url(away, g["league"]),
-                                  push.team_logo_url(home, g["league"])])
+                          {"kind": "final", "game_id": g["game_id"], "league": g["league"]}, dry)
         conn.commit()
     print(f"final: {total} push(es) delivered")
     cur.close()
