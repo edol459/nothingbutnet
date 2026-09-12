@@ -69,9 +69,33 @@ def _auth_token() -> str:
     return token
 
 
+# ESPN's logo slugs, keyed on the abbreviations THIS server sends (games /
+# scheduled_games). Deliberately not a port of the iOS `_espnAbbrMap`: that one is
+# keyed on the client's abbreviations, which drift from these — see the WNBA abbr
+# note in DATABASE_MAP. Against what we actually send, nearly everything is just
+# the lowercased abbr, and only these two differ.
+_ESPN_SLUG = {
+    "nba":  {"NOP": "no", "UTA": "utah"},
+    "wnba": {"CON": "conn", "GS": "gsv"},
+}
+
+# All-Star and exhibition sides that appear in the schedule with no ESPN logo.
+# Listed so we never request a URL we know 404s.
+_NO_LOGO = {"COO", "JNT", "NGR", "SPN", "USA", "WNBASTARS", "CLA", "COL", "LON"}
+
+
+def team_logo_url(abbr: str, league: str):
+    # ESPN logo for a team, or None when there isn't one.
+    if not abbr or abbr.upper() in _NO_LOGO:
+        return None
+    lg = "wnba" if (league or "").lower() == "wnba" else "nba"
+    slug = _ESPN_SLUG[lg].get(abbr.upper(), abbr.lower())
+    return f"https://a.espncdn.com/i/teamlogos/{lg}/500/{slug}.png"
+
+
 def send(tokens, title: str, body: str, data: dict = None,
          environment: str = "production", collapse_id: str = None,
-         thread_id: str = None) -> list:
+         thread_id: str = None, images: list = None) -> list:
     """Push one message to many tokens in ONE environment.
 
     Returns [{token, status, reason, dead}] — `dead` marks a token Apple says will
@@ -91,6 +115,13 @@ def send(tokens, title: str, body: str, data: dict = None,
         payload["aps"]["thread-id"] = thread_id
     if data:
         payload.update(data)
+    # APNs carries only URLs; attaching the image is NotificationService's job.
+    # `mutable-content` is what wakes that extension — without it the payload is
+    # delivered as-is and the images are ignored entirely.
+    urls = [u for u in (images or []) if u]
+    if urls:
+        payload["aps"]["mutable-content"] = 1
+        payload["images"] = urls
     encoded = json.dumps(payload).encode()
 
     headers = {
