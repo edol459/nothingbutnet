@@ -11630,13 +11630,17 @@ def get_watchlist_calendar():
         cur.execute(f"""
             SELECT sg.game_date, COUNT(*) AS games,
                    ARRAY_AGG(sg.home_team_abbr ORDER BY sg.game_time_utc) AS homes,
-                   ARRAY_AGG(sg.away_team_abbr ORDER BY sg.game_time_utc) AS aways
+                   ARRAY_AGG(sg.away_team_abbr ORDER BY sg.game_time_utc) AS aways,
+                   -- Parallel to the abbr arrays. Needed because a crest can only be
+                   -- resolved per league: IND is both the Pacers and the Fever.
+                   ARRAY_AGG(sg.league ORDER BY sg.game_time_utc) AS leagues
             {_WATCHLIST_RESOLVE}
               AND sg.game_date BETWEEN %(start)s AND %(end)s
             GROUP BY sg.game_date ORDER BY sg.game_date
         """, {"uid": user["id"], "start": start, "end": end})
         days = [{"date": r["game_date"].isoformat(), "games": r["games"],
-                 "home": r["homes"], "away": r["aways"]} for r in cur.fetchall()]
+                 "home": r["homes"], "away": r["aways"],
+                 "leagues": r["leagues"]} for r in cur.fetchall()]
         return jsonify({"month": month, "days": days})
     finally:
         cur.close(); conn.close()
