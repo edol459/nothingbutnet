@@ -2406,7 +2406,31 @@ def _enrich_games_with_records(games):
     if not games:
         return
 
+    # Resolve the season from the games on screen, not from today's date.
+    #
+    # This used to be `get_current_season()` unconditionally, which is right for
+    # tonight's slate and wrong for every past one: viewing 2026-05-30 in September
+    # queried records for 2026-27 and matched nothing, so the cards silently lost
+    # their W-L line. It went unnoticed because `_past_sb_cache` keeps past dates
+    # forever, so old payloads still held the records computed at the time.
+    #
+    # Today's games aren't in `games` yet (nothing is Final), so the lookup returns
+    # nothing and the fallback is what actually serves the common case.
     season = get_current_season()
+    _ids = [str(g.get("gameId", "")) for g in games if g.get("gameId")]
+    if _ids:
+        try:
+            _c = get_conn(); _cur = _c.cursor()
+            _cur.execute("""SELECT season FROM games
+                             WHERE game_id = ANY(%s) AND season IS NOT NULL
+                             GROUP BY season ORDER BY COUNT(*) DESC LIMIT 1""", (_ids,))
+            _row = _cur.fetchone()
+            if _row and _row["season"]:
+                season = _row["season"]
+            _cur.close(); _c.close()
+        except Exception:
+            pass   # keep the current-season default
+
     all_abbrs = set()
     playoff_pairs = set()
     for g in games:
@@ -14429,12 +14453,63 @@ def _upsert_wnba_game(game_id, game_date, home_abbr, away_abbr, home_score, away
 
 
 def _enrich_wnba_games(games: list):
-    """Attach review stats to WNBA game dicts in-place."""
+    """Attach review stats AND W-L records to WNBA game dicts in-place.
+
+    Records were missing entirely until 2026-09-12, which is why a WNBA card sat
+    shorter than an NBA one on the same slate: the client draws a second line under
+    the abbreviation only when wins/losses are present, so the row lost it.
+
+    Not reusing `_enrich_games_with_records`: that one resolves a single
+    `get_current_season()` — the NBA label ('2026-27') — and querying WNBA
+    abbreviations against an NBA season matches nothing. The season here comes from
+    the games being shown, so a past WNBA season resolves correctly too.
+
+    `league = 'wnba'` is load-bearing, not defensive: IND is both the Pacers and the
+    Fever, as are ATL/CHI/DAL/MIN/PHX/POR/TOR/WAS.
+    """
     if not games:
         return
     game_ids = [str(g.get("gameId", "")) for g in games if g.get("gameId")]
     if not game_ids:
         return
+
+    records: dict = {}
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            WITH seasons AS (
+                SELECT DISTINCT season FROM games
+                 WHERE game_id = ANY(%s) AND league = 'wnba'
+            ),
+            sides AS (
+                SELECT home_team_abbr AS team_abbr, home_score > away_score AS won
+                  FROM games
+                 WHERE league = 'wnba' AND season_type = 'Regular Season'
+                   AND status = 'Final' AND season IN (SELECT season FROM seasons)
+                UNION ALL
+                SELECT away_team_abbr AS team_abbr, away_score > home_score AS won
+                  FROM games
+                 WHERE league = 'wnba' AND season_type = 'Regular Season'
+                   AND status = 'Final' AND season IN (SELECT season FROM seasons)
+            )
+            SELECT team_abbr,
+                   COUNT(*) FILTER (WHERE won)     AS wins,
+                   COUNT(*) FILTER (WHERE NOT won) AS losses
+              FROM sides GROUP BY team_abbr
+        """, (game_ids,))
+        for r in cur.fetchall():
+            records[r["team_abbr"]] = (int(r["wins"]), int(r["losses"]))
+        cur.close(); conn.close()
+    except Exception:
+        pass   # a card without a record is worse than a card; a 500 is worse than both
+
+    for g in games:
+        for side in ("away", "home"):
+            abbr = (g.get(side) or {}).get("abbr", "")
+            if abbr in records and g[side].get("wins") is None:
+                g[side]["wins"], g[side]["losses"] = records[abbr]
+
     review_stats: dict = {}
     try:
         conn = get_conn()
