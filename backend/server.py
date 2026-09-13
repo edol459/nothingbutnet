@@ -11773,7 +11773,15 @@ def watchlist_add_game(game_id):
     user = current_user()
     conn = get_conn(); cur = conn.cursor()
     try:
-        cur.execute("SELECT 1 FROM scheduled_games WHERE game_id = %s", (game_id,))
+        # Either table. A game leaves `scheduled_games` once it's played and lands in
+        # `games`, so validating against the schedule alone rejected every past game —
+        # which is exactly what "Find a game you missed" adds. The client toggles
+        # optimistically, so the 404 surfaced as a bookmark that filled and then
+        # quietly emptied again.
+        cur.execute(
+            "SELECT 1 WHERE EXISTS (SELECT 1 FROM scheduled_games WHERE game_id = %s) "
+            "           OR EXISTS (SELECT 1 FROM games           WHERE game_id = %s)",
+            (game_id, game_id))
         if not cur.fetchone():
             return jsonify({"error": "Unknown game"}), 404
         cur.execute("""
