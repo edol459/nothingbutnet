@@ -14205,7 +14205,17 @@ def _wnba_cdn_schedule() -> dict:
                 date_key = _dt2.strptime(raw_date, "%m/%d/%Y %H:%M:%S").strftime("%Y-%m-%d")
             except Exception:
                 continue
-            dates[date_key] = [_wnba_cdn_game_dict(g, date_key) for g in entry.get("games", [])]
+            # Skip playoff games that may never be played. The WNBA feed lists every
+            # possible game in a series, and an unreached one carries no teams at all —
+            # empty tricodes, status TBD, the 1900 sentinel tip time. Rendering those
+            # produced blank cards reading only "UPCOMING", and inflated the day's game
+            # count. The NBA parser has always dropped its equivalent; this is the same
+            # guard, keyed on the absence of teams rather than on an `ifNecessary` flag
+            # the WNBA payload doesn't set.
+            dates[date_key] = [
+                d for d in (_wnba_cdn_game_dict(g, date_key) for g in entry.get("games", []))
+                if d["away"]["abbr"] or d["home"]["abbr"]
+            ]
         cached["dates"] = dates
         cached["ts"]    = _time.time()
         return dates
