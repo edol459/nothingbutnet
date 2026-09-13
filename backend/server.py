@@ -11263,6 +11263,18 @@ def set_allegiance():
 
 # Shared WHERE clause for the resolution above. Named params because uid
 # appears three times; callers pass a dict.
+# The watchlist's day boundary is ET, not UTC.
+#
+# Railway's Postgres runs in Etc/UTC, so CURRENT_DATE rolls over at 8pm ET (7pm in
+# winter) — right as the evening slate tips. Every "is this game still upcoming"
+# filter below used it, so a 8:00pm ET game dropped off the watchlist at the moment
+# it started, and the day's finished games jumped to "To rewatch" four hours early.
+#
+# Everything else in the app already treats ET as the basketball day: status_text is
+# written "8:00 pm ET", the scoreboard's slate date is ET, and the client computes its
+# own `today` in America/New_York. This makes the server agree.
+_ET_TODAY = "(NOW() AT TIME ZONE 'America/New_York')::date"
+
 _WATCHLIST_RESOLVE = """
     FROM scheduled_games sg
     WHERE (
@@ -11443,7 +11455,7 @@ def browse_scheduled_games():
     if season:
         where.append("sg.season = %(season)s"); params["season"] = season
     else:
-        where.append("sg.game_date >= CURRENT_DATE")
+        where.append(f"sg.game_date >= {_ET_TODAY}")
     if date_from:
         where[0] = "sg.game_date >= %(from)s"; params["from"] = date_from
     if date_to:
@@ -11472,9 +11484,9 @@ def browse_scheduled_games():
     watching = "FALSE AS watching"
     if user_id:
         params["uid"] = user_id
-        watching = """(
+        watching = f"""(
             (EXISTS (SELECT 1 FROM watchlist_teams wt
-                      WHERE sg.game_date >= CURRENT_DATE AND wt.user_id = %(uid)s
+                      WHERE sg.game_date >= {_ET_TODAY} AND wt.user_id = %(uid)s
                         AND wt.league = sg.league
                         AND (wt.team_abbr = sg.home_team_abbr
                              OR wt.team_abbr = sg.away_team_abbr))
@@ -11490,16 +11502,16 @@ def browse_scheduled_games():
     # completed game — the picker shows a final score there instead of a tip time.
     source = "scheduled_games sg"
     if include_past:
-        source = """(
+        source = f"""(
             SELECT game_id, league, season, game_date, game_time_utc, home_team_abbr,
                    away_team_abbr, status, status_text, arena_name, game_label,
                    season_type, NULL::int AS home_score, NULL::int AS away_score
-              FROM scheduled_games WHERE game_date >= CURRENT_DATE
+              FROM scheduled_games WHERE game_date >= {_ET_TODAY}
             UNION ALL
             SELECT game_id, league, season, game_date, NULL, home_team_abbr,
                    away_team_abbr, status, NULL, NULL, NULL,
                    season_type, home_score, away_score
-              FROM games WHERE game_date < CURRENT_DATE
+              FROM games WHERE game_date < {_ET_TODAY}
         ) sg"""
 
     conn = get_conn(); cur = conn.cursor()
@@ -11563,7 +11575,7 @@ def get_watchlist():
         clause += " AND sg.game_date >= %(from)s"; params["from"] = date_from
     else:
         # Past games are out of scope for now — the watchlist is forward-looking.
-        clause += " AND sg.game_date >= CURRENT_DATE"
+        clause += f" AND sg.game_date >= {_ET_TODAY}"
     if date_to:
         clause += " AND sg.game_date <= %(to)s"; params["to"] = date_to
 
@@ -11613,17 +11625,31 @@ def get_watchlist():
             "explicitlyAdded": r["explicitly_added"],
         } for r in cur.fetchall()]
 
-        # Completed games the user deliberately added. Explicit only, and never from a
-        # team subscription — following the Pacers means "their upcoming games", not
-        # every game they have ever played. Read from `games` because a finished game
-        # leaves `scheduled_games` behind and gains a score.
-        cur.execute("""
+        # Games the user added AFTER they were played — deliberate rewatch picks, which
+        # is what "Find a game you missed" creates. Explicit only, never from a team
+        # subscription: following the Pacers means "their upcoming games", not every
+        # game they have ever played.
+        #
+        # The `created_at > tipoff` test is the whole point. Without it this section
+        # also collected lapsed plans — games added while upcoming that simply got
+        # played — so a watchlist you never pruned turned into a growing list of games
+        # you'd already had your chance at. Those should just fall off the end of the
+        # day. Only a game you sought out after the fact belongs here.
+        #
+        # COALESCE because a game from a previous season was never in `scheduled_games`
+        # at all, so there's no tip time to compare against; midnight ET ending its game
+        # day is close enough when the add is months later.
+        cur.execute(f"""
             SELECT g.game_id, g.league, g.game_date, g.home_team_abbr, g.away_team_abbr,
                    g.home_score, g.away_score, g.season_type
               FROM watchlist_games wg
               JOIN games g ON g.game_id = wg.game_id
+              LEFT JOIN scheduled_games sg ON sg.game_id = wg.game_id
              WHERE wg.user_id = %s AND wg.action = 'add'
-               AND g.game_date < CURRENT_DATE
+               AND g.game_date < {_ET_TODAY}
+               AND wg.created_at > COALESCE(
+                     sg.game_time_utc,
+                     ((g.game_date + 1)::timestamp AT TIME ZONE 'America/New_York'))
              ORDER BY g.game_date DESC
              LIMIT 100
         """, (user["id"],))
@@ -11635,13 +11661,13 @@ def get_watchlist():
             "seasonType": r["season_type"],
         } for r in cur.fetchall()]
 
-        cur.execute("""
+        cur.execute(f"""
             SELECT wt.league, wt.team_abbr,
                    (SELECT COUNT(*) FROM scheduled_games sg
                      WHERE sg.league = wt.league
                        AND (sg.home_team_abbr = wt.team_abbr
                             OR sg.away_team_abbr = wt.team_abbr)
-                       AND sg.game_date >= CURRENT_DATE) AS upcoming
+                       AND sg.game_date >= {_ET_TODAY}) AS upcoming
             FROM watchlist_teams wt WHERE wt.user_id = %s
             ORDER BY wt.league, wt.team_abbr
         """, (user["id"],))
@@ -11712,10 +11738,10 @@ def watchlist_subscribe_team():
             INSERT INTO watchlist_teams (user_id, league, team_abbr)
             VALUES (%s, %s, %s) ON CONFLICT DO NOTHING
         """, (user["id"], league, abbr))
-        cur.execute("""
+        cur.execute(f"""
             SELECT COUNT(*) AS n FROM scheduled_games
             WHERE league = %s AND (home_team_abbr = %s OR away_team_abbr = %s)
-              AND game_date >= CURRENT_DATE
+              AND game_date >= {_ET_TODAY}
         """, (league, abbr, abbr))
         upcoming = cur.fetchone()["n"]
         conn.commit()
