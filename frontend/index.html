@@ -137,7 +137,25 @@ nav {
 .league-pill.active { background:var(--orange); border-color:var(--orange); color:#fff; }
 
 /* ── Calendar ───────────────────────────────────────────────── */
-.cal-strip-wrap { border-bottom:1px solid var(--paper3); margin:8px -32px 16px; overflow:hidden; }
+.cal-strip-wrap { border-bottom:1px solid var(--paper3); margin:8px -32px 16px; overflow:hidden;
+  display:flex; align-items:stretch; }
+.cal-strip-wrap .cal-strip { flex:1; min-width:0; }
+/* Sits outside the scroller so it stays reachable however far the strip is scrolled. */
+.cal-jump {
+  display:flex; align-items:center; gap:5px; flex-shrink:0; cursor:pointer;
+  padding:0 32px 0 12px; border-left:1px solid var(--paper3);
+  font-family:var(--ff-mono); font-size:9px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--ink4); position:relative;
+}
+.cal-jump:hover { color:var(--orange); }
+.cal-jump-icon { font-size:12px; line-height:1; }
+/* The native picker is the control; the label is what you see. Kept in the layout
+   (not display:none) so clicks and keyboard focus still reach it. */
+.cal-jump input[type="date"] {
+  position:absolute; inset:0; width:100%; height:100%;
+  opacity:0; cursor:pointer; border:none; padding:0;
+}
+@media (max-width:600px) { .cal-jump-label { display:none; } .cal-jump { padding-right:16px; } }
 .cal-strip { display:flex; overflow-x:auto; scroll-behavior:smooth; padding:0 32px; scrollbar-width:none; }
 .cal-strip::-webkit-scrollbar { display:none; }
 .cal-day {
@@ -355,6 +373,15 @@ nav {
     </div>
     <div class="cal-strip-wrap noscroll">
       <div class="cal-strip noscroll" id="cal-strip"></div>
+      <!-- The strip covers ±14 days. In the offseason that can hold no finished games
+           at all, which left the web with no route to any past game — the app has a
+           month calendar and a Jump to date, this page had neither. A native date
+           input gives a real month picker, keyboard entry and full a11y for free. -->
+      <label class="cal-jump" title="Jump to a date">
+        <span class="cal-jump-icon">📅</span>
+        <span class="cal-jump-label">Jump</span>
+        <input type="date" id="cal-jump-input">
+      </label>
     </div>
     <div class="scoreboard-strip nf" id="scoreboard-strip">
       <div class="loading-state"><span class="spin"></span> Loading games…</div>
@@ -458,7 +485,11 @@ function teamColor(a,lg){ return (lg==='wnba'?WNBA_COLOR:NBA_COLOR)[(a||'').toUp
 const EVENT_IMAGES = { wnba: '/wnba_allstar.png', nba: '/nba_allstar.png' };
 
 // ── State ──────────────────────────────────────────────────────
-const SB = { today:todayStr(), date:null, league:'all', loading:false, timer:null };
+// `pivot` is the date the ±14 strip is drawn around. It is NOT the selected date:
+// clicking a day must not slide every other day out from under the cursor, so only an
+// explicit Jump moves it.
+const SB = { today:todayStr(), date:null, pivot:null, league:'all', loading:false, timer:null };
+SB.pivot = SB.today;
 let _games = [];
 let _boardRendered = false;
 let _posters = {};   // gameId -> {away, home} player ids; cached so re-renders (e.g. league switch) re-apply headshots without refetching
@@ -557,8 +588,9 @@ function renderPills() {
 function buildCalStrip() {
   const strip = document.getElementById('cal-strip'); if (!strip) return;
   const today = SB.today;
-  const start = addDays(today,-14);
-  const end   = addDays(today, 14);
+  const pivot = SB.pivot || today;
+  const start = addDays(pivot,-14);
+  const end   = addDays(pivot, 14);
   let html = '', c = start;
   while (c <= end) {
     const [y,m,d] = c.split('-').map(Number);
@@ -581,10 +613,26 @@ function buildCalStrip() {
       loadPerformers();
     });
   });
-  const todayEl = strip.querySelector(`[data-date="${today}"]`);
-  if (todayEl) requestAnimationFrame(() => {
-    strip.scrollLeft = todayEl.offsetLeft - strip.offsetWidth/2 + todayEl.offsetWidth/2;
+  // Centre on the pivot, which is today until someone jumps. Without this, jumping to
+  // March would rebuild the strip correctly and then leave it scrolled to one end.
+  const anchorEl = strip.querySelector(`[data-date="${pivot}"]`);
+  if (anchorEl) requestAnimationFrame(() => {
+    strip.scrollLeft = anchorEl.offsetLeft - strip.offsetWidth/2 + anchorEl.offsetWidth/2;
   });
+
+  const jump = document.getElementById('cal-jump-input');
+  if (jump && !jump.dataset.wired) {
+    jump.dataset.wired = '1';
+    jump.addEventListener('change', () => {
+      if (!jump.value) return;
+      SB.pivot = jump.value;
+      SB.date  = jump.value === SB.today ? null : jump.value;
+      buildCalStrip();
+      loadScoreboard();
+      loadPerformers();
+    });
+  }
+  if (jump) jump.value = SB.date || today;
 }
 
 // ── Scoreboard ─────────────────────────────────────────────────
