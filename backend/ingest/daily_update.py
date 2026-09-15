@@ -93,6 +93,24 @@ def main():
             'Scheduled games + tip times',
             ['--league', 'both'],
         ),
+        # ── Venue + crowd for games that just finished. MUST run after
+        #    reconcile_games, which is what puts the night's final games in
+        #    `games` in the first place — there is nothing to look up before
+        #    the row exists.
+        #
+        #    Cloud, not local: this reads the CDN boxscore through _cdn_get's
+        #    Chrome impersonation, which is exactly the path that works from a
+        #    Railway IP. Only stats.nba.com needs the residential box.
+        #
+        #    --recent keeps the nightly cost to the slate just played; attended
+        #    games are pulled in regardless of age, so back-marking an old game
+        #    fills its venue on the next run. Historical backlog is a separate
+        #    manual pass (--limit N), not this step's job. ──────────────────
+        (
+            'backfill_game_venues.py',
+            'Arena + attendance for finished games',
+            ['--recent', '3', '--attended-first', '--apply'],
+        ),
         # ── Team W-L records — both computed from games table, Railway-safe ──
         (
             'fetch_team_seasons.py',

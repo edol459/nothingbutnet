@@ -7831,6 +7831,64 @@ def _format_feed_rows(rows) -> list:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # GET /api/users/<user_id>/insights — "By the Numbers" for the diary page
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/users/<int:user_id>/tickets")
+def get_user_tickets(user_id):
+    """The ticketbook: games this user marked as attended in person, newest first.
+
+    Read-only and public, the same as the rest of a profile — a ticketbook is a
+    thing you show people. Blocked viewers are handled the way every other profile
+    surface handles them, by the caller.
+
+    Venue comes from `games` (schema_v17), not `scheduled_games`: the schedule feed
+    has no memory of past seasons, and the oldest tickets here are from 2024.
+    `arena_name` may still be NULL for a game the backfill has not reached, so the
+    client must treat the venue as optional rather than assume it.
+
+    `attendance` is the building's real crowd figure from the league feed, not a
+    count of ydkball users. NULL means unknown — never rendered as zero, which would
+    claim an empty arena.
+
+    Shaped so the client can build a ScoreboardGame directly (same trick as
+    RewatchItem.card), because the ticket reuses the scoreboard's poster card.
+    """
+    limit = min(int(request.args.get("limit", 60)), 200)
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT g.game_id, g.league, g.game_date, g.season, g.season_type,
+                   g.away_team_abbr, g.home_team_abbr, g.away_score, g.home_score,
+                   g.arena_name, g.arena_city, g.attendance, g.sellout,
+                   r.rating, r.review_text
+              FROM game_reviews r
+              JOIN games g ON g.game_id = r.game_id
+             WHERE r.user_id = %s AND r.attended
+             ORDER BY g.game_date DESC
+             LIMIT %s
+        """, (user_id, limit))
+        tickets = [{
+            "gameId":    r["game_id"],
+            "league":    r["league"] or "nba",
+            "gameDate":  r["game_date"].isoformat() if r["game_date"] else None,
+            "season":    r["season"],
+            "seasonType": r["season_type"],
+            "away":      {"abbr": r["away_team_abbr"], "score": r["away_score"]},
+            "home":      {"abbr": r["home_team_abbr"], "score": r["home_score"]},
+            "arenaName": r["arena_name"],
+            "arenaCity": r["arena_city"],
+            "attendance": r["attendance"],
+            "sellout":   r["sellout"],
+            # The owner's own verdict, printed on the stub. Nullable since schema_v14 —
+            # attending a game and rating it are separate acts.
+            "rating":    r["rating"],
+            "hasNote":   bool((r["review_text"] or "").strip()),
+        } for r in cur.fetchall()]
+        return jsonify({"tickets": tickets, "count": len(tickets)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
 @app.route("/api/users/<int:user_id>/insights")
 def get_user_insights(user_id):
     try:

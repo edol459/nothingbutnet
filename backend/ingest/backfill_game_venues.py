@@ -40,8 +40,17 @@ load_dotenv()
 import server  # noqa: E402
 
 
-def games_needing_venue(cur, refresh: bool, attended_first: bool, limit: int):
+def games_needing_venue(cur, refresh: bool, attended_first: bool, limit: int, recent: int):
     where = "TRUE" if refresh else "g.arena_name IS NULL"
+    # `recent` is what the daily pipeline passes: only chase games that just finished,
+    # so a nightly run costs a handful of CDN calls rather than walking 21k rows.
+    #
+    # Attended games are exempt from that window ON PURPose. Somebody marking a 2024
+    # game as attended today creates a venue gap in the past, which a date-bounded
+    # query would never revisit — the ticket would print with no building on it.
+    if recent:
+        where += (f" AND (g.game_date >= CURRENT_DATE - {int(recent)}"
+                  f"      OR COALESCE(a.n, 0) > 0)")
     cur.execute(f"""
         SELECT g.game_id, g.league, g.game_date,
                COALESCE(a.n, 0) AS attended_logs
@@ -97,6 +106,9 @@ def main() -> int:
     ap.add_argument("--attended-first", action="store_true",
                     help="process games somebody attended first — what a ticketbook renders")
     ap.add_argument("--limit", type=int, default=0, help="stop after N games")
+    ap.add_argument("--recent", type=int, default=0,
+                    help="only games finished in the last N days (plus any attended game "
+                         "still missing a venue). What the daily pipeline passes.")
     ap.add_argument("--sleep", type=float, default=0.15, help="seconds between CDN calls")
     args = ap.parse_args()
     apply = args.apply and not args.dry_run
@@ -104,9 +116,14 @@ def main() -> int:
     conn = psycopg2.connect(os.getenv("DATABASE_URL"))
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    todo = games_needing_venue(cur, args.refresh, args.attended_first, args.limit)
+    todo = games_needing_venue(cur, args.refresh, args.attended_first, args.limit, args.recent)
     print(f"{len(todo)} game(s) need a venue"
+          f"{f' (last {args.recent}d + any attended)' if args.recent else ''}"
           f"{' — attended games first' if args.attended_first else ''}")
+    if not todo:
+        print("nothing to do")
+        cur.close(); conn.close()
+        return 0
     if not apply:
         print("(dry run — nothing will be written; pass --apply to commit)\n")
 
