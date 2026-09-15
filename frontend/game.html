@@ -184,6 +184,32 @@ table.box-table tfoot td:first-child{text-align:left;}
   font-weight:600; margin-top:2px; }
 .review-write-textarea::placeholder { color: var(--ink4); }
 .reviews-write-actions { display: flex; align-items: center; gap: 10px; }
+
+/* ── Notebook: clock stamp + draft state ──────────────────────── */
+.note-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+/* Mono because it prints a clock, and a proportional face makes 4:22 jitter every
+   second as the poll rewrites it. */
+.btn-stamp {
+  font-family:var(--ff-mono); font-size:10px; letter-spacing:.05em;
+  padding:4px 9px; border:1px solid var(--rule); border-radius:4px;
+  background:transparent; color:var(--ink3); cursor:pointer;
+  transition:border-color .12s, color .12s;
+}
+.btn-stamp:hover { border-color:var(--orange); color:var(--orange); }
+/* Pushed to the right of the watched toggle so Submit stays the last thing read. */
+.draft-state {
+  font-family:var(--ff-mono); font-size:10px; letter-spacing:.04em;
+  color:var(--ink4); margin-left:auto;
+}
+.draft-state.error { color:var(--red); }
+/* The buzzer moment: the whole session has been building to Submit unlocking, so it
+   is worth one pulse rather than silently becoming clickable. */
+.btn-review-submit.just-final { animation: submitUnlock 1.1s ease 2; }
+@keyframes submitUnlock {
+  0%,100% { box-shadow:0 0 0 0 rgba(0,0,0,0); }
+  50%     { box-shadow:0 0 0 4px color-mix(in srgb, var(--orange) 35%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) { .btn-review-submit.just-final { animation:none; } }
 .btn-review-submit {
   font-family: var(--ff-sans); font-size: 13px; font-weight: 600;
   padding: 8px 18px; background: var(--orange); color: #fff;
@@ -652,6 +678,11 @@ async function loadGame() {
     const box = boxRes.ok ? await boxRes.json() : null;
     const pbp = pbpRes.ok ? await pbpRes.json() : null;
     GAME_DATA = {box, pbp};
+    // Before the first render, because renderTabs picks the default tab from whether
+    // anyone is signed in. Safe to call here even though ensureReviewUser is declared
+    // in a later <script>: we have already awaited, so the document has finished
+    // parsing. It self-caches, so the poll costs nothing.
+    await ensureReviewUser();
     render(box, pbp);
     if (box && box.gameStatus === 2) {
       if (POLL_TIMER) clearTimeout(POLL_TIMER);
@@ -747,19 +778,36 @@ function teamHref(abbr) {
   return `/team?abbr=${encodeURIComponent(abbr)}&league=${IS_WNBA ? 'wnba' : 'nba'}`;
 }
 
+// Log · Play-by-Play · Box Score · Community — the same four the app shows, in the
+// same order, so the two clients describe a game the same way.
+//
+// The Log tab exists in EVERY game state, which is the whole point of the web pass:
+// the notebook is kept DURING the game (docs/live-logging-spec.md), and this page
+// previously offered no writing surface at all until the final buzzer.
+//
+// Community is final-only because nothing public exists before then — you cannot
+// publish a log until the game ends, so the tab would always be empty.
 function renderTabs(box) {
   const container = document.getElementById('game-tabs');
   const isFinal = box && box.gameStatus === 3;
   const tabs = [
+    {id:'log', label:'My Log'},
     {id:'pbp', label:'Play-by-Play'},
     {id:'box', label:'Box Score'},
-    ...(isFinal ? [{id:'reviews', label:'Reviews'}] : []),
+    ...(isFinal ? [{id:'community', label:'Community'}] : []),
   ];
 
   // Set default tab from URL param only on first render; preserve user's selection on polls
   if (!ACTIVE_TAB || !tabs.find(t => t.id === ACTIVE_TAB)) {
     const urlTab = new URLSearchParams(window.location.search).get('tab');
-    ACTIVE_TAB = (urlTab && tabs.find(t => t.id === urlTab)) ? urlTab : 'pbp';
+    // `reviews` was this page's old tab id and is still live in shared links and OG
+    // cards. Send it to Community, which is where other people's logs went.
+    const alias = urlTab === 'reviews' ? 'community' : urlTab;
+    // Signed-out visitors default to Play-by-Play, not to a sign-in wall. The app can
+    // default to the log because it has no logged-out traffic; this page is linked
+    // from search results and OG cards.
+    ACTIVE_TAB = (alias && tabs.find(t => t.id === alias)) ? alias
+               : (_reviewUser ? 'log' : 'pbp');
   }
 
   container.style.display = '';
@@ -771,9 +819,7 @@ function renderTabs(box) {
       ACTIVE_TAB = btn.dataset.tab;
       container.querySelectorAll('.game-tab').forEach(b => b.classList.toggle('active', b===btn));
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id===`panel-${ACTIVE_TAB}`));
-      if (ACTIVE_TAB === 'reviews' && !document.getElementById('panel-reviews').dataset.loaded) {
-        loadReviewsPanel();
-      }
+      if ((ACTIVE_TAB === 'log' || ACTIVE_TAB === 'community') && !_panelsLoaded) loadGamePanels();
     });
   });
 }
@@ -781,12 +827,34 @@ function renderTabs(box) {
 function renderPanels(box, pbp) {
   const el = document.getElementById('game-panels');
   const isFinal = box && box.gameStatus === 3;
-  el.innerHTML = `
-    <div class="tab-panel ${ACTIVE_TAB==='pbp'?'active':''}" id="panel-pbp">${buildPbp(pbp, box)}</div>
-    <div class="tab-panel ${ACTIVE_TAB==='box'?'active':''}" id="panel-box">${buildBox(box)}</div>
-    ${isFinal ? `<div class="tab-panel ${ACTIVE_TAB==='reviews'?'active':''}" id="panel-reviews"><div class="reviews-panel"><div class="reviews-loading">Loading reviews…</div></div></div>` : ''}
-  `;
-  if (isFinal && ACTIVE_TAB === 'reviews') loadReviewsPanel();
+
+  // This runs on EVERY poll — every 15 seconds while a game is live. The log panel
+  // holds a textarea the user may be mid-sentence in, so its markup is built once and
+  // never rebuilt here; only the two panels that actually change (play-by-play and
+  // box score) get new HTML. Blowing away someone's notebook every 15s is the single
+  // worst thing this page could do to a three-hour session.
+  if (!document.getElementById('panel-pbp')) {
+    el.innerHTML = `
+      <div class="tab-panel" id="panel-log"><div class="log-panel"></div></div>
+      <div class="tab-panel" id="panel-pbp"></div>
+      <div class="tab-panel" id="panel-box"></div>
+      <div class="tab-panel" id="panel-community"><div class="reviews-panel"></div></div>`;
+  }
+  document.getElementById('panel-pbp').innerHTML = buildPbp(pbp, box);
+  document.getElementById('panel-box').innerHTML = buildBox(box);
+
+  el.querySelectorAll('.tab-panel').forEach(p =>
+    p.classList.toggle('active', p.id === `panel-${ACTIVE_TAB}`));
+
+  // Before loadGamePanels, because renderLogContent reads _gameStatus to decide whether
+  // the Player of the Game picker starts visible. Every DOM lookup inside is guarded,
+  // so calling it before the sheet exists is fine.
+  //
+  // This is also what makes a game going final while the sheet is open unlock Submit in
+  // place rather than on a reload — the poll is already running; this reads the status
+  // it brought back.
+  syncGameState(box);
+  if (!_panelsLoaded && (ACTIVE_TAB === 'log' || ACTIVE_TAB === 'community')) loadGamePanels();
 
   // Box score team toggle
   el.querySelectorAll('.box-team-btn').forEach(btn => {
@@ -1070,6 +1138,16 @@ let _reviewTotal   = 0;
 let _reviewSort    = 'likes';  // 'likes' | 'date'
 let _likesWired    = false;
 
+// ── Notebook state ────────────────────────────────────────
+// `_panelsLoaded` guards the one-shot fetch that fills both the Log and Community
+// panels; the 15s poll must never retrigger it.
+let _panelsLoaded  = false;
+let _isPublished   = false;   // a submitted log exists — published beats draft on load
+let _gameStatus    = 0;       // 1 upcoming · 2 live · 3 final, from the live box score
+let _draftTimer    = null;
+let _draftInFlight = false;
+let _draftDirty    = false;
+
 function fmtShortDate(str) {
   if (!str) return '';
   const d = new Date(str);
@@ -1144,19 +1222,26 @@ async function ensureReviewUser() {
   } catch { _reviewUser = null; }
 }
 
-// Sign-in link that returns the user to THIS game's reviews tab (keeps gameId).
+// Sign-in link that returns the user to THIS game's log tab (keeps gameId).
 function reviewSignInHref() {
   const p = new URLSearchParams(window.location.search);
-  p.set('tab', 'reviews');
+  p.set('tab', 'log');
   return `/auth/google/login?next=${encodeURIComponent(window.location.pathname + '?' + p.toString())}`;
 }
 
-// ── Load the reviews panel ────────────────────────────────
-async function loadReviewsPanel(append = false) {
-  const panel = document.getElementById('panel-reviews');
-  if (!panel) return;
+// ── Load the Log + Community panels ───────────────────────
+// One fetch pass fills both. They read the same three endpoints, and splitting them
+// into two loaders would double every request just to render two halves of one answer.
+//
+// `/api/games/<id>` 404s while a game is live — the games table only ever holds
+// finished games — so every read here tolerates failure and the log sheet still works
+// on a game that does not exist server-side yet. That is the normal case mid-game.
+async function loadGamePanels(append = false) {
+  const logPanel = document.getElementById('panel-log');
+  const comPanel = document.getElementById('panel-community');
+  if (!logPanel && !comPanel) return;
   await ensureReviewUser();
-  const container = panel.querySelector('.reviews-panel') || panel;
+  const container = comPanel ? comPanel.querySelector('.reviews-panel') : null;
 
   if (!append) {
     _reviewOffset = 0;
@@ -1165,8 +1250,8 @@ async function loadReviewsPanel(append = false) {
     _potgPick     = null;
     _potgTally    = null;
     closeTagPicker();
-    container.innerHTML = '<div class="reviews-loading">Loading…</div>';
-    panel.dataset.loaded = '1';
+    if (container) container.innerHTML = '<div class="reviews-loading">Loading…</div>';
+    _panelsLoaded = true;
   }
 
   const [gameRes, revRes, potgRes] = await Promise.all([
@@ -1194,9 +1279,10 @@ async function loadReviewsPanel(append = false) {
   _reviewOffset  += reviews.length;
 
   if (!append) {
-    container.innerHTML = renderReviewsContent(g, reviews, revData.has_more);
-    buildStarPicker();
-    wireWriteSection();
+    const logHost = logPanel && logPanel.querySelector('.log-panel');
+    if (logHost) { logHost.innerHTML = renderLogContent(g); buildStarPicker(); wireWriteSection(); }
+    if (container) container.innerHTML = renderCommunityContent(g, reviews, revData.has_more);
+    wireCommunitySection();
   } else {
     // Append new reviews before load-more button
     const list = container.querySelector('.review-list');
@@ -1212,8 +1298,52 @@ async function loadReviewsPanel(append = false) {
   }
 }
 
-function renderReviewsContent(g, reviews, hasMore) {
-  // Aggregate
+// ── The log sheet ─────────────────────────────────────────
+// Deliberately carries NO tally and none of other people's logs. Seeing "Haliburton
+// 62%" while you are choosing your own Player of the Game corrupts the pick, so the
+// crowd lives one tab over — the same separation the app enforces.
+//
+// Field order matches the app: pick → stars → note. Every field stands alone; a
+// rating, a pick or a note is each a complete log on its own.
+function renderLogContent(g) {
+  if (!_reviewUser) {
+    return `<div class="reviews-write">
+      <p class="review-signin-prompt">
+        <a href="${reviewSignInHref()}">Sign in</a> to log this game.
+      </p></div>`;
+  }
+  // Final games only — a pick made at halftime is a different claim from one made at
+  // the buzzer, and mixing them corrupts the tally.
+  //
+  // Rendered always and merely HIDDEN until the buzzer, rather than rendered on demand:
+  // a game can go final while the sheet is open, and re-rendering the sheet to add the
+  // picker would take the note being typed with it.
+  const potgHtml =
+    `<div id="potg-block" style="display:${_gameStatus === 3 ? '' : 'none'}">
+       <div class="reviews-write-title">Player of the Game</div>
+       <select class="potg-select" id="potg-select"><option value="">— No pick —</option></select>
+     </div>`;
+  return `<div class="reviews-write" id="reviews-write-section">
+      ${potgHtml}
+      <div class="reviews-write-title" id="write-title">Rate This Game</div>
+      <div class="star-picker-inline" id="star-picker-inline"></div>
+      <div class="note-head">
+        <span class="reviews-write-title">Your Notes</span>
+        <button class="btn-stamp" id="btn-stamp" type="button" title="Insert the game clock (Alt+S)">⏱ <span id="btn-stamp-label">Stamp</span></button>
+      </div>
+      <textarea class="review-write-textarea" id="review-textarea" placeholder="Write about this game…"${_reviewUser.is_pro ? '' : ` maxlength="${FREE_REVIEW_LIMIT}"`}></textarea>
+      ${_reviewUser.is_pro ? '' : `<div class="review-charcount" id="review-charcount">0/${FREE_REVIEW_LIMIT}</div>`}
+      <div class="write-tags-row" id="write-tags-row"></div>
+      <div class="reviews-write-actions">
+        <button class="btn-watch${g.is_watched ? ' on' : ''}" id="btn-watch" type="button">${_EYE_SVG}<span id="btn-watch-label">${g.is_watched ? 'Watched' : 'Mark watched'}</span></button>
+        <span class="draft-state" id="draft-state"></span>
+        <button class="btn-review-submit" id="btn-review-submit">Submit</button>
+      </div>
+    </div>`;
+}
+
+// ── The community tab ─────────────────────────────────────
+function renderCommunityContent(g, reviews, hasMore) {
   let aggHtml;
   if (g.review_count > 0) {
     const stars = (g.avg_stars || 0).toFixed(2);
@@ -1221,41 +1351,19 @@ function renderReviewsContent(g, reviews, hasMore) {
       <div class="reviews-agg">
         <span class="reviews-agg-val">${stars}</span>
         <span class="reviews-agg-stars">${starsText(g.avg_stars * 2, 16)}</span>
-        <span class="reviews-agg-count">${g.review_count} review${g.review_count !== 1 ? 's' : ''}</span>
+        <span class="reviews-agg-count">${g.review_count} rating${g.review_count !== 1 ? 's' : ''}</span>
       </div>`;
   } else {
     aggHtml = `<div class="reviews-agg"><span class="reviews-agg-empty">No ratings yet — be the first.</span></div>`;
   }
 
-  // Write section
-  const writeHtml = _reviewUser
-    ? `<div class="reviews-write" id="reviews-write-section">
-        <div class="reviews-write-title">Player of the Game</div>
-        <select class="potg-select" id="potg-select"><option value="">— No pick —</option></select>
-        <div class="reviews-write-title" id="write-title">Rate This Game</div>
-        <div class="star-picker-inline" id="star-picker-inline"></div>
-        <textarea class="review-write-textarea" id="review-textarea" placeholder="Write a review (optional)…"${_reviewUser.is_pro ? '' : ` maxlength="${FREE_REVIEW_LIMIT}"`}></textarea>
-        ${_reviewUser.is_pro ? '' : `<div class="review-charcount" id="review-charcount">0/${FREE_REVIEW_LIMIT}</div>`}
-        <div class="write-tags-row" id="write-tags-row"></div>
-        <div class="reviews-write-actions">
-          <button class="btn-watch${g.is_watched ? ' on' : ''}" id="btn-watch" type="button">${_EYE_SVG}<span id="btn-watch-label">${g.is_watched ? 'Watched' : 'Mark watched'}</span></button>
-          <button class="btn-review-submit" id="btn-review-submit">Submit</button>
-        </div>
-      </div>`
-    : `<div class="reviews-write">
-        <p class="review-signin-prompt">
-          <a href="${reviewSignInHref()}">Sign in</a> to rate and review this game.
-        </p>
-      </div>`;
-
-  // Sort toggle + review list
   const sortHtml = reviews.length > 0 ? `
     <div class="reviews-sort">
       <button class="reviews-sort-btn${_reviewSort === 'likes' ? ' active' : ''}" data-sort="likes">Most Liked</button>
       <button class="reviews-sort-btn${_reviewSort === 'date'  ? ' active' : ''}" data-sort="date">Most Recent</button>
     </div>` : '';
   const listHtml = reviews.length === 0
-    ? '<div class="reviews-empty">No reviews yet.</div>'
+    ? '<div class="reviews-empty">No logs yet.</div>'
     : `${sortHtml}<div class="review-list">${reviews.map(reviewItemHTML).join('')}</div>`;
 
   const loadMoreHtml = hasMore
@@ -1267,7 +1375,6 @@ function renderReviewsContent(g, reviews, hasMore) {
       ${aggHtml}
       ${potgTallyHTML(_potgTally)}
     </div>
-    ${writeHtml}
     ${listHtml}
     ${loadMoreHtml}
   `;
@@ -1364,19 +1471,19 @@ function reviewItemHTML(r) {
   <div class="reply-section" id="reply-section-${r.id}" data-review-id="${r.id}"></div>`;
 }
 
-function wireWriteSection() {
-  const panel = document.getElementById('panel-reviews');
+function wireCommunitySection() {
+  const panel = document.getElementById('panel-community');
   if (!panel) return;
 
   // Load-more
   const loadMoreBtn = panel.querySelector('.btn-load-more');
-  if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => loadReviewsPanel(true));
+  if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => loadGamePanels(true));
 
   // Sort toggle
   panel.querySelectorAll('.reviews-sort-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       _reviewSort = btn.dataset.sort;
-      loadReviewsPanel(false);
+      loadGamePanels(false);
     });
   });
 
@@ -1445,55 +1552,36 @@ function wireWriteSection() {
       submitReply(parseInt(section.dataset.reviewId), input);
     });
   }
+}
 
+function wireWriteSection() {
   if (!_reviewUser) return;
 
   // Initial empty tag row
   renderWriteTags();
   renderPotgSelect();
   const ta0 = document.getElementById('review-textarea');
-  if (ta0) ta0.addEventListener('input', updateCharCount);
+  if (ta0) ta0.addEventListener('input', () => { updateCharCount(); queueDraftSave(); });
   updateCharCount();
   const potgSel = document.getElementById('potg-select');
   if (potgSel) potgSel.addEventListener('change', () => {
     const id = potgSel.value;
-    if (!id) { _potgPick = null; return; }
+    if (!id) { _potgPick = null; queueDraftSave(); return; }
     const found = _potgLookup(id);
     _potgPick = { person_id: parseInt(id, 10),
                   player_name: found ? found.name : '',
                   team_abbr:   found ? found.abbr : null };
+    queueDraftSave();
   });
 
-  // Check if user already reviewed — pre-fill
-  fetch(`/api/games/${GAME_ID}/reviews?logs=1&limit=100`)
-    .then(r => r.json())
-    .then(data => {
-      const existing = (data.reviews || []).find(r => r.user_id === _reviewUser.id);
-      if (existing) {
-        _pickedRating = existing.rating;
-        applyStarColors(_pickedRating);
-        const ta = document.getElementById('review-textarea');
-        const title = document.getElementById('write-title');
-        const btn = document.getElementById('btn-review-submit');
-        if (ta) { ta.value = existing.review_text || ''; updateCharCount(); }
-        if (title) title.textContent = 'Your Review';
-        if (btn) {
-          btn.textContent = 'Update';
-          // Add delete button
-          const del = document.createElement('button');
-          del.className = 'btn-review-delete';
-          del.textContent = 'Delete review';
-          del.addEventListener('click', deleteReview);
-          btn.parentElement.appendChild(del);
-        }
-        // Pre-fill tags + attended
-        if (existing.tags && existing.tags.length) {
-          _currentTags = existing.tags.slice();
-        }
-        _attended = !!existing.attended;
-        renderWriteTags();
-      }
-    }).catch(() => {});
+  // Clock stamp — the reason to write on a laptop during the game. Alt+S so it works
+  // without leaving the keyboard; the browser owns every Ctrl/Cmd combination worth
+  // having here.
+  const stampBtn = document.getElementById('btn-stamp');
+  if (stampBtn) stampBtn.addEventListener('click', stampClock);
+  if (ta0) ta0.addEventListener('keydown', e => {
+    if (e.altKey && (e.key === 's' || e.key === 'S')) { e.preventDefault(); stampClock(); }
+  });
 
   // Submit
   const submitBtn = document.getElementById('btn-review-submit');
@@ -1502,6 +1590,190 @@ function wireWriteSection() {
   // Watched toggle
   const watchBtn = document.getElementById('btn-watch');
   if (watchBtn) watchBtn.addEventListener('click', toggleWatch);
+
+  seedSheet();
+  syncGameState(GAME_DATA && GAME_DATA.box);
+}
+
+// Fill the sheet from the server: the published log first, then the draft on top.
+//
+// That order is deliberate. Publishing DELETES the draft server-side, so a draft that
+// exists alongside a published log can only have been written after the publish — it
+// is strictly the newer state of the user's editing and must win.
+async function seedSheet() {
+  // Only a finished game can have a published log, and /api/games/<id>/reviews is
+  // useless before then, so skip the round trip entirely during a live game.
+  if (_gameStatus === 3) {
+    try {
+      const data = await fetch(`/api/games/${GAME_ID}/reviews?logs=1&limit=100`).then(r => r.json());
+      const mine = (data.reviews || []).find(r => r.user_id === _reviewUser.id);
+      if (mine) {
+        _isPublished = true;
+        _pickedRating = mine.rating || 0;
+        applyStarColors(_pickedRating);
+        const ta = document.getElementById('review-textarea');
+        if (ta) { ta.value = mine.review_text || ''; updateCharCount(); }
+        const title = document.getElementById('write-title');
+        if (title) title.textContent = 'Your Rating';
+        if (mine.tags && mine.tags.length) _currentTags = mine.tags.slice();
+        _attended = !!mine.attended;
+        renderWriteTags();
+        addDeleteButton();
+      }
+    } catch {}
+  }
+
+  try {
+    const { draft } = await fetch(`/api/games/${GAME_ID}/draft`).then(r => r.json());
+    if (draft) {
+      if (draft.rating) { _pickedRating = draft.rating; applyStarColors(_pickedRating); }
+      const ta = document.getElementById('review-textarea');
+      if (ta && draft.review_text) { ta.value = draft.review_text; updateCharCount(); }
+      if (draft.tags && draft.tags.length) { _currentTags = draft.tags.slice(); renderWriteTags(); }
+      if (draft.attended) _attended = true;
+      if (draft.potg) { _potgPick = draft.potg; renderPotgSelect(); }
+      setDraftState('saved');
+    }
+  } catch {}
+  syncGameState(GAME_DATA && GAME_DATA.box);
+}
+
+function addDeleteButton() {
+  const btn = document.getElementById('btn-review-submit');
+  if (!btn || document.querySelector('.btn-review-delete')) return;
+  const del = document.createElement('button');
+  del.className = 'btn-review-delete';
+  del.textContent = 'Delete log';
+  del.addEventListener('click', deleteReview);
+  btn.parentElement.appendChild(del);
+}
+
+// ── Draft autosave ────────────────────────────────────────
+// Debounced to 2s per the live-logging spec: a three-hour session touches this
+// notebook constantly and does not need a round trip per keystroke.
+function queueDraftSave() {
+  _draftDirty = true;
+  setDraftState('saving');
+  if (_draftTimer) clearTimeout(_draftTimer);
+  _draftTimer = setTimeout(flushDraft, 2000);
+}
+
+function draftBody() {
+  return {
+    rating:      _pickedRating || null,
+    review_text: document.getElementById('review-textarea')?.value || null,
+    tags:        _currentTags,
+    attended:    _attended,
+    potg:        _potgPick,
+    league:      IS_WNBA ? 'wnba' : 'nba',
+    home_abbr:   GAME_DATA?.box?.homeTeam?.teamTricode || null,
+    away_abbr:   GAME_DATA?.box?.awayTeam?.teamTricode || null,
+  };
+}
+
+async function flushDraft() {
+  if (!_reviewUser || !_draftDirty || _draftInFlight) return;
+  _draftInFlight = true; _draftDirty = false;
+  try {
+    const r = await fetch(`/api/games/${GAME_ID}/draft`, {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(draftBody()),
+    });
+    setDraftState(r.ok ? 'saved' : 'error');
+  } catch { setDraftState('error'); }
+  _draftInFlight = false;
+  if (_draftDirty) flushDraft();   // an edit landed mid-request
+}
+
+function setDraftState(s) {
+  const el = document.getElementById('draft-state');
+  if (!el) return;
+  el.className = 'draft-state ' + s;
+  el.textContent = s === 'saving' ? 'Saving…'
+                 : s === 'saved'  ? 'Draft saved'
+                 : s === 'error'  ? 'Not saved — retrying'
+                 : '';
+}
+
+// Closing the tab mid-sentence must not cost the note. keepalive lets the request
+// outlive the page; a normal fetch here is cancelled on unload.
+window.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && _draftDirty && _reviewUser) {
+    if (_draftTimer) clearTimeout(_draftTimer);
+    try {
+      fetch(`/api/games/${GAME_ID}/draft`, {
+        method: 'PUT', keepalive: true,
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(draftBody()),
+      });
+      _draftDirty = false;
+    } catch {}
+  }
+});
+
+// ── Clock stamp ───────────────────────────────────────────
+function currentClockLabel() {
+  const box = GAME_DATA && GAME_DATA.box;
+  if (!box || !box.period) return null;
+  const p = box.period;
+  const label = p > 4 ? `OT${p - 4}` : `Q${p}`;
+  const clock = fmtClock(box.gameClock || '');
+  return clock ? `${label} ${clock}` : label;
+}
+
+function stampClock() {
+  const ta = document.getElementById('review-textarea');
+  const label = currentClockLabel();
+  if (!ta || !label) return;
+  const at     = ta.selectionStart ?? ta.value.length;
+  const before = ta.value.slice(0, at);
+  const after  = ta.value.slice(at);
+  // Each stamp opens its own line, so the note reads as a timeline rather than a
+  // paragraph with times buried in it.
+  const lead = (before === '' || before.endsWith('\n')) ? '' : '\n';
+  const ins  = `${lead}[${label}] `;
+  ta.value = before + ins + after;
+  const pos = (before + ins).length;
+  ta.setSelectionRange(pos, pos);
+  ta.focus();
+  updateCharCount();
+  queueDraftSave();
+}
+
+// ── Live/final state ──────────────────────────────────────
+// Called on every poll. Owns everything that depends on whether the game has ended:
+// the submit gate, the stamp button, and the Player of the Game picker.
+function syncGameState(box) {
+  const prev  = _gameStatus;
+  _gameStatus = box ? (box.gameStatus || 0) : 0;
+  const isFinal = _gameStatus === 3;
+
+  const stamp = document.getElementById('btn-stamp');
+  if (stamp) {
+    stamp.style.display = _gameStatus === 2 ? '' : 'none';
+    const lbl = document.getElementById('btn-stamp-label');
+    const c = currentClockLabel();
+    if (lbl) lbl.textContent = c || 'Stamp';
+  }
+
+  // The buzzer went while the sheet was open: reveal the picker and populate it from
+  // the box score that just arrived. No re-render, so nothing typed is lost.
+  const block = document.getElementById('potg-block');
+  if (block) {
+    block.style.display = isFinal ? '' : 'none';
+    if (isFinal && prev !== 3) renderPotgSelect();
+  }
+
+  const btn = document.getElementById('btn-review-submit');
+  if (btn) {
+    btn.disabled = !isFinal;
+    // A disabled primary button with no reason reads as a bug, so it says why.
+    btn.textContent = !isFinal
+      ? (_gameStatus === 2 ? 'Submit when the game ends' : 'Submit once the game starts')
+      : (_isPublished ? 'Update' : 'Submit');
+    btn.classList.toggle('just-final', isFinal && prev === 2);
+  }
 }
 
 // ── Mark as watched ────────────────────────────────────────
@@ -1565,6 +1837,7 @@ function buildStarPicker() {
     const star  = parseInt(svg.dataset.star);
     _pickedRating = isLeft ? star * 2 - 1 : star * 2;
     _applyPickerColors(_pickedRating);
+    queueDraftSave();
   });
   picker.dataset.built = '1';
   _applyPickerColors(_pickedRating);
@@ -1614,13 +1887,25 @@ async function submitReview() {
                             tags: _currentTags, attended: _attended, potg: _potgPick}),
     });
     const data = await r.json();
-    if (!r.ok) throw new Error(data.error);
-    showReviewToast('Review saved!');
-    _reviewOffset = 0; _pickedRating = 0;
-    loadReviewsPanel(false);
+    // The endpoint is the guarantee, not the button: it rejects a non-final game with
+    // 409 so a half-formed third-quarter opinion can never reach games.rating_sum.
+    if (!r.ok) throw new Error(data.message || data.error);
+    // Publishing DELETES the draft inside the same transaction. A debounced PUT still
+    // pending here would recreate it a second later, and that zombie draft would then
+    // beat the published log on the next load. Cancel it before anything else.
+    if (_draftTimer) { clearTimeout(_draftTimer); _draftTimer = null; }
+    _draftDirty = false;
+    setDraftState('');
+    _isPublished = true;
+    showReviewToast('Log saved!');
+    // Deliberately NOT clearing _pickedRating: the sheet should now show what you
+    // published, not an empty form. Reloading re-seeds it from the server.
+    _reviewOffset = 0;
+    _panelsLoaded = false;
+    loadGamePanels(false);
   } catch(e) {
     showReviewToast('Error: ' + e.message);
-    btn.disabled = false; btn.textContent = 'Submit';
+    btn.disabled = false; btn.textContent = _isPublished ? 'Update' : 'Submit';
   }
 }
 
@@ -1751,13 +2036,22 @@ async function deleteReply(reviewId, replyId, itemEl) {
 }
 
 async function deleteReview() {
-  if (!confirm('Delete your review?')) return;
+  if (!confirm('Delete your log?')) return;
   try {
     const r = await fetch(`/api/games/${GAME_ID}/reviews`, {method:'DELETE'});
     if (!r.ok) throw new Error((await r.json()).error);
-    showReviewToast('Review deleted.');
+    // Same zombie-draft hazard as publishing: kill the pending write, and drop the
+    // draft too, or the deleted log reappears from the notebook on next open.
+    if (_draftTimer) { clearTimeout(_draftTimer); _draftTimer = null; }
+    _draftDirty = false;
+    try { await fetch(`/api/games/${GAME_ID}/draft`, {method:'DELETE'}); } catch {}
+    showReviewToast('Log deleted.');
+    _isPublished = false;
     _reviewOffset = 0; _pickedRating = 0;
-    loadReviewsPanel(false);
+    const ta = document.getElementById('review-textarea');
+    if (ta) ta.value = '';
+    _panelsLoaded = false;
+    loadGamePanels(false);
   } catch(e) { showReviewToast('Error: ' + e.message); }
 }
 
