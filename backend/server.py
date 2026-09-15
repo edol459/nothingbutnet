@@ -11665,9 +11665,16 @@ def get_watchlist():
                        AND ts.season = sg.season LIMIT 1) AS away_losses,
                    EXISTS (SELECT 1 FROM watchlist_games wg
                            WHERE wg.user_id = %(uid)s AND wg.game_id = sg.game_id
-                             AND wg.action = 'add') AS explicitly_added
+                             AND wg.action = 'add') AS explicitly_added,
+                   EXISTS (SELECT 1 FROM watchlist_highlights wh
+                           WHERE wh.user_id = %(uid)s AND wh.game_id = sg.game_id) AS highlighted
             {clause}
-            ORDER BY sg.game_date, sg.game_time_utc NULLS LAST
+            -- Starred games lead their own day, not the whole list: a must-watch on
+            -- Friday must not jump ahead of tonight's games.
+            ORDER BY sg.game_date,
+                     EXISTS (SELECT 1 FROM watchlist_highlights wh
+                              WHERE wh.user_id = %(uid)s AND wh.game_id = sg.game_id) DESC,
+                     sg.game_time_utc NULLS LAST
             LIMIT {limit}
         """, params)
         games = [{
@@ -11681,6 +11688,7 @@ def get_watchlist():
             "homeWins": r["home_wins"], "homeLosses": r["home_losses"],
             "awayWins": r["away_wins"], "awayLosses": r["away_losses"],
             "explicitlyAdded": r["explicitly_added"],
+            "highlighted": r["highlighted"],
         } for r in cur.fetchall()]
 
         # Games the user added AFTER they were played — deliberate rewatch picks, which
@@ -12050,6 +12058,40 @@ def set_notification_prefs():
         cur.close(); conn.close()
 
 
+@app.route("/api/me/watchlist/games/<game_id>/highlight", methods=["POST"])
+@login_required
+def watchlist_highlight_game(game_id):
+    """Star a game as must-watch. Independent of how it reached the watchlist."""
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""INSERT INTO watchlist_highlights (user_id, game_id)
+                       VALUES (%s, %s) ON CONFLICT DO NOTHING""", (user["id"], game_id))
+        conn.commit()
+        return jsonify({"ok": True, "gameId": game_id, "highlighted": True})
+    except Exception as e:
+        conn.rollback(); return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/me/watchlist/games/<game_id>/highlight", methods=["DELETE"])
+@login_required
+def watchlist_unhighlight_game(game_id):
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        # Scoped to this user AND this game — never a user-wide predicate.
+        cur.execute("DELETE FROM watchlist_highlights WHERE user_id = %s AND game_id = %s",
+                    (user["id"], game_id))
+        conn.commit()
+        return jsonify({"ok": True, "gameId": game_id, "highlighted": False})
+    except Exception as e:
+        conn.rollback(); return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
 @app.route("/api/me/watchlist/games/<game_id>", methods=["DELETE"])
 @login_required
 def watchlist_remove_game(game_id):
@@ -12370,7 +12412,15 @@ def remove_favorite_player(person_id):
 # PATCH /api/me/profile-config  — profile customizer (section visibility, etc.)
 # Body: {"hidden_sections": ["ratings", ...]}  (whitelisted keys only)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-_PROFILE_SECTIONS = {"players", "featured", "lists", "ratings", "recent"}
+# Every section the profile can draw. A key missing here is silently dropped from the
+# request, so the client's toggle appears to work and then reverts on the next load —
+# add to this set whenever a new section ships.
+#
+# "ballots" and "tickets" are separate sections with their own headers even though
+# Ballots is rendered by the same view as Lists. "featured" is retained because older
+# clients may still send it; nothing renders it today.
+_PROFILE_SECTIONS = {"players", "featured", "ballots", "lists",
+                     "tickets", "ratings", "recent"}
 
 @app.route("/api/me/profile-config", methods=["PATCH"])
 @login_required

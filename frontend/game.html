@@ -1345,7 +1345,7 @@ function renderLogContent(g) {
            is also the seed of the ticketbook, so it gets a label and a row. -->
       <button class="attended-row" id="btn-attended" type="button" aria-pressed="false">
         <span class="attended-box" aria-hidden="true"></span>
-        <span class="attended-text">I was at this game</span>
+        <span class="attended-text" id="attended-text">${_gameStatus === 2 ? "I&rsquo;m at this game" : "I was at this game"}</span>
       </button>
       <div class="note-head">
         <span class="reviews-write-title">Your Notes</span>
@@ -1794,6 +1794,11 @@ function syncGameState(box) {
 
   // The buzzer went while the sheet was open: reveal the picker and populate it from
   // the box score that just arrived. No re-render, so nothing typed is lost.
+  const att = document.getElementById('attended-text');
+  // Present tense only while it is actually happening. syncGameState already runs on
+  // every poll, so this flips at the buzzer without re-rendering the sheet.
+  if (att) att.innerHTML = _gameStatus === 2 ? "I&rsquo;m at this game" : "I was at this game";
+
   const block = document.getElementById('potg-block');
   if (block) {
     block.style.display = isFinal ? '' : 'none';
