@@ -678,6 +678,11 @@ async function loadGame() {
     const box = boxRes.ok ? await boxRes.json() : null;
     const pbp = pbpRes.ok ? await pbpRes.json() : null;
     GAME_DATA = {box, pbp};
+    // The Player of the Game picker, the stat-tag picker and the performance card all
+    // read rosters off `_boxscoreData`, and each used to lazily re-fetch this exact URL
+    // to get it. renderPotgSelect reads it SYNCHRONOUSLY though, so it saw null and
+    // rendered a select containing nothing but "No pick". We already have the payload.
+    if (box) _boxscoreData = box;
     // Before the first render, because renderTabs picks the default tab from whether
     // anyone is signed in. Safe to call here even though ensureReviewUser is declared
     // in a later <script>: we have already awaited, so the document has finished
