@@ -185,6 +185,27 @@ table.box-table tfoot td:first-child{text-align:left;}
 .review-write-textarea::placeholder { color: var(--ink4); }
 .reviews-write-actions { display: flex; align-items: center; gap: 10px; }
 
+/* ── Attendance: a row, not an icon ───────────────────────────── */
+.attended-row {
+  display:flex; align-items:center; gap:9px; width:100%;
+  margin:10px 0 2px; padding:8px 0; background:none; border:none;
+  cursor:pointer; text-align:left; color:var(--ink3);
+  font-family:var(--ff-sans); font-size:13px;
+}
+.attended-box {
+  width:15px; height:15px; flex-shrink:0; border-radius:3px;
+  border:1.5px solid var(--rule); transition:background .12s, border-color .12s;
+}
+.attended-row:hover .attended-box { border-color:var(--orange); }
+.attended-row.on { color:var(--ink); }
+.attended-row.on .attended-box {
+  background:var(--orange); border-color:var(--orange);
+  /* Drawn rather than a glyph so it inherits the box size and stays crisp. */
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size:100% 100%;
+}
+.attended-row:focus-visible { outline:2px solid var(--orange); outline-offset:3px; border-radius:4px; }
+
 /* ── Notebook: clock stamp + draft state ──────────────────────── */
 .note-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
 /* Mono because it prints a clock, and a proportional face makes 4:22 jitter every
@@ -396,19 +417,6 @@ table.box-table tfoot td:first-child{text-align:left;}
   transition: border-color 0.15s, color 0.15s;
 }
 .btn-add-tag:hover { border-color: var(--orange); color: var(--orange); }
-.btn-attended {
-  display: inline-flex; align-items: center; justify-content: space-evenly;
-  width: 22px; height: 22px; border-radius: 50%;
-  border: 1.5px dashed var(--ink4); background: none; cursor: pointer;
-  color: var(--ink4); transition: border-color 0.15s, color 0.15s, background 0.15s;
-  flex-shrink: 0;
-}
-.btn-attended svg { width: 13px; height: 13px; }
-.btn-attended:hover { border-color: var(--ink2); color: var(--ink2); }
-.btn-attended.on {
-  border-style: solid; border-color: var(--ink2);
-  background: var(--ink2); color: var(--paper);
-}
 .attended-badge {
   display: inline-flex; align-items: center; gap: 4px;
   background: var(--paper); border: 1px solid var(--rule);
@@ -1332,6 +1340,13 @@ function renderLogContent(g) {
       ${potgHtml}
       <div class="reviews-write-title" id="write-title">Rate This Game</div>
       <div class="star-picker-inline" id="star-picker-inline"></div>
+      <!-- Attendance was a bare person icon appended to the stat-tag row, with the
+           meaning carried only by a title tooltip. 15 people have ever marked it. It
+           is also the seed of the ticketbook, so it gets a label and a row. -->
+      <button class="attended-row" id="btn-attended" type="button" aria-pressed="false">
+        <span class="attended-box" aria-hidden="true"></span>
+        <span class="attended-text">I was at this game</span>
+      </button>
       <div class="note-head">
         <span class="reviews-write-title">Your Notes</span>
         <button class="btn-stamp" id="btn-stamp" type="button" title="Insert the game clock (Alt+S)">⏱ <span id="btn-stamp-label">Stamp</span></button>
@@ -1588,6 +1603,14 @@ function wireWriteSection() {
     if (e.altKey && (e.key === 's' || e.key === 'S')) { e.preventDefault(); stampClock(); }
   });
 
+  const attBtn = document.getElementById('btn-attended');
+  if (attBtn) attBtn.addEventListener('click', () => {
+    _attended = !_attended;
+    renderAttended();
+    queueDraftSave();
+  });
+  renderAttended();
+
   // Submit
   const submitBtn = document.getElementById('btn-review-submit');
   if (submitBtn) submitBtn.addEventListener('click', submitReview);
@@ -1622,7 +1645,7 @@ async function seedSheet() {
         if (title) title.textContent = 'Your Rating';
         if (mine.tags && mine.tags.length) _currentTags = mine.tags.slice();
         _attended = !!mine.attended;
-        renderWriteTags();
+        renderWriteTags(); renderAttended();
         addDeleteButton();
       }
     } catch {}
@@ -1635,12 +1658,19 @@ async function seedSheet() {
       const ta = document.getElementById('review-textarea');
       if (ta && draft.review_text) { ta.value = draft.review_text; updateCharCount(); }
       if (draft.tags && draft.tags.length) { _currentTags = draft.tags.slice(); renderWriteTags(); }
-      if (draft.attended) _attended = true;
+      if (draft.attended) { _attended = true; renderAttended(); }
       if (draft.potg) { _potgPick = draft.potg; renderPotgSelect(); }
       setDraftState('saved');
     }
   } catch {}
   syncGameState(GAME_DATA && GAME_DATA.box);
+}
+
+function renderAttended() {
+  const btn = document.getElementById('btn-attended');
+  if (!btn) return;
+  btn.classList.toggle('on', _attended);
+  btn.setAttribute('aria-pressed', _attended ? 'true' : 'false');
 }
 
 function addDeleteButton() {
@@ -2125,15 +2155,9 @@ function renderWriteTags() {
   if (_currentTags.length < 5) {
     html += `<button class="btn-add-tag" id="btn-add-tag" title="Add a stat context tag">+</button>`;
   }
-  html += `<button class="btn-attended${_attended ? ' on' : ''}" id="btn-attended" title="${_attended ? 'Remove — I was there' : 'I was at this game'}">${_PERSON_SVG}</button>`;
   row.innerHTML = html;
   const addBtn = document.getElementById('btn-add-tag');
   if (addBtn) addBtn.addEventListener('click', e => { e.stopPropagation(); openTagPicker(addBtn); });
-  document.getElementById('btn-attended').addEventListener('click', e => {
-    e.stopPropagation();
-    _attended = !_attended;
-    renderWriteTags();
-  });
   row.querySelectorAll('.write-tag-x').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
