@@ -135,6 +135,11 @@ Three jobs, see `DATABASE_MAP.md` for the full table-by-table map.
 All NBA/WNBA CDN calls go through `_cdn_get()` with curl_cffi Chrome impersonation
 to defeat Akamai TLS fingerprinting on Railway IPs — see `docs/cdn-akamai-bot-manager.md`.
 
+**Jerseys** are ingested by `cloud_daily` and need no annual nudge — but LockerVision
+answers `200` with a shared placeholder for a season it hasn't published, so the
+scripts verify by image hash before writing. See `docs/jersey-ingest.md`; the season
+is keyed to `roster_season()` because jersey art lands weeks before any game is played.
+
 ## Player of the Game (the log sheet)
 
 Replaced per-player letter grading in September 2026. Grading asked for up to 26 decisions

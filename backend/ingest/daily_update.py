@@ -144,6 +144,38 @@ def main():
             'Net Points per 100',
             season_args,
         ),
+        # ── Jerseys. In no pipeline until now, which is why a new season's kits
+        #    never appeared until someone ran the script by hand — a silent gap,
+        #    since scores and stats keep working without them.
+        #
+        #    Both flags matter. LockerVision answers 200 with a shared placeholder
+        #    for a season it hasn't published, so the script verifies by image hash
+        #    and declines to write; --ok-if-unpublished makes that the expected
+        #    outcome rather than a daily "partial" run for the weeks before the art
+        #    lands. --skip-if-present short-circuits on a DB count once it HAS
+        #    landed, so the steady-state cost is one query, not 120 image fetches.
+        #
+        #    Cloud-safe: verification goes through server._cdn_get's Chrome
+        #    impersonation, which is the path that works from a Railway IP. ──────
+        #    Keyed to roster_season, NOT `season`. Jerseys LEAD the season the way
+        #    rosters do: the art publishes around media day, weeks before a game is
+        #    played. `season` resolves from played games and so still says 2025-26
+        #    in September — which, combined with --skip-if-present, would have made
+        #    this step short-circuit on jerseys we already have and never once look
+        #    for the new season's. Same rule as CLAUDE.md states for rosters: stats
+        #    resolve from played games, membership resolves from the schedule. ─────
+        (
+            'ingest_lockervision_jerseys.py',
+            'NBA jerseys (new season art)',
+            ['--season', season_util.roster_season('nba').split('-')[0],
+             '--skip-if-present', '--ok-if-unpublished'],
+        ),
+        (
+            'ingest_lockervision_wnba_jerseys.py',
+            'WNBA jerseys (new season art)',
+            ['--season', str(season_util.roster_season('wnba')),
+             '--skip-if-present', '--ok-if-unpublished'],
+        ),
     ]
 
     run_id = pipeline_status.start_run(pipeline_status.CLOUD_DAILY)
