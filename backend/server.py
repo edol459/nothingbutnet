@@ -15186,46 +15186,65 @@ def get_wnba_game_posters():
                 conn = get_conn()
                 cur  = conn.cursor()
                 # Check current-season game stats first (CDN ingest)
+                # Top FIVE per team with names, not one id — the poster needs somebody
+                # to fall back to when the leader is ruled out, and the injury report
+                # is keyed by name.
                 cur.execute("""
-                    SELECT DISTINCT ON (team) team, player_id
-                    FROM (
-                        SELECT team, player_id, SUM(pts + reb + ast) AS total
-                        FROM   wnba_player_game_stats
-                        WHERE  team = ANY(%s) AND season = %s
-                        GROUP  BY team, player_id
-                    ) agg
+                    SELECT team, player_id, player_name, SUM(pts + reb + ast) AS total
+                    FROM   wnba_player_game_stats
+                    WHERE  team = ANY(%s) AND season = %s
+                    GROUP  BY team, player_id, player_name
                     ORDER  BY team, total DESC NULLS LAST
                 """, (uncached, season))
-                found = set()
+                by_team: dict[str, list] = {}
                 for row in cur.fetchall():
-                    abbr = row["team"]
-                    _wnba_team_star_cache[abbr] = {"id": int(row["player_id"]), "ts": now}
-                    found.add(abbr)
+                    by_team.setdefault(row["team"], []).append(row)
+                for abbr, rows in by_team.items():
+                    _wnba_team_star_cache[abbr] = {"cands": rows[:5], "ts": now}
                 # Fall back to historical seasons for any still uncached
-                still_missing = [a for a in uncached if a not in found]
+                still_missing = [a for a in uncached if a not in by_team]
                 if still_missing:
                     cur.execute("""
-                        SELECT DISTINCT ON (team) team, player_id
+                        SELECT team, player_id, player_name
                         FROM   wnba_player_seasons
                         WHERE  team = ANY(%s) AND season_type = 'Regular Season'
                         ORDER  BY team, season DESC, (pts + reb + ast) DESC NULLS LAST
                     """, (still_missing,))
+                    hist: dict[str, list] = {}
                     for row in cur.fetchall():
-                        abbr = row["team"]
-                        _wnba_team_star_cache[abbr] = {"id": int(row["player_id"]), "ts": now}
-                # Mark any abbrs with no data as None
+                        hist.setdefault(row["team"], []).append(row)
+                    for abbr, rows in hist.items():
+                        _wnba_team_star_cache[abbr] = {"cands": rows[:5], "ts": now}
+                # Mark any abbrs with no data as empty
                 for abbr in uncached:
                     if abbr not in _wnba_team_star_cache or _wnba_team_star_cache[abbr]["ts"] != now:
-                        _wnba_team_star_cache[abbr] = {"id": None, "ts": now}
+                        _wnba_team_star_cache[abbr] = {"cands": [], "ts": now}
                 cur.close(); conn.close()
             except Exception as e:
                 print(f"[wnba] game-posters bulk lookup error: {e}", flush=True)
 
+        # Injury filter applied HERE rather than when the candidates were cached: the
+        # team-star cache lives 6 hours and the injury report 30 minutes, so choosing at
+        # cache time would leave a ruled-out player on the card most of a day.
+        #
+        # This is the gap that put Olivia Miles on Minnesota's upcoming and live cards
+        # on a night she was out. The NBA endpoint has filtered on this all along and
+        # _fetch_injury_report already takes a league — the WNBA path simply never asked.
+        wnba_injuries = _fetch_injury_report("wnba")
+
+        def _wnba_best(abbr):
+            cands = _wnba_team_star_cache.get(abbr, {}).get("cands") or []
+            for row in cands:
+                if not _is_out(row.get("player_name") or "", wnba_injuries):
+                    return int(row["player_id"])
+            # Everyone in the top five ruled out is vanishingly rare, but a card with a
+            # face beats a card with a hole — fall back to the leader.
+            return int(cands[0]["player_id"]) if cands else None
+
         for g in other_games:
-            gid     = g.get("gameId", "")
-            away_cd = _wnba_team_star_cache.get(g.get("away", "").upper(), {})
-            home_cd = _wnba_team_star_cache.get(g.get("home", "").upper(), {})
-            posters[gid] = {"away": away_cd.get("id"), "home": home_cd.get("id")}
+            gid = g.get("gameId", "")
+            posters[gid] = {"away": _wnba_best(g.get("away", "").upper()),
+                            "home": _wnba_best(g.get("home", "").upper())}
 
     return jsonify({"posters": posters})
 

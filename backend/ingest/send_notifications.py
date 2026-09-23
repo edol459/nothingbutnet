@@ -92,6 +92,15 @@ SELECT g.game_id, g.league, g.home_team_abbr, g.away_team_abbr,
                     WHERE wg.user_id = u.id AND wg.game_id = g.game_id AND wg.action = 'remove')
    AND NOT EXISTS (SELECT 1 FROM notification_sends ns
                     WHERE ns.user_id = u.id AND ns.kind = 'final' AND ns.reference = g.game_id)
+   -- Already logged it? Then the notification has nothing to ask for. This fires up to
+   -- one cron interval after the buzzer, which is easily long enough for someone
+   -- watching to have finished their log first — measured 89 seconds behind a real
+   -- submit. "Log it and pick your Player of the Game" arriving after you did both
+   -- reads as the app not noticing you were there.
+   AND NOT EXISTS (SELECT 1 FROM game_reviews r
+                    WHERE r.user_id = u.id AND r.game_id = g.game_id)
+   AND NOT EXISTS (SELECT 1 FROM potg_picks pp
+                    WHERE pp.user_id = u.id AND pp.game_id = g.game_id)
  GROUP BY g.game_id, g.league, g.home_team_abbr, g.away_team_abbr,
           g.home_score, g.away_score, u.id
 """
