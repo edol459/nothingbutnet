@@ -17,6 +17,7 @@ are refreshed, so percentiles always reflect the latest data.
 """
 
 import os
+import time as _time
 import sys
 import subprocess
 from datetime import datetime
@@ -198,8 +199,12 @@ def main():
                 print(f"\n⚠️  Skipping '{label}' — {script_name} not found")
                 step_results.append({"label": label, "ok": None, "skipped": True})
                 continue
+            _t0 = _time.time()
             ok = run(path, label, args)
-            step_results.append({"label": label, "ok": ok, "skipped": False})
+            # Wall seconds per step. `steps` previously held only {label, ok, skipped},
+            # so a run that took four hours gave no clue which step ate them.
+            step_results.append({"label": label, "ok": ok, "skipped": False,
+                                 "secs": round(_time.time() - _t0, 1)})
             if not ok:
                 failed_steps.append(label)
                 # All failures are non-fatal — log and continue

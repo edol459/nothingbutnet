@@ -26,6 +26,7 @@ Scheduled via: run_daily_local.bat (Windows Task Scheduler)
 """
 
 import os
+import time as _time
 import sys
 import subprocess
 from datetime import datetime
@@ -105,11 +106,15 @@ def main():
             'Closest defender shots',
             season_args,
         ),
-        (
-            'fetch_matchups.py',
-            'Matchup defense',
-            season_args + ['--min-poss', '20', '--min-def-poss', '300'],
-        ),
+        # ── PAUSED 2026-09-24 — web-stats feeds, see docs/local-pipeline-audit.md ──
+        # Nothing the iOS app reads touches these tables; they feed only the
+        # Matchups/Compare and WoWY pages on the website, which stay up and now
+        # serve last season's data rather than breaking. Uncomment to resume.
+        # (
+        #     'fetch_matchups.py',
+        #     'Matchup defense',                       # → player_matchups, matchup_*
+        #     season_args + ['--min-poss', '20', '--min-def-poss', '300'],
+        # ),
         (
             'fetch_nba_stats.py',
             'NBA Stats (gravity, shot quality, leverage)',
@@ -144,11 +149,11 @@ def main():
         # season's rosters months before tipoff, so pinning them to the stats
         # season refetches last season's roster all summer and every offseason
         # trade stays invisible until games are played.
-        (
-            os.path.join(base_backend, 'fetch_roster.py'),
-            'Roster data (WoWY)',
-            ['--season', roster_season],
-        ),
+        # (
+        #     os.path.join(base_backend, 'fetch_roster.py'),
+        #     'Roster data (WoWY)',                    # → team_rosters
+        #     ['--season', roster_season],
+        # ),
         (
             'sync_player_teams.py',
             'Player team assignments (current_team)',
@@ -163,11 +168,11 @@ def main():
             [],
         ),
         # ── WoWY lineups (pbpstats, leverage-filtered) ────────
-        (
-            'fetch_wowy_lineups.py',
-            'WoWY lineups (leverage-filtered)',
-            ['--season', season, '--recent-only'],
-        ),
+        # (
+        #     'fetch_wowy_lineups.py',
+        #     'WoWY lineups (leverage-filtered)',      # → wowy_lineups
+        #     ['--season', season, '--recent-only'],
+        # ),
         # ── Team season stats (Base+Advanced) for team pages ──
         (
             'fetch_team_season_stats.py',
@@ -192,8 +197,12 @@ def main():
                 print(f"\n⚠️  Skipping '{label}' — {script_name} not found")
                 step_results.append({"label": label, "ok": None, "skipped": True})
                 continue
+            _t0 = _time.time()
             ok = run(path, label, args)
-            step_results.append({"label": label, "ok": ok, "skipped": False})
+            # Wall seconds per step. `steps` previously held only {label, ok, skipped},
+            # so a run that took four hours gave no clue which step ate them.
+            step_results.append({"label": label, "ok": ok, "skipped": False,
+                                 "secs": round(_time.time() - _t0, 1)})
             if not ok:
                 failed_steps.append(label)
                 # compute_pctiles is a hard dependency — stop if it fails

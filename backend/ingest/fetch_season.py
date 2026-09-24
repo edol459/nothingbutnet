@@ -298,10 +298,11 @@ def fetch_all(season, season_type):
                 per_mode_simple="PerGame", play_type_nullable=pt,
                 type_grouping_nullable=g, player_or_team_abbreviation="P"))
 
-    # Shot locations
-    data['shot_zones'] = fetch("Player Shot Locations",
-        lambda: LeagueDashPlayerShotLocations(season=season,
-            season_type_all_star=season_type, distance_range="By Zone"))
+    # Shot locations — see FETCH_SHOT_ZONES above
+    if FETCH_SHOT_ZONES:
+        data['shot_zones'] = fetch("Player Shot Locations",
+            lambda: LeagueDashPlayerShotLocations(season=season,
+                season_type_all_star=season_type, distance_range="By Zone"))
 
     # Closest defender shooting
     # VT = Very Tight 0-2ft, TG = Tight 2-4ft, OP = Open 4-6ft, WO = Wide Open 6ft+
@@ -1211,6 +1212,12 @@ def update_group_synergy(season, season_type):
     conn.close()
 
 
+# Shot zones are PAUSED (2026-09-24). `player_shot_zones` is read by no API route at
+# all — only compute_metrics.py, which is in neither pipeline. The fetch is one of the
+# slower calls in this script, so it costs real time every night for a table nothing
+# serves. Flip to True to resume; see docs/local-pipeline-audit.md.
+FETCH_SHOT_ZONES = False
+
 GROUP_UPDATERS = {
     'clutch':   update_group_clutch,
     'tracking': update_group_tracking,
@@ -1266,7 +1273,9 @@ def main():
     upsert_players(conn, player_rows)
     upsert_seasons(conn, season_rows)
 
-    if not data.get('shot_zones', pd.DataFrame()).empty:
+    # Guarded by the flag as well as the emptiness check: with the fetch off the key
+    # is absent, and the existing rows are left exactly as they are.
+    if FETCH_SHOT_ZONES and not data.get('shot_zones', pd.DataFrame()).empty:
         upsert_shot_zones(conn, data['shot_zones'], season)
 
     conn.close()

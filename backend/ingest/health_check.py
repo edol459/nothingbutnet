@@ -149,12 +149,17 @@ class Health:
              "cloud + local both write daily — expected year-round"),
             ("team_seasons",   "Team W-L records", True,
              "cloud writes daily — expected year-round"),
-            ("player_matchups", "Matchup defense", self.nba_in_season(),
-             "local pipeline, NBA in-season"),
-            ("team_rosters",    "Rosters (WoWY)",  self.nba_in_season(),
-             "local pipeline, NBA in-season"),
-            ("wowy_lineups",    "WoWY lineups",    self.nba_in_season(),
-             "local pipeline, NBA in-season"),
+            # PAUSED 2026-09-24 — their pipeline steps are commented out, so they are
+            # meant to be stale. Enforcing freshness here would have produced three
+            # FAILs every day from opening night onward: an alarm that is always wrong
+            # trains you to ignore the report, which is worse than not checking.
+            # Re-enable alongside the steps — see docs/local-pipeline-audit.md.
+            ("player_matchups", "Matchup defense", False,
+             "PAUSED — feed disabled, Matchups/Compare serve last season"),
+            ("team_rosters",    "Rosters (WoWY)",  False,
+             "PAUSED — feed disabled, WoWY serves last season"),
+            ("wowy_lineups",    "WoWY lineups",    False,
+             "PAUSED — feed disabled, WoWY serves last season"),
             ("player_pctiles",  "Percentiles (Builder)", self.nba_in_season(),
              "local pipeline, NBA in-season"),
         ]
@@ -162,7 +167,8 @@ class Health:
             if not (self.table_exists(tbl) and self.column_exists(tbl, "updated_at")):
                 continue
             if not enforce:
-                self.add(sec, INFO, label, f"offseason — not refreshed now ({ctx})")
+                # `ctx` says which it is — an offseason pause or a deliberate one.
+                self.add(sec, INFO, label, f"not refreshed now ({ctx})")
                 continue
             ts = self._scalar(f"SELECT MAX(updated_at) FROM {tbl}")
             self._freshness_verdict(sec, label, ts, now,
@@ -216,6 +222,20 @@ class Health:
             for r in cur.fetchall():
                 rows[r[0]] = {"status": r[1], "failed": r[2], "age_h": float(r[3]),
                              "started": r[4]}
+            # The most recent COMPLETED run per pipeline. An in-progress run says
+            # nothing about health on its own — what matters is whether the job
+            # finished successfully recently.
+            cur.execute("""
+                SELECT DISTINCT ON (pipeline)
+                       pipeline, status,
+                       EXTRACT(EPOCH FROM (NOW() - started_at))/3600 AS age_h
+                FROM pipeline_runs
+                WHERE finished_at IS NOT NULL
+                ORDER BY pipeline, started_at DESC""")
+            for r in cur.fetchall():
+                if r[0] in rows:
+                    rows[r[0]]["prev_status"] = r[1]
+                    rows[r[0]]["prev_age_h"]  = float(r[2])
 
         # (key, label, critical-when-missing?)
         # No puzzle_gen entry — puzzles are lazily generated on first play, so
@@ -246,9 +266,29 @@ class Health:
                 fs = ", ".join(r["failed"] or []) or "some steps"
                 self.add(sec, WARN, label, f"ran {age:.0f}h ago but {len(r['failed'] or [])} step(s) failed: {fs}")
             elif r["status"] == "running":
-                self.add(sec, WARN if age < 3 else FAIL, label,
-                         f"still marked 'running' after {age:.1f}h "
-                         f"({'in progress' if age < 3 else 'likely crashed mid-run'})")
+                # A long run is not a crashed run.
+                #
+                # local_daily takes ~4h when Windows throttles it (the same 14 steps
+                # finish in 17 minutes on a manual run), and the health check fires
+                # inside that window. The old 3h cut-off therefore reported "likely
+                # crashed mid-run" every single day while the job was still working —
+                # an alarm you learn to ignore, which is worse than no alarm.
+                #
+                # The question a still-running job actually poses is "did the LAST
+                # completed run succeed?". If it did, this one is merely slow.
+                prev_ok = (r.get("prev_status") == "success"
+                           and r.get("prev_age_h", 999) < 30)
+                if age >= 8:
+                    self.add(sec, FAIL, label,
+                             f"still marked 'running' after {age:.1f}h — likely crashed mid-run")
+                elif prev_ok:
+                    self.add(sec, INFO, label,
+                             f"in progress ({age:.1f}h so far) — last completed run succeeded "
+                             f"{r['prev_age_h']:.0f}h ago")
+                else:
+                    self.add(sec, WARN, label,
+                             f"in progress ({age:.1f}h so far) and no successful run in the "
+                             f"last 30h — watch this one")
             else:  # success
                 self.add(sec, OK, label, f"ran successfully {age:.0f}h ago")
 

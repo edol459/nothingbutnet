@@ -80,6 +80,9 @@ virtualenv.
   `_is_admin` / `_admin_required`, allowlisted by `ADMIN_GOOGLE_IDS` env.
 - `backend/games/` — daily games (survival/poeltl) + generators.
 - `backend/ingest/` — all data fetch/compute scripts + the daily pipelines.
+  Four local-pipeline feeds (matchups, WoWY rosters, WoWY lineups, shot zones)
+  are **paused** — see `docs/local-pipeline-audit.md` for what each fed and how
+  to resume. The web stats pages stay up and serve last season's data.
 - `backend/schema*.py` — table DDL (schema.py, schema_additions.py, schema_v3..v5).
 - `frontend/` — one static HTML file per page; `/admin` is `admin.html`.
 
