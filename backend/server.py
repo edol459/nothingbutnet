@@ -3877,13 +3877,38 @@ def _roster_with_avg_minutes(cur, abbr: str, league: str, season: str) -> list:
               AND COALESCE(gp, 0) > 0
         """, (variants, season))
     else:
+        # Membership UNION stats, not stats alone.
+        #
+        # Built from `player_seasons ... gp > 0`, this roster omitted anyone who had
+        # not played a game in the season — so a player returning from a year out
+        # (Haliburton, Lillard, Irving in 2026-27) was missing from his own team's
+        # roster, and no amount of fixing team RESOLUTION helped, because he was not
+        # in the list being resolved against.
+        #
+        # `players.current_team` comes from the league's roster feed and knows a
+        # player belongs to a team before he takes the floor. Stats are LEFT JOINed,
+        # so a returning player appears with null averages rather than not at all.
+        #
+        # DISTINCT ON guards the join: player_seasons can hold more than one row per
+        # player and season, and the higher-gp row is the one worth showing.
         cur.execute("""
-            SELECT ps.player_id, p.player_name, ps.min_per_game AS avg_min, ps.pts AS avg_pts
-            FROM player_seasons ps
-            JOIN players p ON p.player_id = ps.player_id
-            WHERE ps.team_abbr = %s AND ps.season = %s AND ps.season_type = 'Regular Season'
-              AND COALESCE(ps.gp, 0) > 0
-        """, (abbr, season))
+            WITH roster AS (
+                SELECT player_id FROM players WHERE current_team = %s
+                UNION
+                SELECT player_id FROM player_seasons
+                 WHERE team_abbr = %s AND season = %s
+                   AND season_type = 'Regular Season' AND COALESCE(gp, 0) > 0
+            )
+            SELECT DISTINCT ON (r.player_id)
+                   r.player_id, p.player_name,
+                   ps.min_per_game AS avg_min, ps.pts AS avg_pts
+              FROM roster r
+              JOIN players p ON p.player_id = r.player_id
+              LEFT JOIN player_seasons ps
+                     ON ps.player_id = r.player_id AND ps.season = %s
+                    AND ps.season_type = 'Regular Season'
+             ORDER BY r.player_id, COALESCE(ps.gp, 0) DESC
+        """, (abbr, abbr, season, season))
     return [{"playerId": r["player_id"], "playerName": r["player_name"],
              "avgMinutes": r["avg_min"], "avgPts": r["avg_pts"]} for r in cur.fetchall()]
 
