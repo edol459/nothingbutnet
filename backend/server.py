@@ -3958,10 +3958,26 @@ def players_today():
         if followed_only:
             fid_list = list(followed_ids)
             cur.execute("""
-                SELECT DISTINCT ps.team_abbr FROM player_seasons ps
-                WHERE ps.player_id = ANY(%s) AND ps.season = %s
-                  AND ps.season_type = 'Regular Season' AND COALESCE(ps.gp, 0) > 0
-            """, (fid_list, nba_season))
+                SELECT DISTINCT team_abbr FROM (
+                    -- Membership first: who the league says they are on RIGHT NOW.
+                    -- player_seasons only gains a row once someone takes the floor, so
+                    -- a player who missed all of last season through injury resolved to
+                    -- no team at all and his games silently never matched. Measured on
+                    -- 2026-09-24: Haliburton, Lillard and Irving were all invisible here
+                    -- despite correct current_team values.
+                    --
+                    -- Same rule as everywhere else: stats resolve from played games,
+                    -- membership resolves from the roster feed (sync_player_teams.py).
+                    SELECT p.current_team AS team_abbr FROM players p
+                     WHERE p.player_id = ANY(%s) AND p.current_team IS NOT NULL
+                    UNION
+                    -- Fallback for anyone the roster sync has not covered — it fills
+                    -- ~674 of 3,010 rows, so played-stats still carry the rest.
+                    SELECT ps.team_abbr FROM player_seasons ps
+                     WHERE ps.player_id = ANY(%s) AND ps.season = %s
+                       AND ps.season_type = 'Regular Season' AND COALESCE(ps.gp, 0) > 0
+                ) t WHERE team_abbr IS NOT NULL
+            """, (fid_list, fid_list, nba_season))
             followed_team_abbrs["nba"] = {r["team_abbr"] for r in cur.fetchall() if r["team_abbr"]}
             cur.execute("""
                 SELECT DISTINCT team FROM wnba_player_seasons
