@@ -1108,8 +1108,23 @@ def _log_pro_wall(source: str, user_id: int = None) -> None:
 # rolls forward on its own the night a new season's first game goes Final —
 # there is no cron and nothing to toggle each October.
 ARCHIVE_FREE_SEASONS  = 2        # the current season and the one before it
-ARCHIVE_GATED_LEAGUES = {"nba"}  # WNBA has no archive to sell yet, and gating it
-                                 # would only remove games users can log today.
+#
+# ⚠️  CURRENTLY DISABLED. Re-enable by setting this back to {"nba"}.
+#
+# The gate shipped accidentally on 2026-10-03 (bundled into commit 4331ffc) before
+# the archive backfill had run and before the iOS build could handle the 402. Because
+# enforcement is server-side, App Store users were blocked too — they got a generic
+# error alert after writing a note, with no paywall and no way to act on it.
+#
+# Turn it back on only when BOTH are true:
+#   1. backfill_historical_games.py has committed the 1996-2010 seasons, so there is
+#      something to sell rather than only something to take away.
+#   2. An iOS build handling APIError.proRequired is live in the App Store.
+#
+# Everything else — _archive_locked, the five gated write paths, log_locked on
+# /api/games/<id>, the web Vault card — stays in place and inert while this is empty.
+ARCHIVE_GATED_LEAGUES = set()    # was {"nba"}; WNBA stays ungated either way, since
+                                 # gating it would only remove games users can log today.
 _ARCHIVE_FREE_TTL   = 900
 _ARCHIVE_FREE_CACHE = {}         # league -> (expires_at, frozenset(seasons))
 
