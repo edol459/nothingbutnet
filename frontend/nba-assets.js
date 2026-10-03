@@ -11,6 +11,82 @@
     NY:1611661313,NYL:1611661313,PHX:1611661317,POR:1611661327,PDX:1611661327,SEA:1611661328,
     TOR:1611661332,WSH:1611661322,WAS:1611661322};
 
+  /* ── Defunct & relocated franchises ────────────────────────────────────────
+     Historical games carry the abbreviation the game was played under, so the
+     archive surfaces VAN, SEA, NJN, CHH, NOH and NOK. None of them are in the
+     NBA's logo CDN: season-scoped paths (…/<id>/2007/L/logo.svg) 403, and the
+     /global/ path serves the CURRENT franchise mark — a 2007 Sonics game would
+     render a Thunder logo, which is worse than no logo at all.
+
+     So these get a generated monogram in the franchise's own colors instead.
+     It is honest, needs no external asset, and because it is returned as a
+     data: URI from ydkTeamLogo() every existing caller keeps working unchanged
+     (<img src>, CSS background-image, OG cards).
+
+     `successor` is the franchise that carries the lineage today. Note CHH maps
+     to CHA, not NOP: the NBA credits the 1988-2002 Hornets history to the
+     current Charlotte team, while the Pelicans' record starts in 2002.
+
+     Colors are the franchises' primary brand pairs; several predate official
+     hex publication and are the widely-used approximations, in the same spirit
+     as the approximated WNBA expansion colors in team-colors.js. */
+  var DEFUNCT = {
+    SEA: {name: 'Seattle SuperSonics',                years: '1967-2008',
+          primary: '#00653A', secondary: '#FFC200', successor: 'OKC'},
+    VAN: {name: 'Vancouver Grizzlies',                years: '1995-2001',
+          primary: '#00A8A9', secondary: '#B4975A', successor: 'MEM'},
+    NJN: {name: 'New Jersey Nets',                    years: '1977-2012',
+          primary: '#002A60', secondary: '#CD1041', successor: 'BKN'},
+    CHH: {name: 'Charlotte Hornets',                  years: '1988-2002',
+          primary: '#00778B', secondary: '#1D1160', successor: 'CHA'},
+    NOH: {name: 'New Orleans Hornets',                years: '2002-2013',
+          primary: '#00778B', secondary: '#B4975A', successor: 'NOP'},
+    NOK: {name: 'New Orleans/Oklahoma City Hornets',  years: '2005-2007',
+          primary: '#00778B', secondary: '#B4975A', successor: 'NOP'},
+  };
+
+  function luminance(hex) {
+    var h = String(hex || '').replace('#', '');
+    if (h.length === 3) h = h.split('').map(function (c) { return c + c; }).join('');
+    var n = parseInt(h, 16);
+    if (isNaN(n)) return 0;
+    // Rec. 601 luma — good enough to choose between light and dark ink.
+    return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+  }
+
+  /* Ink that stays legible on `bg`: the team's own secondary when it contrasts,
+     otherwise plain white/black. Keeps NJN red-on-navy but avoids CHH's purple
+     disappearing into its teal. */
+  function readableInk(bg, secondary) {
+    var lb = luminance(bg);
+    if (secondary && Math.abs(luminance(secondary) - lb) > 0.35) return secondary;
+    return lb > 0.55 ? '#111111' : '#FFFFFF';
+  }
+
+  function monogram(abbr, team) {
+    var ink = readableInk(team.primary, team.secondary);
+    var svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" ' +
+           'aria-label="' + team.name + '">' +
+        '<circle cx="50" cy="50" r="50" fill="' + team.primary + '"/>' +
+        '<text x="50" y="50" fill="' + ink + '" ' +
+              'font-family="Helvetica Neue,Helvetica,Arial,sans-serif" ' +
+              'font-size="33" font-weight="700" letter-spacing="-1.5" ' +
+              'text-anchor="middle" dominant-baseline="central">' + abbr + '</text>' +
+      '</svg>';
+    return 'data:image/svg+xml,' + encodeURIComponent(svg);
+  }
+
+  // Built once at load — these never change, and callers hit them per render.
+  var DEFUNCT_MARKS = {};
+  Object.keys(DEFUNCT).forEach(function (abbr) {
+    DEFUNCT_MARKS[abbr] = monogram(abbr, DEFUNCT[abbr]);
+  });
+
+  // Exposed so team-colors.js can resolve historical abbrs without duplicating
+  // the hexes, and so pages can link a defunct team through to its successor.
+  window.YDK_DEFUNCT_TEAMS = DEFUNCT;
+
   window.ydkHeadshot = function (pid, league) {
     if (pid == null) return null;
     return league === 'wnba'
@@ -20,9 +96,36 @@
   window.ydkTeamLogo = function (abbr, league) {
     abbr = (abbr || '').toUpperCase();
     var id = league === 'wnba' ? WNBA[abbr] : NBA[abbr];
-    if (!id) return null;
-    return league === 'wnba'
-      ? 'https://cdn.wnba.com/logos/wnba/' + id + '/global/L/logo.svg'
-      : 'https://cdn.nba.com/logos/nba/' + id + '/global/L/logo.svg';
+    if (id) {
+      return league === 'wnba'
+        ? 'https://cdn.wnba.com/logos/wnba/' + id + '/global/L/logo.svg'
+        : 'https://cdn.nba.com/logos/nba/' + id + '/global/L/logo.svg';
+    }
+    // SEA is a live WNBA team (the Storm) and a defunct NBA one — only fall
+    // through to the historical mark for NBA.
+    if (league !== 'wnba' && DEFUNCT_MARKS[abbr]) return DEFUNCT_MARKS[abbr];
+    return null;
+  };
+
+  /* Full name for a team abbreviation, historical ones included.
+     Returns the abbr unchanged if we don't know it, so it is safe to render. */
+  window.ydkTeamName = function (abbr, league) {
+    abbr = (abbr || '').toUpperCase();
+    if (league !== 'wnba' && DEFUNCT[abbr]) return DEFUNCT[abbr].name;
+    return abbr;
+  };
+
+  /* True for abbreviations that no longer exist in the league. Pages use this
+     to suppress "go to team page" links, which are keyed to current abbrs. */
+  window.ydkIsDefunctTeam = function (abbr, league) {
+    return league !== 'wnba' && !!DEFUNCT[(abbr || '').toUpperCase()];
+  };
+
+  /* The franchise carrying this abbr's lineage today (SEA -> OKC), or the abbr
+     itself when it is already current. */
+  window.ydkCurrentFranchise = function (abbr, league) {
+    abbr = (abbr || '').toUpperCase();
+    if (league !== 'wnba' && DEFUNCT[abbr]) return DEFUNCT[abbr].successor;
+    return abbr;
   };
 })();

@@ -1012,6 +1012,7 @@ ANALYTICS_EVENT_TYPES = {
 ANALYTICS_SOURCES = {
     "survival_unlimited", "poeltl_unlimited", "review_length",
     "cosmetics",    # locked rings/titles in the Ball Knowledge picker
+    "archive",      # tried to log a game older than the free season window
     "profile", "games_hub", "settings", "feed", "onboarding", "other",
 }
 
@@ -1086,9 +1087,104 @@ def log_event(event_type: str, source: str = None, user_id: int = None,
 
 
 def _log_pro_wall(source: str, user_id: int = None) -> None:
-    """Shorthand for the three server-side Pro gates."""
+    """Shorthand for the server-side Pro gates."""
     log_event("pro_wall_hit", source=source, user_id=user_id,
               platform=("ios" if request.headers.get("Authorization") else "web"))
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# The Vault — logging games from past seasons is Pro
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# READING the archive is free, deliberately and permanently. Those game pages
+# are public and crawlable and are the only acquisition surface the archive has;
+# walling them would trade the growth channel for the subscription. What costs
+# money is WRITING to it — adding a rating, pick, note or watch to a game older
+# than the free window.
+#
+# The free window is the most recent ARCHIVE_FREE_SEASONS seasons that actually
+# have games, read from the `games` table at request time. Deliberately not
+# get_current_season() plus date arithmetic: this has to hold for both season
+# label formats ('2025-26' and '2026'), and resolving from real games means it
+# rolls forward on its own the night a new season's first game goes Final —
+# there is no cron and nothing to toggle each October.
+ARCHIVE_FREE_SEASONS  = 2        # the current season and the one before it
+ARCHIVE_GATED_LEAGUES = {"nba"}  # WNBA has no archive to sell yet, and gating it
+                                 # would only remove games users can log today.
+_ARCHIVE_FREE_TTL   = 900
+_ARCHIVE_FREE_CACHE = {}         # league -> (expires_at, frozenset(seasons))
+
+
+def _archive_free_seasons(cur, league: str) -> frozenset:
+    """Seasons any signed-in user may log, newest first. Cached for 15 minutes."""
+    cached = _ARCHIVE_FREE_CACHE.get(league)
+    now = _time.time()
+    if cached and cached[0] > now:
+        return cached[1]
+    cur.execute("""
+        SELECT DISTINCT season
+          FROM games
+         WHERE league = %s
+           AND season_type IN ('Regular Season', 'Playoffs', 'PlayIn')
+         ORDER BY season DESC
+         LIMIT %s
+    """, (league, ARCHIVE_FREE_SEASONS))
+    seasons = frozenset(r["season"] for r in cur.fetchall() if r.get("season"))
+    _ARCHIVE_FREE_CACHE[league] = (now + _ARCHIVE_FREE_TTL, seasons)
+    return seasons
+
+
+def _archive_locked(cur, game_id, user, season=None, league=None) -> bool:
+    """True when this user may not add a NEW log to this game.
+
+    Pass season/league when the caller already has the games row, to save a query.
+    """
+    if user and user.get("is_pro"):
+        return False
+    if season is None or league is None:
+        cur.execute("SELECT season, league FROM games WHERE game_id = %s", (game_id,))
+        row = cur.fetchone()
+        if not row:
+            # Unknown game. Not our error to raise — the caller's own 404/409
+            # says something truer than "buy Pro".
+            return False
+        season, league = row.get("season"), row.get("league")
+    league = league or "nba"
+    if league not in ARCHIVE_GATED_LEAGUES:
+        return False
+    if season in _archive_free_seasons(cur, league):
+        return False
+    if not user:
+        return True
+    # Grandfathered: anyone who already logged this game keeps full access to it,
+    # editing included. Every field stands alone, so any one of the three tables
+    # counts as having logged it. Holding existing diary entries hostage would
+    # cost more trust than the subscription is worth.
+    cur.execute("""
+        SELECT EXISTS (SELECT 1 FROM game_reviews WHERE user_id=%s AND game_id=%s)
+            OR EXISTS (SELECT 1 FROM potg_picks   WHERE user_id=%s AND game_id=%s)
+            OR EXISTS (SELECT 1 FROM game_watches WHERE user_id=%s AND game_id=%s)
+            AS has_log
+    """, (user["id"], game_id) * 3)
+    row = cur.fetchone()
+    return not (row and row.get("has_log"))
+
+
+def _archive_gate(cur, game_id, user, season=None, league=None):
+    """The response to return when the Vault is locked here, or None to proceed.
+
+    402 rather than 403: 403 is what this app returns for "not your row", and a
+    paywall is a different thing from a permission error. Clients that don't know
+    the code still get a readable `error` string.
+    """
+    if not _archive_locked(cur, game_id, user, season, league):
+        return None
+    _log_pro_wall("archive", user.get("id") if user else None)
+    return jsonify({
+        "error":   "Logging games from past seasons is a Pro feature. "
+                   "Browsing the archive is always free.",
+        "code":    "pro_required",
+        "feature": "archive",
+    }), 402
 
 
 @app.route("/api/analytics/event", methods=["POST"])
@@ -3241,33 +3337,69 @@ def get_game_posters():
 
     # ── Upcoming / live: season stats + ESPN injury filter ────────
     if nonfinal_games:
-        now    = _dt.utcnow()
-        season = (f"{now.year}-{str(now.year + 1)[2:]}"
-                  if now.month >= 10
-                  else f"{now.year - 1}-{str(now.year)[2:]}")
-
         teams_needed = {(g.get("away") or "").upper() for g in nonfinal_games} | \
                        {(g.get("home") or "").upper() for g in nonfinal_games}
         teams_needed.discard("")
 
+        # Candidates resolve per PLAYER, not per calendar season. Each player
+        # contributes their most recent season with real volume behind it, so
+        # October cards show last season's stars and quietly switch to this
+        # season's once anyone clears the GP floor. The old version derived one
+        # season from the date (Oct 1 → "2026-27") and required gp >= 5 in it,
+        # which emptied every poster from Oct 1 until ~2 weeks into the season,
+        # every year — exactly the trap get_current_season() warns about.
+        #
+        # Membership comes from players.current_team (schema_v12), not
+        # player_seasons.team_abbr: the stat row carries the team the stats were
+        # earned with, so ranking by team_abbr would put summer-traded players on
+        # their old team's card for the whole preseason. Stats resolve from
+        # played games, membership resolves from the roster.
         team_candidates: dict[str, list] = {}
         try:
             conn = get_conn()
             cur  = conn.cursor()
             for abbr in teams_needed:
                 cur.execute("""
-                    SELECT ps.player_id, p.player_name,
-                           COALESCE(ps.pts,0)+COALESCE(ps.ast,0)+COALESCE(ps.reb,0) AS total
-                    FROM player_seasons ps
-                    JOIN players p ON p.player_id = ps.player_id
-                    WHERE ps.team_abbr = %s
-                      AND ps.season = %s
-                      AND ps.season_type = 'Regular Season'
-                      AND COALESCE(ps.gp,0) >= 5
-                    ORDER BY total DESC
+                    SELECT p.player_id, p.player_name, ps.total
+                    FROM players p
+                    JOIN LATERAL (
+                        SELECT COALESCE(s.pts,0)+COALESCE(s.ast,0)+COALESCE(s.reb,0) AS total
+                        FROM player_seasons s
+                        WHERE s.player_id = p.player_id
+                          AND s.season_type = 'Regular Season'
+                          AND COALESCE(s.gp,0) >= 5
+                        ORDER BY s.season DESC
+                        LIMIT 1
+                    ) ps ON TRUE
+                    WHERE p.current_team = %s
+                    ORDER BY ps.total DESC
                     LIMIT 5
-                """, (abbr, season))
+                """, (abbr,))
                 team_candidates[abbr] = cur.fetchall()
+
+            # Safety net: if current_team is stale or unfilled for a team, fall
+            # back to the team the stats were earned with. A wrong-but-plausible
+            # headshot beats the blank card this endpoint used to return.
+            stale = [a for a in teams_needed if not team_candidates.get(a)]
+            if stale:
+                cur.execute("""
+                    SELECT MAX(season) AS s FROM player_seasons
+                    WHERE season_type = 'Regular Season' AND season LIKE '____-__'
+                """)
+                newest = ((cur.fetchone() or {}).get("s"))
+                for abbr in stale if newest else []:
+                    cur.execute("""
+                        SELECT ps.player_id, p.player_name,
+                               COALESCE(ps.pts,0)+COALESCE(ps.ast,0)+COALESCE(ps.reb,0) AS total
+                        FROM player_seasons ps
+                        JOIN players p ON p.player_id = ps.player_id
+                        WHERE ps.team_abbr = %s
+                          AND ps.season = %s
+                          AND ps.season_type = 'Regular Season'
+                        ORDER BY total DESC
+                        LIMIT 5
+                    """, (abbr, newest))
+                    team_candidates[abbr] = cur.fetchall()
             cur.close(); conn.close()
         except Exception as e:
             return jsonify({"error": str(e), "posters": posters}), 500
@@ -5009,6 +5141,12 @@ def get_game(game_id):
             game["is_watched"] = cur.fetchone() is not None
         else:
             game["is_watched"] = False
+        # Whether the log sheet should open or offer the upgrade instead. The write
+        # endpoints enforce this themselves — this is so the client can say so before
+        # someone types a paragraph, not instead of the server checking.
+        game["log_locked"] = _archive_locked(
+            cur, game_id, user, row.get("season"), row.get("league")
+        )
         cur.close(); conn.close()
         return jsonify({"game": game})
     except Exception as e:
@@ -5217,10 +5355,16 @@ def submit_review(game_id):
 
         # (tags/attended columns are ensured once per deploy in _ensure_tables — running
         # ALTER TABLE here took an ACCESS EXCLUSIVE lock on every submission.)
-        cur.execute("SELECT game_id FROM games WHERE game_id = %s", (game_id,))
-        if not cur.fetchone():
+        cur.execute("SELECT season, league FROM games WHERE game_id = %s", (game_id,))
+        _g = cur.fetchone()
+        if not _g:
             cur.close(); conn.close()
             return jsonify({"error": "Game not found"}), 404
+
+        gated = _archive_gate(cur, game_id, user, _g.get("season"), _g.get("league"))
+        if gated:
+            cur.close(); conn.close()
+            return gated
 
         cur.execute("""
             INSERT INTO game_reviews (user_id, game_id, rating, review_text, tags, attended)
@@ -5582,7 +5726,8 @@ def submit_game_log(game_id):
         conn = get_conn()
         cur  = conn.cursor()
 
-        cur.execute("SELECT game_date, status FROM games WHERE game_id = %s", (game_id,))
+        cur.execute("SELECT game_date, status, season, league FROM games WHERE game_id = %s",
+                    (game_id,))
         game_row = cur.fetchone()
         if not game_row:
             cur.close(); conn.close()
@@ -5594,6 +5739,14 @@ def submit_game_log(game_id):
             cur.close(); conn.close()
             return jsonify({"error": "not_final",
                             "message": "You can submit once the game is final."}), 409
+
+        # The Vault. Checked here, after not_final, so an in-progress game is
+        # reported as in-progress rather than as a paywall.
+        gated = _archive_gate(cur, game_id, user,
+                              game_row.get("season"), game_row.get("league"))
+        if gated:
+            cur.close(); conn.close()
+            return gated
 
         # Read before writing: after the upserts, every publish looks like an update.
         cur.execute("""
@@ -6053,6 +6206,13 @@ def put_game_draft(game_id):
 
     try:
         conn = get_conn(); cur = conn.cursor()
+        # Gated at draft time as well as publish. Letting someone write a long note
+        # into a draft that submit will refuse is a worse experience than saying so
+        # up front, and it stops a stale client from accumulating unpublishable drafts.
+        gated = _archive_gate(cur, game_id, user)
+        if gated:
+            cur.close(); conn.close()
+            return gated
         cur.execute("""
             INSERT INTO game_log_drafts
                 (user_id, game_id, league, home_abbr, away_abbr,
@@ -6274,6 +6434,11 @@ def watch_game(game_id):
     try:
         conn = get_conn()
         cur  = conn.cursor()
+        # "I watched this" is a complete log on its own, so the Vault applies here too.
+        gated = _archive_gate(cur, game_id, user)
+        if gated:
+            cur.close(); conn.close()
+            return gated
         cur.execute("""
             INSERT INTO game_watches (user_id, game_id)
             VALUES (%s, %s)
@@ -6455,6 +6620,12 @@ def submit_performance_review(game_id, person_id):
     try:
         conn = get_conn()
         cur  = conn.cursor()
+        # Grading is dormant in both clients but this endpoint is still live and still
+        # writes a game_watches row, which would be a way around the Vault.
+        gated = _archive_gate(cur, game_id, user)
+        if gated:
+            cur.close(); conn.close()
+            return gated
         cur.execute("""
             INSERT INTO performance_reviews (user_id, game_id, person_id, rating, player_name, review_text)
             VALUES (%s, %s, %s, %s, %s, %s)

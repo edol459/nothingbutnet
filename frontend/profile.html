@@ -1597,14 +1597,11 @@ function _teamDisplayAbbr(favorite_team) {
 }
 function riLogo(abbr, gameId) {
   const isWnba = gameId && String(gameId).startsWith('10');
-  if (isWnba) {
-    const id = _WNBA_CDN_IDS[abbr];
-    if (!id) return `<div class="ri-logo-fallback">🏀</div>`;
-    return `<img class="ri-logo" src="https://cdn.wnba.com/logos/wnba/${id}/global/L/logo.svg" alt="${abbr}" onerror="this.outerHTML='<div class=\\'ri-logo-fallback\\'>🏀</div>'">`;
-  }
-  const id = _RI_TEAM_IDS[abbr];
-  if (!id) return `<div class="ri-logo-fallback">🏀</div>`;
-  return `<img class="ri-logo" src="https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg" alt="${abbr}" onerror="this.outerHTML='<div class=\\'ri-logo-fallback\\'>🏀</div>'">`;
+  // Shared helper so archive games (SEA, VAN, NJN, CHH, NOH, NOK) get their
+  // franchise mark here too, rather than falling through to the 🏀 placeholder.
+  const url = window.ydkTeamLogo(abbr, isWnba ? 'wnba' : 'nba');
+  if (!url) return `<div class="ri-logo-fallback">🏀</div>`;
+  return `<img class="ri-logo" src="${url}" alt="${abbr}" onerror="this.outerHTML='<div class=\\'ri-logo-fallback\\'>🏀</div>'">`;
 }
 
 function fmtDate(str) {

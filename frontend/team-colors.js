@@ -92,7 +92,14 @@ function getWnbaTeamColor(abbr, type = 'primary') {
  * @returns {string} CSS color string
  */
 function getTeamColor(abbr, type = 'primary') {
-  const colors = TEAM_COLORS[(abbr || '').toUpperCase()];
+  const key = (abbr || '').toUpperCase();
+  // Defunct/relocated franchises (SEA, VAN, NJN, CHH, NOH, NOK) show up on
+  // archive games. Their hexes live in nba-assets.js next to the generated
+  // logo marks; read them at call time so load order doesn't matter and the
+  // colors aren't duplicated in two files.
+  const colors = TEAM_COLORS[key]
+    || (typeof window !== 'undefined' && window.YDK_DEFUNCT_TEAMS
+        && window.YDK_DEFUNCT_TEAMS[key]);
   if (!colors) return type === 'primary' ? '#333333' : '#888888';
   return colors[type] || colors.primary;
 }

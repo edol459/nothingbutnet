@@ -19,6 +19,7 @@
 <link rel="icon" type="image/png" href="/logo.png">
 <link rel="apple-touch-icon" href="/logo.png">
 <script src="/team-colors.js"></script>
+<script src="/nba-assets.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -246,6 +247,19 @@ table.box-table tfoot td:first-child{text-align:left;}
 .btn-review-delete:hover { color: var(--red); }
 .review-signin-prompt { font-size: 13px; color: var(--ink3); line-height: 1.5; }
 .review-signin-prompt a { color: var(--orange); font-weight: 600; text-decoration: none; }
+
+/* The Vault — shown in place of the log sheet on archive games. Built from the
+   page tokens so it inherits night mode with no override block. */
+.vault-locked { text-align: center; padding: 28px 20px 30px; border: 1px solid var(--rule);
+  border-radius: 10px; background: var(--paper2); }
+.vault-title { font-family: var(--ff-serif); font-size: 19px; color: var(--ink);
+  letter-spacing: -.01em; margin-bottom: 8px; }
+.vault-sub { font-size: 13px; color: var(--ink3); line-height: 1.6; max-width: 34em;
+  margin: 0 auto 18px; }
+.btn-vault { display: inline-block; padding: 9px 18px; border-radius: 7px;
+  background: var(--orange); color: #fff; font-size: 13px; font-weight: 600;
+  text-decoration: none; }
+.btn-vault:hover { filter: brightness(1.06); }
 
 /* Review list */
 .review-item {
@@ -781,14 +795,18 @@ function renderScoreboard(box) {
 }
 
 function teamLogo(abbr) {
-  const src = IS_WNBA
-    ? (wnbaTeamLogoUrl(abbr) || '')
-    : `https://cdn.nba.com/logos/nba/${nbaTeamId(abbr)}/global/L/logo.svg`;
+  // Shared helper, so archive games get the generated mark for defunct
+  // franchises (SEA, VAN, NJN, CHH, NOH, NOK) instead of a 404'd CDN URL.
+  const src = window.ydkTeamLogo(abbr, IS_WNBA ? 'wnba' : 'nba') || '';
   return `<img class="sb-logo" src="${src}" alt="${abbr}" onerror="this.outerHTML='<div class=\\'sb-logo-fallback\\'>🏀</div>'">`;
 }
 
 function teamHref(abbr) {
-  return `/team?abbr=${encodeURIComponent(abbr)}&league=${IS_WNBA ? 'wnba' : 'nba'}`;
+  const league = IS_WNBA ? 'wnba' : 'nba';
+  // Team pages are keyed to current abbreviations, so a defunct one would land
+  // on an empty page. Send it to the franchise that carries the lineage today.
+  const target = window.ydkCurrentFranchise(abbr, league);
+  return `/team?abbr=${encodeURIComponent(target)}&league=${league}`;
 }
 
 // Log · Play-by-Play · Box Score · Community — the same four the app shows, in the
@@ -1100,29 +1118,10 @@ function fmtClock(s) {
   return s;
 }
 
-// Rough NBA team ID lookup for logo CDN
-const TEAM_IDS = {
-  ATL:1610612737,BOS:1610612738,BKN:1610612751,CHA:1610612766,CHI:1610612741,
-  CLE:1610612739,DAL:1610612742,DEN:1610612743,DET:1610612765,GSW:1610612744,
-  HOU:1610612745,IND:1610612754,LAC:1610612746,LAL:1610612747,MEM:1610612763,
-  MIA:1610612748,MIL:1610612749,MIN:1610612750,NOP:1610612740,NYK:1610612752,
-  OKC:1610612760,ORL:1610612753,PHI:1610612755,PHX:1610612756,POR:1610612757,
-  SAC:1610612758,SAS:1610612759,TOR:1610612761,UTA:1610612762,WAS:1610612764,
-};
-function nbaTeamId(abbr) { return TEAM_IDS[abbr] || 0; }
-
-const WNBA_CDN_TEAM_IDS = {
-  ATL:1611661330, CHI:1611661329, CON:1611661323, DAL:1611661321,
-  GS:1611661331,  GSV:1611661331, IND:1611661325, LA:1611661320,
-  LAS:1611661320, LV:1611661319,  LVA:1611661319, MIN:1611661324,
-  NY:1611661313,  NYL:1611661313, PHX:1611661317, POR:1611661327,
-  PDX:1611661327, SEA:1611661328, TOR:1611661332, WSH:1611661322,
-  WAS:1611661322,
-};
-function wnbaTeamLogoUrl(abbr) {
-  const id = WNBA_CDN_TEAM_IDS[(abbr || '').toUpperCase()];
-  return id ? `https://cdn.wnba.com/logos/wnba/${id}/global/L/logo.svg` : null;
-}
+// Team logos come from /nba-assets.js (window.ydkTeamLogo). This page used to
+// carry its own NBA and WNBA id maps; they were removed when the archive
+// landed, because a second copy that doesn't know about defunct franchises is
+// exactly how a 1997 game ends up with no logo.
 </script>
 <script>
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1324,6 +1323,25 @@ function renderLogContent(g) {
       <p class="review-signin-prompt">
         <a href="${reviewSignInHref()}">Sign in</a> to log this game.
       </p></div>`;
+  }
+  // The Vault. Checked after sign-in, not before: log_locked is true for logged-out
+  // visitors, and a Pro subscriber who just hasn't signed in yet should be asked to
+  // sign in rather than told to buy something they already own.
+  //
+  // Only the writing surface is withheld. Everything else on this page — box score,
+  // play-by-play, and the Community tab with everyone else's logs — stays open.
+  if (g.log_locked) {
+    window.ydkTrack && ydkTrack('paywall_shown', 'archive');
+    return `<div class="reviews-write vault-locked">
+      <div class="vault-title">This game is in the Vault</div>
+      <p class="vault-sub">
+        Logging games from past seasons is part of ydkball Pro.
+        This season and last are always free to log — and reading the archive
+        always is too.
+      </p>
+      <a class="btn-vault" href="https://apps.apple.com/app/id6766407610"
+         target="_blank" rel="noopener">Get Pro in the app</a>
+    </div>`;
   }
   // Final games only — a pick made at halftime is a different claim from one made at
   // the buzzer, and mixing them corrupts the tally.
@@ -2126,8 +2144,7 @@ function _headshotUrl(pid) {
     : `https://cdn.nba.com/headshots/nba/latest/260x190/${pid}.png`;
 }
 function _teamLogoUrl(abbr) {
-  const id = TEAM_IDS[abbr];
-  return id ? `https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg` : '';
+  return window.ydkTeamLogo(abbr, IS_WNBA ? 'wnba' : 'nba') || '';
 }
 function _parseMins(str) {
   const m = String(str || '').match(/PT(\d+)M/);

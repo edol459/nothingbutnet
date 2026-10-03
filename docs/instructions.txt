@@ -5,3 +5,8 @@ python backend/ingest/fix_positions.py --season 2025-26
 python backend/ingest/fetch_darko.py --season 2025-26 --season-type "Regular Season"
 python backend/ingest/fetch_bad_pass_tov.py --season 2025-26
 python backend/ingest/compute_metrics.py --season 2025-26
+
+add games to calendar:
+python backend/ingest/fetch_scheduled_games.py --league wnba
+
+python backend/dev_reset_onboarding.py etdolder@gmail.com
