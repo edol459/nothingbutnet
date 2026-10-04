@@ -69,6 +69,15 @@ SNAPSHOT_TABLES = [
 ANOMALY_DROP_FRAC = 0.05
 
 
+# Games the per-game pipelines actually pull, and therefore the only ones that
+# count as "due". Mirrors BACKFILL_TYPES in reconcile_games.py. Preseason and
+# All-Star are played but never landed, so including them would read as a gap.
+COUNTED_SEASON_TYPES = ('Regular Season', 'Playoffs', 'PlayIn')
+# Pre-rendered as a SQL list. Built by concatenation, never %-formatting: these
+# queries carry LIKE patterns written '%%-%%' so psycopg2 sees a literal '%', and
+# running % over the string would collapse them into a stray placeholder.
+COUNTED_SEASON_TYPES_SQL = "(" + ", ".join("'" + t + "'" for t in COUNTED_SEASON_TYPES) + ")"
+
 class Health:
     def __init__(self, conn, today=None, quiet=False):
         self.conn = conn
@@ -392,12 +401,20 @@ class Health:
         # The `games` table holds BOTH leagues; NBA seasons are hyphenated
         # ("2025-26"), WNBA are single-year ("2026"). Scope each arm to its league
         # so an in-season WNBA slate doesn't get mistaken for an NBA schedule.
+        #
+        # Exhibitions are excluded from the "ground truth" schedule, the same set
+        # reconcile_games.py backfills. The per-game pipelines only pull Regular
+        # Season and Playoffs, so counting a preseason or All-Star game as a final
+        # that is "due" compares two different populations: on 2026-10-03 a single
+        # preseason game defeated the offseason guard below and reported the whole
+        # summer — 112 days — as the local pipeline failing to land data.
 
         # ── NBA: player_gamelogs (local pipeline) vs the NBA schedule ──
         if self.table_exists("player_gamelogs"):
             last_final = self._scalar(
                 "SELECT MAX(game_date) FROM games "
-                "WHERE status='Final' AND season LIKE '%%-%%'")
+                "WHERE status='Final' AND season LIKE '%%-%%' "
+                "AND season_type IN " + COUNTED_SEASON_TYPES_SQL)
             last_landed = self._scalar("SELECT MAX(game_date) FROM player_gamelogs")
             self._completeness_arm(
                 sec, "NBA game logs", last_final, last_landed,
@@ -409,11 +426,13 @@ class Health:
         if self.table_exists("wnba_player_game_stats"):
             last_final = self._scalar(
                 "SELECT MAX(game_date) FROM games "
-                "WHERE status='Final' AND season NOT LIKE '%%-%%'")
+                "WHERE status='Final' AND season NOT LIKE '%%-%%' "
+                "AND season_type IN " + COUNTED_SEASON_TYPES_SQL)
             last_landed = self._scalar(
                 "SELECT MAX(g.game_date) FROM games g "
                 "JOIN wnba_player_game_stats w ON w.game_id = g.game_id "
-                "WHERE g.status='Final' AND g.season NOT LIKE '%%-%%'")
+                "WHERE g.status='Final' AND g.season NOT LIKE '%%-%%' "
+                "AND g.season_type IN " + COUNTED_SEASON_TYPES_SQL)
             self._completeness_arm(
                 sec, "WNBA box scores", last_final, last_landed,
                 landed_noun="box scores",
