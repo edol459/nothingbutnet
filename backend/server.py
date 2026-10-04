@@ -1163,7 +1163,21 @@ def _archive_locked(cur, game_id, user, season=None, league=None) -> bool:
     league = league or "nba"
     if league not in ARCHIVE_GATED_LEAGUES:
         return False
-    if season in _archive_free_seasons(cur, league):
+    free = _archive_free_seasons(cur, league)
+    if not free:
+        return False
+    # Strictly OLDER than the window, not merely "absent from it".
+    #
+    # Membership alone locked the newest game in the league. _archive_free_seasons
+    # only counts seasons with Regular Season/Playoffs/PlayIn games, so in early
+    # October 2026-27 held nothing but a single preseason game and therefore wasn't
+    # a free season — which made that game, played the night before, require Pro.
+    #
+    # The Vault sells the past, so anything at or after the window is free no matter
+    # what. Season labels sort correctly as strings in both leagues' formats
+    # ('1999-00' < '2000-01', '2024' < '2025') and the window is league-scoped, so
+    # the two never mix.
+    if not season or season >= min(free):
         return False
     if not user:
         return True
