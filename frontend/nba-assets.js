@@ -43,6 +43,14 @@
           primary: '#00778B', secondary: '#B4975A', successor: 'NOP'},
     NOK: {name: 'New Orleans/Oklahoma City Hornets',  years: '2005-2007',
           primary: '#00778B', secondary: '#B4975A', successor: 'NOP'},
+    // The 1983-96 backfill reaches back past two more relocations. The other codes
+    // that era uses — GOS, PHL, SAN, UTH — are the SAME franchises in the same
+    // cities under different feed abbreviations, so the ingest normalises those to
+    // GSW/PHI/SAS/UTA rather than inventing defunct teams for them.
+    KCK: {name: 'Kansas City Kings',                  years: '1975-1985',
+          primary: '#0033A0', secondary: '#E35205', successor: 'SAC'},
+    SDC: {name: 'San Diego Clippers',                 years: '1978-1984',
+          primary: '#C8102E', secondary: '#002F6C', successor: 'LAC'},
   };
 
   function luminance(hex) {
