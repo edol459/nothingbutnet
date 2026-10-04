@@ -1109,22 +1109,19 @@ def _log_pro_wall(source: str, user_id: int = None) -> None:
 # there is no cron and nothing to toggle each October.
 ARCHIVE_FREE_SEASONS  = 2        # the current season and the one before it
 #
-# ⚠️  CURRENTLY DISABLED. Re-enable by setting this back to {"nba"}.
+# ENABLED 2026-10-04. The 1996-2010 backfill committed on 2026-10-03 (17,360 games),
+# so the archive is something users gain access to rather than only something taken
+# away — which is why the accidental enable the day before was rolled back and this
+# one isn't.
 #
-# The gate shipped accidentally on 2026-10-03 (bundled into commit 4331ffc) before
-# the archive backfill had run and before the iOS build could handle the 402. Because
-# enforcement is server-side, App Store users were blocked too — they got a generic
-# error alert after writing a note, with no paywall and no way to act on it.
+# Known gap at time of enabling: App Store builds have no handling for the 402, so
+# iOS users get a generic error alert instead of the paywall until the update with
+# APIError.proRequired ships. Web is fully handled (the Vault card). Accepted
+# deliberately; remove this paragraph once that build is live.
 #
-# Turn it back on only when BOTH are true:
-#   1. backfill_historical_games.py has committed the 1996-2010 seasons, so there is
-#      something to sell rather than only something to take away.
-#   2. An iOS build handling APIError.proRequired is live in the App Store.
-#
-# Everything else — _archive_locked, the five gated write paths, log_locked on
-# /api/games/<id>, the web Vault card — stays in place and inert while this is empty.
-ARCHIVE_GATED_LEAGUES = set()    # was {"nba"}; WNBA stays ungated either way, since
-                                 # gating it would only remove games users can log today.
+# WNBA stays ungated — there is no WNBA archive to sell, so gating it would only
+# remove games users can log today.
+ARCHIVE_GATED_LEAGUES = {"nba"}
 _ARCHIVE_FREE_TTL   = 900
 _ARCHIVE_FREE_CACHE = {}         # league -> (expires_at, frozenset(seasons))
 
