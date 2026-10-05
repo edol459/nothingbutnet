@@ -11546,6 +11546,131 @@ def set_allegiance():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Allegiance, read publicly — who supports whom.
+#
+# The /api/me/allegiance pair above answers "what is MY team". These answer the
+# social half: how the user base splits across the league, and who is behind one
+# team. 183 of 333 accounts have set a team, so this is one of the few surfaces
+# that can show a crowd rather than an empty room.
+#
+# NOT ordered by how long someone has held their team, and "since" is withheld for
+# most people, because that date is mostly not real: schema_v11 seeded
+# team_allegiance from users.favorite_team and stamped 163 of the 183 rows with the
+# single instant the migration ran. Ranking on it would present a 163-way tie as a
+# loyalty ladder, and "Fan since 29 Aug 2026" is simply false for someone who has
+# followed the Pacers for twenty years. Only allegiances set or switched since the
+# migration carry a date worth showing. Ordering is by XP — honest, and it surfaces
+# the fans who actually post.
+#
+# Note for whenever private accounts land: both of these expose display names and
+# must learn to exclude anyone who has gone private.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# The instant schema_v11 backfilled team_allegiance. A started_at equal to this is
+# the migration's fingerprint, not something the user did; treat it as unknown.
+_ALLEGIANCE_SEED_AT = "2026-08-29 03:31:49.927248+00"
+
+@app.route("/api/allegiance/teams")
+def allegiance_teams():
+    """Every team in one league with a current supporter count, most first."""
+    league = (request.args.get("league") or "nba").lower().strip()
+    if league not in _ALLEGIANCE_LEAGUES:
+        return jsonify({"error": "league must be nba or wnba"}), 400
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT team_abbr,
+                   COUNT(*) AS fans,
+                   COUNT(*) FILTER (WHERE started_at > %s::timestamptz) AS since_seed
+            FROM team_allegiance
+            WHERE league = %s AND ended_at IS NULL
+            GROUP BY team_abbr
+            ORDER BY fans DESC, team_abbr
+        """, (_ALLEGIANCE_SEED_AT, league))
+        rows = cur.fetchall()
+        total = sum(r["fans"] for r in rows)
+        # One lookup for the whole league. Calling _team_display_name per row is
+        # 28 round trips for a page that renders once; DISTINCT ON applies the
+        # same newest-season-wins rule in a single pass.
+        cur.execute("""
+            SELECT DISTINCT ON (team_abbr) team_abbr, team_name
+            FROM team_seasons
+            WHERE league = %s AND team_name <> team_abbr
+            ORDER BY team_abbr, season DESC
+        """, (league,))
+        names = {r["team_abbr"]: r["team_name"] for r in cur.fetchall()}
+        teams = [{
+            "teamAbbr":  r["team_abbr"],
+            "teamName":  names.get(r["team_abbr"]),
+            "fans":      r["fans"],
+            # Share of people who picked a team, not of all accounts — "12% of
+            # accounts" would mostly measure how many never answered.
+            "share":     round(r["fans"] / total * 100, 1) if total else 0.0,
+            # Picked up since the seed, so genuinely chosen rather than migrated.
+            "newFans":   r["since_seed"],
+        } for r in rows]
+        return jsonify({"league": league, "total": total, "teams": teams})
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/teams/<abbr>/fans")
+def team_fans(abbr):
+    """Who currently reps this team, longest-held first."""
+    league = (request.args.get("league") or "nba").lower().strip()
+    if league not in _ALLEGIANCE_LEAGUES:
+        return jsonify({"error": "league must be nba or wnba"}), 400
+    abbr = (abbr or "").upper().strip()
+    try:
+        limit  = min(int(request.args.get("limit", 40)), 100)
+        offset = max(int(request.args.get("offset", 0)), 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit and offset must be integers"}), 400
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT u.id, u.display_name, u.avatar_url, u.is_pro, u.xp,
+                   u.equipped_ring, u.equipped_title,
+                   CASE WHEN a.started_at > %s::timestamptz THEN a.started_at END AS since
+            FROM team_allegiance a
+            JOIN users u ON u.id = a.user_id
+            WHERE a.league = %s AND a.team_abbr = %s AND a.ended_at IS NULL
+            ORDER BY COALESCE(u.xp, 0) DESC, u.id
+            LIMIT %s OFFSET %s
+        """, (_ALLEGIANCE_SEED_AT, league, abbr, limit, offset))
+        fans = [{
+            "userId":        r["id"],
+            "displayName":   r["display_name"],
+            "avatarUrl":     r["avatar_url"],
+            "isPro":         bool(r["is_pro"]),
+            "xp":            r["xp"],
+            "equippedRing":  r["equipped_ring"],
+            "equippedTitle": r["equipped_title"],
+            # null for anyone carried over by the schema_v11 seed — we don't know
+            # when they actually picked the team, and guessing reads as a fact.
+            "since":         r["since"].isoformat() if r["since"] else None,
+        } for r in cur.fetchall()]
+
+        cur.execute("""
+            SELECT COUNT(*) FILTER (WHERE ended_at IS NULL)     AS current,
+                   COUNT(*) FILTER (WHERE ended_at IS NOT NULL) AS former
+            FROM team_allegiance WHERE league = %s AND team_abbr = %s
+        """, (league, abbr))
+        counts = cur.fetchone()
+        return jsonify({
+            "league":   league,
+            "teamAbbr": abbr,
+            "teamName": _team_display_name(cur, league, abbr),
+            "total":    counts["current"],
+            "former":   counts["former"],
+            "fans":     fans,
+        })
+    finally:
+        cur.close(); conn.close()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Watchlist — one list, filled two ways.
 #
 # A team subscription is one row meaning "every game they play", so playoff,

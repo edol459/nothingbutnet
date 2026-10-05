@@ -71,6 +71,18 @@ a { color:inherit; }
 .section-h { font-family:var(--ff-mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink3); margin-bottom:12px; }
 
 /* Roster */
+/* Fans — who reps this team. Built from the same tokens as the roster rows so the
+   two sections read as one page. */
+.fans-meta { font-size:12px; color:var(--ink3); margin:-4px 0 12px; }
+.fans-meta b { color:var(--ink2); font-weight:600; }
+.fans-grid { display:flex; flex-wrap:wrap; gap:8px; }
+.fan { display:flex; align-items:center; gap:8px; padding:6px 10px 6px 6px;
+  border:1px solid var(--paper3); border-radius:999px; text-decoration:none; color:inherit; }
+.fan:hover { border-color:var(--ink4); }
+.fan-av { width:24px; height:24px; border-radius:50%; object-fit:cover; background:var(--paper3); flex-shrink:0; }
+.fan-name { font-size:13px; font-weight:500; }
+.fan-since { font-size:11px; color:var(--ink4); font-family:var(--ff-mono); }
+.fans-more { font-size:12px; color:var(--ink3); align-self:center; padding-left:4px; }
 .roster-row { display:flex; align-items:center; gap:12px; padding:9px 0; border-bottom:1px solid var(--paper3); }
 .roster-head { width:38px; height:28px; border-radius:5px; background:var(--paper3); object-fit:cover; flex-shrink:0; }
 .roster-name { font-weight:500; font-size:15px; flex:1; min-width:0; }
@@ -261,7 +273,64 @@ function render(d) {
     <div class="section">
       <div class="section-h">Schedule</div>
       ${sched}
-    </div>`;
+    </div>
+    <div class="section" id="fans-section"></div>`;
+
+  loadFans();
+}
+
+/* Loaded after render rather than alongside the profile: allegiance is a separate
+   endpoint, and a slow or failing fans query shouldn't hold up the roster. The
+   section simply stays empty if nobody reps this team. */
+async function loadFans() {
+  const host = document.getElementById('fans-section');
+  if (!host) return;
+  try {
+    const [fansRes, leagueRes] = await Promise.all([
+      fetch(`/api/teams/${ABBR}/fans?league=${LEAGUE}&limit=40`),
+      fetch(`/api/allegiance/teams?league=${LEAGUE}`),
+    ]);
+    if (!fansRes.ok) return;
+    const d = await fansRes.json();
+    if (!d.total) return;
+
+    // Rank among teams people actually chose, which is the interesting comparison
+    // — "3rd most supported" says more than a bare count.
+    let rankLine = '';
+    if (leagueRes.ok) {
+      const lg = await leagueRes.json();
+      const i = (lg.teams || []).findIndex(t => t.teamAbbr === d.teamAbbr);
+      if (i >= 0) {
+        const t = lg.teams[i];
+        rankLine = ` · <b>${ordinal(i + 1)}</b> most supported · ${t.share}% of ${LEAGUE.toUpperCase()} fans`;
+      }
+    }
+    const former = d.former ? ` · ${d.former} moved on` : '';
+
+    host.innerHTML = `
+      <div class="section-h">Fans</div>
+      <div class="fans-meta"><b>${d.total}</b> ${d.total === 1 ? 'person reps' : 'people rep'} the ${esc(d.teamName || d.teamAbbr)}${rankLine}${former}</div>
+      <div class="fans-grid">
+        ${d.fans.map(f => `
+          <a class="fan" href="/profile/${f.userId}">
+            <img class="fan-av" src="${f.avatarUrl || ''}" alt="" onerror="this.style.visibility='hidden'">
+            <span class="fan-name">${esc(f.displayName || 'ydkball fan')}</span>
+            ${f.since ? `<span class="fan-since">since ${fmtSince(f.since)}</span>` : ''}
+          </a>`).join('')}
+        ${d.total > d.fans.length ? `<span class="fans-more">+${d.total - d.fans.length} more</span>` : ''}
+      </div>`;
+  } catch (e) { /* leave the section empty */ }
+}
+
+function ordinal(n) {
+  const s = ['th','st','nd','rd'], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+/* "since" is only sent for allegiances chosen after the schema_v11 seed, so a
+   missing one means unknown, never "new". */
+function fmtSince(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
 }
 
 function cell(val, lab, cls) {
