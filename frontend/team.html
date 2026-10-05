@@ -305,11 +305,9 @@ async function loadFans() {
         rankLine = ` · <b>${ordinal(i + 1)}</b> most supported · ${t.share}% of ${LEAGUE.toUpperCase()} fans`;
       }
     }
-    const former = d.former ? ` · ${d.former} moved on` : '';
-
     host.innerHTML = `
       <div class="section-h">Fans</div>
-      <div class="fans-meta"><b>${d.total}</b> ${d.total === 1 ? 'person reps' : 'people rep'} the ${esc(d.teamName || d.teamAbbr)}${rankLine}${former}
+      <div class="fans-meta"><b>${d.total}</b> ${d.total === 1 ? 'person reps' : 'people rep'} the ${esc(d.teamName || d.teamAbbr)}${rankLine}
         · <a href="/allegiances?league=${LEAGUE}" style="color:var(--orange);text-decoration:none">all teams</a></div>
       <div class="fans-grid">
         ${d.fans.map(f => `

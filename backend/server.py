@@ -11469,9 +11469,18 @@ def _set_allegiance(cur, user_id: int, league: str | None, abbr: str | None,
         # an identical one. Close-and-reopen would leave a closed IND row behind
         # a current IND row, which reads as "left the team and came back" in the
         # switch history — a fake switch invented by a timestamp change.
-        cur.execute("UPDATE team_allegiance SET started_at = NOW() WHERE id = %s",
-                    (row["id"],))
-        return True
+        #
+        # Only when the existing date ISN'T real. restart exists to replace the
+        # schema_v11 seed, which stamped every backfilled row with the instant
+        # that migration ran. Applied unconditionally it also destroyed genuine
+        # streaks: re-running onboarding and re-picking the team you already had
+        # reset a 34-day streak to zero, which is the opposite of what the flag
+        # is for. A deliberately chosen start date is the streak.
+        cur.execute("""
+            UPDATE team_allegiance SET started_at = NOW()
+            WHERE id = %s AND started_at <= %s::timestamptz
+        """, (row["id"], _ALLEGIANCE_SEED_AT))
+        return cur.rowcount > 0
     if row:
         cur.execute("UPDATE team_allegiance SET ended_at = NOW() WHERE id = %s", (row["id"],))
     if abbr and league:
