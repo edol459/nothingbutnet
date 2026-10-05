@@ -56,9 +56,21 @@ nav{position:fixed;top:0;left:0;right:0;height:var(--nav-h);background:var(--pap
 
 /* ── Scoreboard header ───────────────────────────────────────── */
 .game-sb{display:flex;align-items:center;justify-content:center;padding:36px 24px 28px;gap:0;}
-.sb-team{display:flex;align-items:center;gap:12px;flex:1;}
+/* The whole block — logo, abbreviation and record — is one link to the team
+   page. It has been since the page shipped, but with text-decoration:none and
+   no hover or press state there was nothing to suggest it, so the only way to
+   find it was to tap and see. The abbreviation taking the accent on hover is
+   enough of a hint without putting a link colour through the scoreline. */
+.sb-team{display:flex;align-items:center;gap:12px;flex:1;cursor:pointer;}
+/* hover:hover so touch devices never get a stuck hover state after a tap. */
+@media (hover:hover){
+  .sb-team:hover .sb-abbr{color:var(--orange);}
+  .sb-team:hover .sb-logo{transform:scale(1.04);}
+}
+/* The press state is the only affordance touch gets. */
+.sb-team:active{opacity:.6;}
 .sb-team.home{flex-direction:row-reverse;}
-.sb-logo{width:60px;height:60px;object-fit:contain;}
+.sb-logo{width:60px;height:60px;object-fit:contain;transition:transform .15s ease;}
 .sb-logo-fallback{width:60px;height:60px;font-size:28px;display:flex;align-items:center;justify-content:center;}
 .sb-team-info{display:flex;flex-direction:column;gap:2px;}
 .sb-abbr{font-family:var(--ff-mono);font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;}
