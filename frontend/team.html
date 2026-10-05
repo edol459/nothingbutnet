@@ -309,7 +309,8 @@ async function loadFans() {
 
     host.innerHTML = `
       <div class="section-h">Fans</div>
-      <div class="fans-meta"><b>${d.total}</b> ${d.total === 1 ? 'person reps' : 'people rep'} the ${esc(d.teamName || d.teamAbbr)}${rankLine}${former}</div>
+      <div class="fans-meta"><b>${d.total}</b> ${d.total === 1 ? 'person reps' : 'people rep'} the ${esc(d.teamName || d.teamAbbr)}${rankLine}${former}
+        · <a href="/allegiances?league=${LEAGUE}" style="color:var(--orange);text-decoration:none">all teams</a></div>
       <div class="fans-grid">
         ${d.fans.map(f => `
           <a class="fan" href="/profile/${f.userId}">

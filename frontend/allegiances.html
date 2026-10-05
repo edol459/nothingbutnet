@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Allegiances — ydkball</title>
+<meta name="description" content="Which NBA and WNBA teams ydkball members rep, ranked by how many people claim them.">
+<meta property="og:site_name" content="ydkball">
+<meta property="og:title" content="Allegiances — ydkball">
+<meta property="og:description" content="Which teams ydkball members rep, ranked.">
+<meta property="og:image" content="https://ydkball.net/og-image.png">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/night-mode.css">
+<link rel="stylesheet" href="/site-nav.css">
+<style>
+:root {
+  --ink:#0c0c0d; --ink2:#2a2a2e; --ink3:#6b6b78; --ink4:#a8a8b3;
+  --paper:#F5F0E8; --paper2:#eeecea; --paper3:#e5e2dc; --bg-card:#FDFAF4;
+  --rule:#d8d5cf; --orange:#e8530a; --orange-lt:#fff0ea; --gold:#C9922A;
+  --green:#1a7a4a; --star:#00C030; --red:#c0392b;
+  --ff-serif:'DM Serif Display',Georgia,serif;
+  --ff-sans:'Instrument Sans',system-ui,sans-serif;
+  --ff-mono:'DM Mono','Courier New',monospace;
+  --nav-h:58px; font-size:15px;
+}
+html.night-mode {
+  --paper:#18181b; --paper2:#222228; --paper3:#2c2c34; --bg-card:#222228;
+  --rule:#3a3a46; --ink:#ededf0; --ink2:#c0c0cc; --ink3:#8080a0; --ink4:#4a4a68;
+  --orange-lt:#2a1508; --green:#22c55e; --star:#22c55e; --red:#f87171; color-scheme:dark;
+}
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+html { scroll-behavior:smooth; overflow-x:clip; background:var(--paper); }
+body { font-family:var(--ff-sans); background:var(--paper); color:var(--ink); min-height:100vh; -webkit-font-smoothing:antialiased; overflow-x:clip; }
+a { color:inherit; }
+
+.page { max-width:760px; margin:0 auto; padding:calc(var(--nav-h) + 28px) 20px 80px; }
+.h1 { font-family:var(--ff-serif); font-size:30px; letter-spacing:-.015em; }
+.sub { font-size:13px; color:var(--ink3); margin-top:6px; line-height:1.55; }
+
+.caps { display:flex; gap:8px; margin:22px 0 18px; }
+.cap { font-family:var(--ff-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+  padding:6px 13px; border:1px solid var(--rule); border-radius:999px; background:none;
+  color:var(--ink3); cursor:pointer; }
+.cap.active { background:var(--ink); color:var(--paper); border-color:var(--ink); }
+
+.row { display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid var(--paper3);
+  text-decoration:none; }
+.row:hover .name { color:var(--orange); }
+.rank { font-family:var(--ff-mono); font-size:12px; color:var(--ink4); width:22px; text-align:right; flex-shrink:0; }
+.logo { width:30px; height:30px; object-fit:contain; flex-shrink:0; }
+.logo-fb { width:30px; height:30px; display:grid; place-items:center; font-size:15px; flex-shrink:0; }
+.name { font-size:15px; font-weight:500; flex-shrink:0; min-width:150px; }
+/* The bar is the point of the page — it makes a 45-vs-5 split legible at a glance
+   in a way a column of numbers doesn't. */
+.bar-wrap { flex:1; height:7px; background:var(--paper3); border-radius:999px; overflow:hidden; min-width:40px; }
+/* display:block is load-bearing. Both of these are spans; .bar-wrap gets
+   blockified because flex:1 makes it a flex item, but .bar is an ordinary inline
+   child, and width/height are ignored on those — every bar rendered identical. */
+.bar { display:block; height:100%; background:var(--orange); border-radius:999px; }
+.count { font-family:var(--ff-mono); font-size:13px; color:var(--ink2); width:30px; text-align:right; flex-shrink:0; }
+.pct { font-family:var(--ff-mono); font-size:11px; color:var(--ink4); width:44px; text-align:right; flex-shrink:0; }
+
+.empty, .loading { color:var(--ink3); font-size:14px; padding:40px 0; text-align:center; }
+.foot { margin-top:26px; font-size:12px; color:var(--ink4); line-height:1.6; }
+@media (max-width:560px) {
+  .name { min-width:0; flex:1; }
+  .bar-wrap { display:none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── Site header (canonical) ── -->
+<header class="site-nav">
+  <div class="site-nav__bar">
+    <a class="site-nav__brand" href="/">
+      <img src="/transparent.png" alt="">
+      <span class="site-nav__word">ydk<span>ball</span></span>
+    </a>
+    <div class="site-nav__links" role="navigation" aria-label="Primary">
+      <a href="/">Home</a>
+      <a href="/reviews">Reviews</a>
+      <a href="/games">Games</a>
+      <a href="/stats">Stats</a>
+    </div>
+    <div class="site-nav__auth" id="nav-auth-slot"></div>
+  </div>
+</header>
+
+<div class="page">
+  <div class="h1">Allegiances</div>
+  <div class="sub">Which teams ydkball members rep, ranked by how many claim them.
+    Pick yours on <a href="/profile" style="color:var(--orange);text-decoration:none">your profile</a>.</div>
+
+  <div class="caps">
+    <button class="cap active" id="cap-nba"  onclick="setLeague('nba')">NBA</button>
+    <button class="cap"        id="cap-wnba" onclick="setLeague('wnba')">WNBA</button>
+  </div>
+
+  <div id="content"><div class="loading">Loading…</div></div>
+</div>
+
+<script src="/nba-assets.js"></script>
+<script src="/site-nav.js"></script>
+<script>
+let LEAGUE = new URLSearchParams(location.search).get('league') === 'wnba' ? 'wnba' : 'nba';
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function setLeague(lg) {
+  LEAGUE = lg;
+  document.getElementById('cap-nba').classList.toggle('active',  lg === 'nba');
+  document.getElementById('cap-wnba').classList.toggle('active', lg === 'wnba');
+  history.replaceState(null, '', `?league=${lg}`);
+  load();
+}
+
+async function load() {
+  const c = document.getElementById('content');
+  c.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    const res = await fetch(`/api/allegiance/teams?league=${LEAGUE}`);
+    if (!res.ok) throw new Error('failed');
+    const d = await res.json();
+    if (!d.total) {
+      c.innerHTML = '<div class="empty">Nobody has picked a team in this league yet.</div>';
+      return;
+    }
+    // Bars scale to the leader, not to 100% — one team holds a quarter of the
+    // base, so a share-of-total scale would flatten everyone else into nothing.
+    const max = Math.max(...d.teams.map(t => t.fans));
+    const rows = d.teams.map((t, i) => {
+      const url = window.ydkTeamLogo && ydkTeamLogo(t.teamAbbr, LEAGUE);
+      const logo = url
+        ? `<img class="logo" src="${url}" alt="" onerror="this.style.visibility='hidden'">`
+        : `<span class="logo-fb">🏀</span>`;
+      return `<a class="row" href="/team?abbr=${encodeURIComponent(t.teamAbbr)}&league=${LEAGUE}">
+        <span class="rank">${i + 1}</span>
+        ${logo}
+        <span class="name">${esc(t.teamName || t.teamAbbr)}</span>
+        <span class="bar-wrap"><span class="bar" style="width:${(t.fans / max * 100).toFixed(1)}%"></span></span>
+        <span class="count">${t.fans}</span>
+        <span class="pct">${t.share}%</span>
+      </a>`;
+    }).join('');
+
+    const newFans = d.teams.reduce((a, t) => a + (t.newFans || 0), 0);
+    c.innerHTML = rows + `<div class="foot">
+      ${d.total} ${d.total === 1 ? 'person has' : 'people have'} picked
+      ${LEAGUE.toUpperCase()} teams${newFans ? ` · ${newFans} chosen since we started tracking` : ''}.
+      Tap a team to see who reps it.</div>`;
+  } catch (e) {
+    c.innerHTML = '<div class="empty">Couldn\'t load allegiances.</div>';
+  }
+}
+
+setLeague(LEAGUE);
+</script>
+</body>
+</html>

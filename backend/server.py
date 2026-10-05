@@ -4545,6 +4545,14 @@ def game_page():
 def team_page():
     return app.send_static_file("team.html")
 
+# ── Serve allegiances.html ────────────────────────────────────────
+# Also the only discovery path to /team, which is otherwise reachable only by
+# tapping a team name on a game page.
+@app.route("/allegiances.html")
+@app.route("/allegiances")
+def allegiances_page():
+    return app.send_static_file("allegiances.html")
+
 # ── Serve builder.html ────────────────────────────────────────────
 @app.route("/builder.html")
 @app.route("/builder")
