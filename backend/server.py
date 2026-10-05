@@ -10906,11 +10906,21 @@ def team_profile(abbr):
                     "diff": round((pf - pa) / gp, 1),
                 }
 
+        # Supporter count rides along so the team header can show "N fans" without
+        # a second request. The fan LIST stays on /api/teams/<abbr>/fans — it is
+        # only needed once someone taps through, and it pages.
+        cur.execute("""
+            SELECT COUNT(*) AS n FROM team_allegiance
+            WHERE league = %s AND team_abbr = %s AND ended_at IS NULL
+        """, (league, abbr))
+        fan_count = (cur.fetchone() or {}).get("n", 0)
+
         return jsonify({
             "teamAbbr": abbr, "teamName": team_name,
             "league": league, "season": season, "seasons": seasons,
             "record": record,
             "stats": stats,
+            "fanCount": fan_count,
             "roster": roster, "games": games,
         })
     finally:
