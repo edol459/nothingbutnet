@@ -830,13 +830,36 @@ function teamHref(abbr) {
 //
 // Community is final-only because nothing public exists before then — you cannot
 // publish a log until the game ends, so the tab would always be empty.
+/* Season start year from an NBA game id (002YY…); null for WNBA and anything else
+   that doesn't encode it. The century split is 46 because NBA ids carry only two
+   digits and the league's first season was 1946-47, so anything from 46 up is 19xx. */
+function seasonStartYear(gameId) {
+  const id = String(gameId || '');
+  if (id.length < 5 || !id.startsWith('00')) return null;
+  const yy = parseInt(id.slice(3, 5), 10);
+  if (Number.isNaN(yy)) return null;
+  return yy >= 46 ? 1900 + yy : 2000 + yy;
+}
+/* Play-by-play exists from 2019-20 on; before that there's no source for it. */
+function hasPlayByPlay(gameId) {
+  const y = seasonStartYear(gameId);
+  return y === null || y >= 2019;
+}
+/* Box scores come from player_gamelogs, which starts at 1996-97. The 1983-96 games
+   were backfilled from LeagueGameFinder, which is team-level only — date, teams and
+   a final score — so there are no player lines to show. */
+function hasBoxScore(gameId) {
+  const y = seasonStartYear(gameId);
+  return y === null || y >= 1996;
+}
+
 function renderTabs(box) {
   const container = document.getElementById('game-tabs');
   const isFinal = box && box.gameStatus === 3;
   const tabs = [
     {id:'log', label:'My Log'},
-    {id:'pbp', label:'Play-by-Play'},
-    {id:'box', label:'Box Score'},
+    ...(hasPlayByPlay(GAME_ID) ? [{id:'pbp', label:'Play-by-Play'}] : []),
+    ...(hasBoxScore(GAME_ID)   ? [{id:'box', label:'Box Score'}]    : []),
     ...(isFinal ? [{id:'community', label:'Community'}] : []),
   ];
 
@@ -849,8 +872,12 @@ function renderTabs(box) {
     // Signed-out visitors default to Play-by-Play, not to a sign-in wall. The app can
     // default to the log because it has no logged-out traffic; this page is linked
     // from search results and OG cards.
+    // Signed-out default walks the list rather than naming 'pbp' outright: on an
+    // archive game that tab doesn't exist, and naming a missing tab would leave
+    // the page with no panel showing at all.
+    const firstPublic = ['pbp', 'box', 'community'].find(id => tabs.some(t => t.id === id));
     ACTIVE_TAB = (alias && tabs.find(t => t.id === alias)) ? alias
-               : (_reviewUser ? 'log' : 'pbp');
+               : (_reviewUser ? 'log' : (firstPublic || 'log'));
   }
 
   container.style.display = '';
