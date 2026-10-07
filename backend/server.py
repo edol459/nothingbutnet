@@ -9242,15 +9242,20 @@ def open_ballot():
 
 @app.route("/api/awards/consensus")
 def awards_consensus():
-    """How the crowd voted, per award.
+    """How the crowd voted, per award — live, updating as people pick.
 
-    Only ever counts LOCKED ballots, which is the whole safety property: while
-    the window is open nothing is locked, so this returns nothing and can't
-    anchor anyone's picks. The same rule POTG tallies follow — see CLAUDE.md:
-    lurkers should see the crowd, nobody should see it while choosing.
+    Deliberately NOT gated on lock, unlike POTG tallies. The tradeoff is real
+    (seeing the favourite nudges you toward it) and was taken on purpose: a
+    board that moves daily through the preseason is a reason to open the app,
+    and a ballot is an opinion rather than a guess at a hidden answer.
 
     Public ballots only. An aggregate hides individuals, but a one-vote row in a
     small pool doesn't, and private should stay private.
+
+    Each award carries its OWN denominator. Ballots get filled in gradually, so
+    MVP might have eighteen picks while Coach of the Year has nine — scoring both
+    against a single ballot count would quietly understate every slot people
+    haven't reached yet.
     """
     league = (request.args.get("league") or "nba").lower()
     if league not in _AWARD_TEMPLATES:
@@ -9261,15 +9266,14 @@ def awards_consensus():
     cur.execute(_AWARD_TABLES); conn.commit()
     cur.execute("""
         SELECT COUNT(*) AS n FROM game_lists
-        WHERE list_type = 'awards' AND league = %s AND season = %s
-          AND is_public AND locked_at IS NOT NULL AND locked_at < NOW()
+        WHERE list_type = 'awards' AND league = %s AND season = %s AND is_public
     """, (league, season))
     ballots = int(cur.fetchone()["n"])
+    # Whether picks are still changing, so the client can say "live" or "final".
+    locked = not _award_window(cur, league)["isOpen"]
     if not ballots:
         cur.close(); conn.close()
-        # Deliberately indistinguishable from "nobody voted": before tipoff the
-        # client should show the same "comes back when picks lock" state either way.
-        return jsonify({"league": league, "season": season, "isLocked": False,
+        return jsonify({"league": league, "season": season, "isLocked": locked,
                         "ballots": 0, "awards": []})
 
     cur.execute("""
@@ -9282,7 +9286,7 @@ def awards_consensus():
         FROM award_ballot_items abi
         JOIN game_lists gl ON gl.id = abi.list_id
         WHERE gl.list_type = 'awards' AND gl.league = %s AND gl.season = %s
-          AND gl.is_public AND gl.locked_at IS NOT NULL AND gl.locked_at < NOW()
+          AND gl.is_public
         GROUP BY abi.award_code, COALESCE(abi.person_id::text, abi.team)
         ORDER BY abi.award_code, votes DESC, player_name
     """, (league, season))
@@ -9315,16 +9319,18 @@ def awards_consensus():
                 p["isWinner"] = p["personId"] == win["person_id"]
             else:
                 p["isWinner"] = _norm_name(p["playerName"]) == _norm_name(win["player_name"])
+        cast = sum(p["votes"] for p in picks)
         top = picks[0]["votes"] if picks else 0
         out.append({
             "code": slot["code"], "label": slot["label"], "short": slot["short"],
             "entity": slot.get("entity", "player"),
             "picks": picks,
+            "totalVotes": cast,
             # Share of the leading pick — the lower it is, the more contested the
             # award, which is the genuinely interesting signal.
-            "leaderShare": round(top / ballots, 3) if ballots else 0.0,
+            "leaderShare": round(top / cast, 3) if cast else 0.0,
         })
-    return jsonify({"league": league, "season": season, "isLocked": True,
+    return jsonify({"league": league, "season": season, "isLocked": locked,
                     "ballots": ballots, "awards": out})
 
 
