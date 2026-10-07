@@ -9240,6 +9240,94 @@ def open_ballot():
     return jsonify({"list": _format_list(row, 0, cover)}), 200
 
 
+@app.route("/api/awards/consensus")
+def awards_consensus():
+    """How the crowd voted, per award.
+
+    Only ever counts LOCKED ballots, which is the whole safety property: while
+    the window is open nothing is locked, so this returns nothing and can't
+    anchor anyone's picks. The same rule POTG tallies follow — see CLAUDE.md:
+    lurkers should see the crowd, nobody should see it while choosing.
+
+    Public ballots only. An aggregate hides individuals, but a one-vote row in a
+    small pool doesn't, and private should stay private.
+    """
+    league = (request.args.get("league") or "nba").lower()
+    if league not in _AWARD_TEMPLATES:
+        return jsonify({"error": "unknown league"}), 400
+    conn = get_conn(); cur = conn.cursor()
+    season = request.args.get("season") or (_award_window(cur, league)["season"] or "")
+
+    cur.execute(_AWARD_TABLES); conn.commit()
+    cur.execute("""
+        SELECT COUNT(*) AS n FROM game_lists
+        WHERE list_type = 'awards' AND league = %s AND season = %s
+          AND is_public AND locked_at IS NOT NULL AND locked_at < NOW()
+    """, (league, season))
+    ballots = int(cur.fetchone()["n"])
+    if not ballots:
+        cur.close(); conn.close()
+        # Deliberately indistinguishable from "nobody voted": before tipoff the
+        # client should show the same "comes back when picks lock" state either way.
+        return jsonify({"league": league, "season": season, "isLocked": False,
+                        "ballots": 0, "awards": []})
+
+    cur.execute("""
+        SELECT abi.award_code,
+               COALESCE(abi.person_id::text, abi.team) AS key,
+               MAX(abi.person_id)  AS person_id,
+               MAX(abi.player_name) AS player_name,
+               MAX(abi.team)        AS team,
+               COUNT(*)             AS votes
+        FROM award_ballot_items abi
+        JOIN game_lists gl ON gl.id = abi.list_id
+        WHERE gl.list_type = 'awards' AND gl.league = %s AND gl.season = %s
+          AND gl.is_public AND gl.locked_at IS NOT NULL AND gl.locked_at < NOW()
+        GROUP BY abi.award_code, COALESCE(abi.person_id::text, abi.team)
+        ORDER BY abi.award_code, votes DESC, player_name
+    """, (league, season))
+    by_code = {}
+    for r in cur.fetchall():
+        by_code.setdefault(r["award_code"], []).append({
+            "personId":   r["person_id"],
+            "playerName": r["player_name"],
+            "team":       r["team"],
+            "votes":      int(r["votes"]),
+        })
+
+    # The answer key, if it exists, so a graded season can mark the winner.
+    cur.execute("""SELECT award_code, person_id, player_name, team
+                   FROM award_results WHERE league = %s AND season = %s""",
+                (league, season))
+    winners = {r["award_code"]: r for r in cur.fetchall()}
+    cur.close(); conn.close()
+
+    out = []
+    for slot in _AWARD_TEMPLATES[league]:
+        picks = by_code.get(slot["code"], [])
+        win = winners.get(slot["code"])
+        for p in picks:
+            if not win:
+                p["isWinner"] = None
+            elif slot.get("entity") == "team":
+                p["isWinner"] = (p["team"] or "").upper() == (win.get("team") or "").upper()
+            elif p["personId"] and win.get("person_id"):
+                p["isWinner"] = p["personId"] == win["person_id"]
+            else:
+                p["isWinner"] = _norm_name(p["playerName"]) == _norm_name(win["player_name"])
+        top = picks[0]["votes"] if picks else 0
+        out.append({
+            "code": slot["code"], "label": slot["label"], "short": slot["short"],
+            "entity": slot.get("entity", "player"),
+            "picks": picks,
+            # Share of the leading pick — the lower it is, the more contested the
+            # award, which is the genuinely interesting signal.
+            "leaderShare": round(top / ballots, 3) if ballots else 0.0,
+        })
+    return jsonify({"league": league, "season": season, "isLocked": True,
+                    "ballots": ballots, "awards": out})
+
+
 @app.route("/api/awards/players/search")
 def search_award_players():
     """Players eligible for one award slot.
