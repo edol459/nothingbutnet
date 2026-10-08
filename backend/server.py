@@ -2339,7 +2339,18 @@ def _sb_poller_tick() -> tuple[bool, bool, bool]:
 
     # ── Primary: NBA live CDN ─────────────────────────────────────────────────
     try:
-        r = _requests.get(
+        # _cdn_get, not plain _requests: Akamai Bot Manager 403s a stock TLS
+        # fingerprint from Railway's datacenter IP. This call was written in
+        # April, before that gate existed, and was missed when _cdn_get landed
+        # in June — so on production it always failed and the tick fell through
+        # to the schedule fallback below, pinning every NBA game at
+        # "scheduled, 0-0" for the whole day. It stayed invisible because the
+        # NBA was in the offseason from June 13 until preseason: past dates
+        # render from the games table and pre-tipoff stubs match the CDN, so
+        # the only observable symptom is a live game that never goes live.
+        # The WNBA tick already used _cdn_get, which is why WNBA stayed correct.
+        # See docs/cdn-akamai-bot-manager.md.
+        r = _cdn_get(
             "https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json",
             headers=_CDN_HEADERS, timeout=8,
         )
