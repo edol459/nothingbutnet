@@ -2554,9 +2554,19 @@ def _enrich_games_with_records(games):
     if _ids:
         try:
             _c = get_conn(); _cur = _c.cursor()
-            _cur.execute("""SELECT season FROM games
-                             WHERE game_id = ANY(%s) AND season IS NOT NULL
-                             GROUP BY season ORDER BY COUNT(*) DESC LIMIT 1""", (_ids,))
+            # `games` holds only played games, so a FUTURE slate matched nothing here
+            # and fell through to get_current_season() — which reads the newest season
+            # with a final regular-season game and therefore still says "2025-26" all
+            # preseason. That is why picking a date two days out showed last year's
+            # records while today's cards showed this year's.
+            _cur.execute("""SELECT season FROM (
+                                SELECT season FROM games
+                                 WHERE game_id = ANY(%s) AND season IS NOT NULL
+                                UNION ALL
+                                SELECT season FROM scheduled_games
+                                 WHERE game_id = ANY(%s) AND season IS NOT NULL
+                             ) s
+                             GROUP BY season ORDER BY COUNT(*) DESC LIMIT 1""", (_ids, _ids))
             _row = _cur.fetchone()
             if _row and _row["season"]:
                 season = _row["season"]
@@ -2585,7 +2595,20 @@ def _enrich_games_with_records(games):
         conn = get_conn()
         cur  = conn.cursor()
 
-        # ── Regular season W-L ──
+        # Which phase of this season has a record to report?
+        #
+        # Before opening night a team's only record IS its preseason record, and that
+        # is exactly what the live CDN feed puts on today's cards. Matching it here
+        # keeps a future date consistent with today instead of jumping to last season.
+        # Once a regular-season game is final, that becomes the record — including the
+        # honest 0-0 on opening night.
+        cur.execute("""SELECT COUNT(*) AS n FROM games
+                        WHERE season = %s AND season_type = 'Regular Season'
+                          AND status = 'Final'""", (season,))
+        _rs  = cur.fetchone()
+        rec_type = "Regular Season" if (_rs and _rs["n"]) else "Pre Season"
+
+        # ── W-L for the season on screen ──
         if all_abbrs:
             abbr_list = list(all_abbrs)
             cur.execute("""
@@ -2595,16 +2618,16 @@ def _enrich_games_with_records(games):
                 FROM (
                     SELECT home_team_abbr AS team_abbr, home_score > away_score AS won
                     FROM games
-                    WHERE season = %s AND season_type = 'Regular Season'
+                    WHERE season = %s AND season_type = %s
                       AND status = 'Final' AND home_team_abbr = ANY(%s)
                     UNION ALL
                     SELECT away_team_abbr AS team_abbr, away_score > home_score AS won
                     FROM games
-                    WHERE season = %s AND season_type = 'Regular Season'
+                    WHERE season = %s AND season_type = %s
                       AND status = 'Final' AND away_team_abbr = ANY(%s)
                 ) sub
                 GROUP BY team_abbr
-            """, (season, abbr_list, season, abbr_list))
+            """, (season, rec_type, abbr_list, season, rec_type, abbr_list))
             for r in cur.fetchall():
                 reg_records[r["team_abbr"]] = (int(r["wins"]), int(r["losses"]))
 
