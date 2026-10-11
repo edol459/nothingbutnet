@@ -4087,9 +4087,14 @@ def _roster_with_avg_minutes(cur, abbr: str, league: str, season: str) -> list:
             WITH roster AS (
                 SELECT player_id FROM players WHERE current_team = %s
                 UNION
-                SELECT player_id FROM player_seasons
-                 WHERE team_abbr = %s AND season = %s
-                   AND season_type = 'Regular Season' AND COALESCE(gp, 0) > 0
+                -- Played-stats only speak for players the roster feed does not know,
+                -- or a traded player stays on his old team's roster all season.
+                SELECT ps.player_id FROM player_seasons ps
+                 WHERE ps.team_abbr = %s AND ps.season = %s
+                   AND ps.season_type = 'Regular Season' AND COALESCE(ps.gp, 0) > 0
+                   AND NOT EXISTS (SELECT 1 FROM players p2
+                                    WHERE p2.player_id = ps.player_id
+                                      AND p2.current_team IS NOT NULL)
             )
             SELECT DISTINCT ON (r.player_id)
                    r.player_id, p.player_name,
@@ -4193,6 +4198,14 @@ def players_today():
                     SELECT ps.team_abbr FROM player_seasons ps
                      WHERE ps.player_id = ANY(%s) AND ps.season = %s
                        AND ps.season_type = 'Regular Season' AND COALESCE(ps.gp, 0) > 0
+                       -- Only for players the roster feed does not cover. Without
+                       -- this the UNION returns a traded player's OLD team as well as
+                       -- his new one, so he surfaced on his former club's upcoming and
+                       -- live games (153 players differ this way right now). Final
+                       -- games never showed it because they read the real box score.
+                       AND NOT EXISTS (SELECT 1 FROM players p2
+                                        WHERE p2.player_id = ps.player_id
+                                          AND p2.current_team IS NOT NULL)
                 ) t WHERE team_abbr IS NOT NULL
             """, (fid_list, fid_list, nba_season))
             followed_team_abbrs["nba"] = {r["team_abbr"] for r in cur.fetchall() if r["team_abbr"]}
@@ -10929,22 +10942,60 @@ def team_profile(abbr):
                     "ppg": r.get("pts"), "rpg": r.get("reb"), "apg": r.get("ast"),
                 })
         else:
+            # Membership UNION stats — but only for the season the roster feed is
+            # actually describing.
+            #
+            # `player_seasons` gains a row when someone plays, so a season that has not
+            # tipped off yet produced an empty roster: a team page in preseason showed a
+            # name, a dash and nothing else. `players.current_team` knows the squad
+            # before a game is played.
+            #
+            # The `is_current` guard matters. current_team means RIGHT NOW, so unioning
+            # it into 2023-24 would put today's players on a three-year-old roster. It is
+            # only correct for the newest season, which is the one with no stats yet.
+            cur.execute("""SELECT MAX(season) AS s FROM scheduled_games WHERE league = %s""",
+                        (league,))
+            _rs = cur.fetchone()
+            is_current = bool(_rs and _rs["s"] and _rs["s"] == season)
             cur.execute("""
-                SELECT ps.player_id, p.player_name, ps.gp, ps.min_per_game,
+                WITH squad AS (
+                    SELECT ps.player_id
+                      FROM player_seasons ps
+                     WHERE ps.team_abbr = %s AND ps.season = %s
+                       AND ps.season_type = 'Regular Season'
+                       AND COALESCE(ps.gp, 0) > 0
+                       -- Past seasons keep whoever played; the CURRENT season defers to
+                       -- the roster feed, so a traded player leaves his old team's page.
+                       AND NOT (%s AND EXISTS (SELECT 1 FROM players p2
+                                                WHERE p2.player_id = ps.player_id
+                                                  AND p2.current_team IS NOT NULL))
+                    UNION
+                    SELECT p.player_id FROM players p
+                     WHERE %s AND p.current_team = %s
+                )
+                SELECT DISTINCT ON (sq.player_id)
+                       sq.player_id, p.player_name, ps.gp, ps.min_per_game,
                        ps.pts, ps.reb, ps.ast
-                FROM player_seasons ps
-                JOIN players p ON p.player_id = ps.player_id
-                WHERE ps.team_abbr = %s AND ps.season = %s
-                  AND ps.season_type = 'Regular Season'
-                  AND COALESCE(ps.gp, 0) > 0
-                ORDER BY ps.pts DESC NULLS LAST
-            """, (abbr, season))
+                  FROM squad sq
+                  JOIN players p ON p.player_id = sq.player_id
+                  LEFT JOIN player_seasons ps
+                         ON ps.player_id = sq.player_id AND ps.season = %s
+                        AND ps.season_type = 'Regular Season'
+                 ORDER BY sq.player_id, COALESCE(ps.gp, 0) DESC
+            """, (abbr, season, is_current, is_current, abbr, season))
             for r in cur.fetchall():
                 roster.append({
                     "playerId": r["player_id"], "playerName": r["player_name"],
                     "gp": r.get("gp"), "mpg": r.get("min_per_game"),
                     "ppg": r.get("pts"), "rpg": r.get("reb"), "apg": r.get("ast"),
                 })
+            # DISTINCT ON pins the SQL ordering to player_id, so the scoring sort moves
+            # here. Players with no stats yet sort last rather than vanishing.
+            # Name breaks the tie: before a season tips off every player scores None,
+            # so without it the roster came back in whatever order the union produced
+            # and reshuffled between requests.
+            roster.sort(key=lambda x: (x.get("ppg") is None, -(x.get("ppg") or 0),
+                                       (x.get("playerName") or "")))
 
         # Schedule / results for this season (crowd ratings included)
         cur.execute("""
