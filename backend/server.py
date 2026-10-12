@@ -8620,10 +8620,23 @@ def revenuecat_webhook():
         "INITIAL_PURCHASE", "RENEWAL", "REACTIVATION",
         "PRODUCT_CHANGE", "TRANSFER",
     }
-    # Events that mean the subscription is no longer active
+    # Events that mean the subscription is no longer active.
+    #
+    # CANCELLATION is NOT one of them, despite the name. In RevenueCat it means
+    # auto-renew was switched off — the subscriber keeps access until the period they
+    # already paid for runs out, which arrives separately as EXPIRATION. Treating it as
+    # a revocation cut people off early: user 269 renewed on 2026-08-30 and cancelled
+    # 66 milliseconds later, so they lost Pro that day despite having paid through
+    # 2026-09-30, when their EXPIRATION actually fired.
+    #
+    # SUBSCRIBER_ALIAS is not one either — it is an identity merge, carrying no
+    # entitlement meaning at all, and could revoke a paying subscriber outright.
+    #
+    # BILLING_ISSUE is kept deliberately: a failed payment stops access here rather
+    # than riding out RevenueCat's grace period. That is a product call, not a bug —
+    # flip it out of this set if you would rather give the retry a chance.
     inactive_events = {
-        "CANCELLATION", "EXPIRATION", "BILLING_ISSUE",
-        "SUBSCRIBER_ALIAS",
+        "EXPIRATION", "BILLING_ISSUE",
     }
 
     if event_type in active_events:
@@ -8768,6 +8781,26 @@ def admin_dashboard():
                      for r in cur.fetchall()]
     except Exception:
         conn.rollback()
+
+    # End the transaction before building the response.
+    #
+    # This endpoint opened a connection at the top and returned without ever closing
+    # it or ending its transaction. get_conn() is THREAD-LOCAL, so that transaction
+    # stayed open until the same worker thread happened to serve another request that
+    # committed — which, on an idle thread, is never.
+    #
+    # The cost is not theoretical. Every call left a backend "idle in transaction"
+    # holding an ACCESS SHARE lock on `users`, and ACCESS EXCLUSIVE (any ALTER TABLE)
+    # cannot be granted while one exists. Four had accumulated on 2026-10-12 and a
+    # migration could not get a lock at all. Open snapshots also hold back vacuum.
+    #
+    # Read-only work, so rollback rather than commit: there is nothing to keep, and it
+    # releases the locks and the snapshot immediately.
+    try:
+        cur.close()
+        conn.rollback()
+    except Exception:
+        pass
 
     def _rate(num, den):
         if not den or num is None:
