@@ -8909,6 +8909,151 @@ def _fetch_perf_items(cur, list_id: int, ranked: bool) -> list:
     return items
 
 
+# ━━━ Gifted Pro ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# An admin grants Pro for a stretch of months without a purchase. `users.is_pro`
+# stays the single source of truth that all 44 read sites consult; `pro_until`
+# only records when to take it back, and `pro_gifts` is the audit trail.
+#
+# Expiry is swept daily (expire_pro_gifts.py), not computed on read.
+
+def _gift_lookup(cur, query):
+    """Resolve a free-text admin query to one user row, or None.
+
+    Accepts a bare user id or an email. Email match is case-insensitive because
+    nobody types the capitalisation their provider stored.
+    """
+    q = (query or "").strip()
+    if not q:
+        return None
+    if q.isdigit():
+        cur.execute("""
+            SELECT id, email, display_name, is_pro, pro_until
+              FROM users WHERE id = %s
+        """, (int(q),))
+    else:
+        cur.execute("""
+            SELECT id, email, display_name, is_pro, pro_until
+              FROM users WHERE LOWER(email) = LOWER(%s)
+        """, (q,))
+    return cur.fetchone()
+
+
+def _gift_user_payload(row, cur=None):
+    out = {
+        "id":          row["id"],
+        "email":       row["email"],
+        "displayName": row["display_name"],
+        "isPro":       bool(row["is_pro"]),
+        "proUntil":    row["pro_until"].isoformat() if row.get("pro_until") else None,
+    }
+    if cur is not None:
+        cur.execute("""
+            SELECT months, reason, granted_at, expires_at
+              FROM pro_gifts WHERE user_id = %s
+             ORDER BY granted_at DESC LIMIT 5
+        """, (row["id"],))
+        out["gifts"] = [{
+            "months":    g["months"],
+            "reason":    g["reason"],
+            "grantedAt": g["granted_at"].isoformat(),
+            "expiresAt": g["expires_at"].isoformat(),
+        } for g in cur.fetchall()]
+    return out
+
+
+@app.route("/api/admin/gift-pro/lookup")
+@_admin_required
+def admin_gift_pro_lookup():
+    """Preview who a query resolves to, so the admin confirms before granting.
+
+    Separate from the grant itself on purpose: gifting to the wrong account is
+    the obvious failure mode, and an email typo is silent without this step.
+    """
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        row = _gift_lookup(cur, request.args.get("query"))
+        if not row:
+            return jsonify({"found": False}), 404
+        return jsonify({"found": True, "user": _gift_user_payload(row, cur)})
+    finally:
+        # Read-only: end the transaction so this thread-local connection does not
+        # sit idle-in-transaction holding a snapshot and a lock on `users`.
+        try:
+            cur.close(); conn.rollback()
+        except Exception:
+            pass
+
+
+@app.route("/api/admin/gift-pro", methods=["POST"])
+@_admin_required
+def admin_gift_pro():
+    """Grant a user N months of Pro.
+
+    Stacking is additive from whichever is later — an unexpired gift's end date,
+    or now. Gifting twice in a week should extend the grant, not silently reset
+    it to one month from today.
+    """
+    admin = current_user()
+    body  = request.get_json(silent=True) or {}
+
+    try:
+        months = int(body.get("months", 1))
+    except (TypeError, ValueError):
+        return jsonify({"error": "months must be a whole number"}), 400
+    # Upper bound is a typo guard, not policy: "120" for "12" should not hand out
+    # a decade of Pro with no way to notice.
+    if not (1 <= months <= 24):
+        return jsonify({"error": "months must be between 1 and 24"}), 400
+
+    reason = (body.get("reason") or "").strip()[:200]
+
+    conn = get_conn(); cur = conn.cursor()
+    row = _gift_lookup(cur, body.get("query"))
+    if not row:
+        conn.rollback()
+        return jsonify({"error": "No user matches that id or email"}), 404
+
+    # A paying subscriber already has what the gift would grant, and stamping
+    # pro_until on them hands the sweep a chance to revoke a live subscription.
+    # The sweep guards against that too, but not creating the situation is better.
+    if row["is_pro"] and not row["pro_until"]:
+        conn.rollback()
+        return jsonify({
+            "error": f"{row['email']} is already Pro through a subscription — "
+                     "gifting would risk revoking it when the gift lapses.",
+            "user": _gift_user_payload(row),
+        }), 409
+
+    cur.execute("""
+        UPDATE users
+           SET is_pro    = TRUE,
+               pro_until = GREATEST(COALESCE(pro_until, NOW()), NOW())
+                           + (%s * INTERVAL '1 month')
+         WHERE id = %s
+     RETURNING pro_until
+    """, (months, row["id"]))
+    new_until = cur.fetchone()["pro_until"]
+
+    cur.execute("""
+        INSERT INTO pro_gifts (user_id, granted_by, months, reason, expires_at)
+        VALUES (%s, %s, %s, %s, %s)
+    """, (row["id"], (admin or {}).get("id"), months, reason or None, new_until))
+
+    conn.commit()
+
+    print(f"[gift-pro] user {row['id']} ({row['email']}) +{months}mo "
+          f"until {new_until.date()} by admin {(admin or {}).get('id')}")
+
+    cur.execute("""
+        SELECT id, email, display_name, is_pro, pro_until FROM users WHERE id = %s
+    """, (row["id"],))
+    fresh = cur.fetchone()
+    payload = _gift_user_payload(fresh, cur)
+    conn.commit()
+    return jsonify({"ok": True, "months": months, "user": payload})
+
+
 # ━━━ Awards ballots ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # Created lazily like _LIST_SOCIAL_TABLES so a fresh dev DB works without

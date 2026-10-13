@@ -177,6 +177,15 @@ def main():
             ['--season', str(season_util.roster_season('wnba')),
              '--skip-if-present', '--ok-if-unpublished'],
         ),
+
+        # ── Take back gifted Pro once it lapses. Cheap no-op on most days: it
+        #    only writes when a gift's end date has actually passed. Last in the
+        #    list because nothing downstream depends on it. ──────────────────
+        (
+            'expire_pro_gifts.py',
+            'Expire gifted Pro',
+            ['--apply'],
+        ),
     ]
 
     run_id = pipeline_status.start_run(pipeline_status.CLOUD_DAILY)

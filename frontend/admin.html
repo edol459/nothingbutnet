@@ -164,6 +164,22 @@ body::before {
   border:1px solid var(--rule); border-radius:6px; cursor:pointer; transition:all .15s; }
 .btn-more:hover { border-color:var(--orange); color:var(--orange); }
 
+/* ── Gift Pro ── */
+.gift-grid { display:grid; grid-template-columns:1fr auto auto; gap:10px; align-items:center; }
+@media (max-width:560px) { .gift-grid { grid-template-columns:1fr; } }
+.gift-sel { font-family:var(--ff-mono); font-size:12px; padding:9px 10px;
+  background:var(--bg-card); border:1px solid var(--rule); border-radius:6px;
+  color:var(--ink); outline:none; cursor:pointer; }
+.gift-sel:focus { border-color:var(--orange); }
+.gift-who { margin-top:16px; padding:14px 16px; border:1px solid var(--rule);
+  border-radius:8px; background:var(--bg-card); }
+.gift-name { font-family:var(--ff-serif); font-size:1.25rem; color:var(--ink); }
+.gift-meta { font-family:var(--ff-mono); font-size:11px; color:var(--ink3); margin-top:4px; }
+.gift-warn { margin-top:12px; font-size:13px; color:var(--red); line-height:1.45; }
+.gift-hist { margin-top:14px; border-top:1px solid var(--paper3); padding-top:10px; }
+.gift-hist-row { display:flex; justify-content:space-between; gap:12px;
+  font-family:var(--ff-mono); font-size:11px; color:var(--ink3); padding:4px 0; }
+
 /* ── Access denied + toast ── */
 .denied { display:flex; flex-direction:column; align-items:center; justify-content:center;
   min-height:50vh; gap:12px; text-align:center; }
@@ -207,6 +223,7 @@ body::before {
     <div class="seg" id="nav-tabs">
       <button class="nav-tab active" data-tab="insights" onclick="showTab('insights')">Insights</button>
       <button class="nav-tab" data-tab="moderation" onclick="showTab('moderation')">Moderation</button>
+      <button class="nav-tab" data-tab="pro" onclick="showTab('pro')">Pro</button>
     </div>
     <span class="asof" id="asof"></span>
   </div>
@@ -235,6 +252,10 @@ function toast(msg) {
 }
 const el = (h) => { const t=document.createElement('template'); t.innerHTML=h.trim(); return t.content.firstChild; };
 const nfmt = (x) => (x==null ? '—' : Number(x).toLocaleString());
+// Display names, emails and gift reasons are user-supplied and go into innerHTML.
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 // Conversion rates are null until there's a denominator — show the label alone rather
 // than a misleading "0%" on a stage nobody has reached yet.
 const pct = (v, label) => (v==null ? `— ${label}` : `${v}% ${label}`);
@@ -247,12 +268,120 @@ function showTab(tab) {
   document.querySelectorAll('.nav-tab').forEach(b =>
     b.classList.toggle('active', b.dataset.tab === tab));
   if (insightsTimer) { clearInterval(insightsTimer); insightsTimer = null; }
+  document.getElementById('asof').textContent = '';
   if (tab === 'insights') {
     renderInsights();
     insightsTimer = setInterval(renderInsights, 60000);  // live refresh
+  } else if (tab === 'pro') {
+    renderPro();
   } else {
-    document.getElementById('asof').textContent = '';
     renderPage();
+  }
+}
+
+// ── Gift Pro ──────────────────────────────────────────────────
+// Deliberately two steps. Granting straight from the search box means one
+// mistyped email silently hands Pro to a stranger, with nothing on screen to
+// catch it — so look up first, show who matched, then grant to that id.
+let giftFound = null;
+
+function renderPro() {
+  document.getElementById('page').innerHTML = `
+    <div class="page-header">
+      <div class="page-title">Gift Pro</div>
+      <div class="page-sub">Grant a user Pro without a purchase. Expires on its own.</div>
+    </div>
+    <div class="panel">
+      <h3>Find a user</h3>
+      <div class="gift-grid">
+        <input class="search-input" id="gift-q" placeholder="email or user id"
+               autocomplete="off" onkeydown="if(event.key==='Enter')giftLookup()">
+        <select class="gift-sel" id="gift-months">
+          <option value="1" selected>1 month</option>
+          <option value="3">3 months</option>
+          <option value="6">6 months</option>
+          <option value="12">12 months</option>
+        </select>
+        <button class="btn-search" onclick="giftLookup()">Look up</button>
+      </div>
+      <div id="gift-result"></div>
+    </div>`;
+  document.getElementById('gift-q').focus();
+}
+
+async function giftLookup() {
+  const q   = document.getElementById('gift-q').value.trim();
+  const box = document.getElementById('gift-result');
+  giftFound = null;
+  if (!q) { box.innerHTML = ''; return; }
+  box.innerHTML = '<div class="table-state">Looking up…</div>';
+  try {
+    const r = await fetch('/api/admin/gift-pro/lookup?query=' + encodeURIComponent(q));
+    if (r.status === 404) {
+      box.innerHTML = '<div class="gift-who"><div class="gift-meta">No user matches that id or email.</div></div>';
+      return;
+    }
+    if (!r.ok) throw new Error('lookup failed');
+    const { user } = await r.json();
+    giftFound = user;
+    box.innerHTML = giftCard(user);
+  } catch (e) {
+    box.innerHTML = '<div class="gift-who"><div class="gift-meta">Lookup failed. Try again.</div></div>';
+  }
+}
+
+function giftCard(u) {
+  const until = u.proUntil ? new Date(u.proUntil) : null;
+  // A Pro user with no pro_until is a paying subscriber; the endpoint refuses
+  // these, so say why here rather than letting the button fail.
+  const subscriber = u.isPro && !u.proUntil;
+  let status;
+  if (subscriber)      status = '<span class="pill" style="background:rgba(39,174,96,.15);color:var(--green)">Subscriber</span>';
+  else if (u.isPro)    status = `<span class="pill" style="background:rgba(230,126,34,.15);color:var(--orange)">Gifted → ${until.toLocaleDateString()}</span>`;
+  else                 status = '<span class="pill" style="background:var(--paper3);color:var(--ink3)">Free</span>';
+
+  const hist = (u.gifts || []).length ? `
+    <div class="gift-hist">
+      ${u.gifts.map(g => `<div class="gift-hist-row">
+        <span>+${g.months}mo${g.reason ? ' · ' + esc(g.reason) : ''}</span>
+        <span>${new Date(g.grantedAt).toLocaleDateString()}</span>
+      </div>`).join('')}
+    </div>` : '';
+
+  return `
+    <div class="gift-who">
+      <div class="gift-name">${esc(u.displayName || '(no name)')} ${status}</div>
+      <div class="gift-meta">${esc(u.email)} · id ${u.id}</div>
+      ${subscriber
+        ? '<div class="gift-warn">Already Pro through a subscription. Gifting could revoke their paid access when the gift lapses, so this is blocked.</div>'
+        : `<div class="gift-grid" style="margin-top:14px">
+             <input class="search-input" id="gift-reason" placeholder="reason (optional, for the record)" autocomplete="off">
+             <button class="btn-search" onclick="giftGrant()">Grant Pro</button>
+           </div>`}
+      ${hist}
+    </div>`;
+}
+
+async function giftGrant() {
+  if (!giftFound) return;
+  const months = parseInt(document.getElementById('gift-months').value, 10);
+  const reason = (document.getElementById('gift-reason') || {}).value || '';
+  if (!confirm(`Give ${giftFound.email} ${months} month${months>1?'s':''} of Pro?`)) return;
+  try {
+    const r = await fetch('/api/admin/gift-pro', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // Grant by id, never by the raw search text — the id is what the admin
+      // just saw and confirmed on screen.
+      body: JSON.stringify({ query: String(giftFound.id), months, reason }),
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || 'Could not grant Pro'); return; }
+    giftFound = d.user;
+    document.getElementById('gift-result').innerHTML = giftCard(d.user);
+    toast(`Granted ${months} month${months>1?'s':''} of Pro`);
+  } catch (e) {
+    toast('Could not grant Pro');
   }
 }
 
