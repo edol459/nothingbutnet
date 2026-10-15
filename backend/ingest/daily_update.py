@@ -7,10 +7,9 @@ Runs only the steps that work from cloud IPs (stats.nba.com is blocked
 on Railway — those steps run locally via daily_update_local.py instead).
 
 Steps:
-  1. fetch_players.py   — sync players table (CDN-friendly, works from cloud)
-  2. fetch_darko.py     — DARKO DPM (darko.app)
-  3. fetch_lebron.py    — LEBRON + O/D-LEBRON + WAR (fanspo.com)
-  4. fetch_net_pts.py   — Net Points per 100 (ESPN via S3)
+  1. fetch_darko.py     — DARKO DPM (darko.app)
+  2. fetch_lebron.py    — LEBRON + O/D-LEBRON + WAR (fanspo.com)
+  3. fetch_net_pts.py   — Net Points per 100 (ESPN via S3)
 
 compute_pctiles runs at the end of daily_update_local.py after NBA stats
 are refreshed, so percentiles always reflect the latest data.
@@ -123,12 +122,19 @@ def main():
             'WNBA team season records',
             ['--seasons', wnba_year],
         ),
-        # ── Players (CDN-friendly, works from cloud) ───────────
-        (
-            'fetch_players.py',
-            'Players sync',
-            ['--season', season],
-        ),
+        # ── No players step here on purpose ───────────────────
+        #    There was one calling fetch_players.py, but that file has been
+        #    empty since the initial commit — python runs it, exits 0, and the
+        #    step reported "ok" in 0.0s every morning for four months without
+        #    ever doing anything. Nothing broke because player membership is
+        #    actually synced by sync_player_teams.py in daily_update_local.py,
+        #    which has to live there: CommonAllPlayers is a stats.nba.com
+        #    endpoint and Railway is blocked from it.
+        #
+        #    Removed rather than implemented, because a step that silently
+        #    passes is worse than no step — it was the reason the players
+        #    freshness alarm pointed at the cloud cron on 2026-10-15 while the
+        #    Windows PC was the thing that had stopped.
         # ── External metrics (non-NBA endpoints) ──────────────
         (
             'fetch_darko.py',

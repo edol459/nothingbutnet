@@ -16,7 +16,7 @@ Runs steps that work from a cloud/datacenter IP:
 |------|--------|-----------|
 | NBA team W-L records | `fetch_team_seasons.py` | `team_seasons` |
 | WNBA team W-L records | `fetch_wnba_team_seasons.py` | `team_seasons` |
-| Players table sync | `fetch_players.py` | `players` |
+| Players table sync | `sync_player_teams.py` (local pipeline) | `players` |
 | DARKO DPM | `fetch_darko.py` | `player_seasons` |
 | LEBRON / O-LEBRON / WAR | `fetch_lebron.py` | `player_seasons` |
 | Net Points per 100 | `fetch_net_pts.py` | `player_seasons` |
@@ -53,7 +53,7 @@ Bio table for all NBA players ever. Joined into almost everything.
 | position | 48% (1,372/2,860) ⚠️ |
 | college | 100% (stored as empty string for international) |
 
-> **Gap:** Only ~half of players have `position` filled in. The `players` table is synced by `fetch_players.py` which pulls from the NBA CDN — position data comes from a different endpoint and may not have been backfilled for historical players.
+> **Gap:** Only ~half of players have `position` filled in. The `players` table is synced by `sync_player_teams.py` (in `daily_update_local.py`) from one CommonAllPlayers call — position data comes from a different endpoint and has never been backfilled for historical players. A `fetch_players.py` used to be listed here, but that file was empty from the initial commit and was removed on 2026-10-15; it never populated anything.
 
 ---
 

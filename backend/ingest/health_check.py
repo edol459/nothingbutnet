@@ -134,13 +134,26 @@ class Health:
         sec = "Pipeline freshness"
         now = datetime.now(timezone.utc)
 
-        # Cloud Railway cron → fetch_players writes players.updated_at daily.
-        if self.column_exists("players", "updated_at"):
-            ts = self._scalar("SELECT MAX(updated_at) FROM players")
+        # Player membership, refreshed by sync_player_teams.py in the LOCAL
+        # pipeline (CommonAllPlayers is a stats.nba.com endpoint, so it cannot
+        # run from Railway).
+        #
+        # Reads current_team_at, NOT updated_at. `players.updated_at` is
+        # DEFAULT now() with no trigger, so it is stamped on INSERT and never on
+        # UPDATE — MAX() of it answers "when did a new player last join the
+        # league", not "when did the sync last run". Through preseason that
+        # drifts upward on its own as rosters churn and the check passes by
+        # accident; once signings stop it goes stale with nothing wrong. It also
+        # used to be labelled as the cloud cron, which sent 2026-10-15's
+        # investigation at Railway when the Windows PC was the thing that was
+        # down. current_team_at is written NOW() on every row of every sync,
+        # changed or not, so it tracks the job rather than the roster.
+        if self.column_exists("players", "current_team_at"):
+            ts = self._scalar("SELECT MAX(current_team_at) FROM players")
             self._freshness_verdict(
-                sec, "Cloud cron (players sync)", ts, now,
+                sec, "Player teams (current_team)", ts, now,
                 warn_h=30, fail_h=54,
-                ctx="runs daily on Railway — works year-round")
+                ctx="local pipeline (sync_player_teams) — year-round")
 
         # NB: no puzzle-generator freshness check — Higher-or-Lower & Guess Who
         # are lazily generated on first play (no cron), so a table's newest
