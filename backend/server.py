@@ -14651,6 +14651,199 @@ def impact_page():
     return app.send_static_file("impact.html")
 
 
+# ━━━ Admin: product email ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# Compose and send from /admin. Shares backend/emailer.py with the CLI, so
+# there is one send path: opt-outs excluded, email_sends claimed before each
+# API call, unsubscribe link and postal address on every message.
+#
+# The send runs on a background thread because a few hundred recipients takes
+# minutes and gunicorn kills a request at 60s (see Procfile). The thread opens
+# its own DB connection — get_conn() is thread-local and must not be shared.
+
+import threading as _email_threading
+
+# campaign -> progress dict. In-memory and per-worker, so it is a progress
+# indicator, not a source of truth; the authoritative record is email_sends,
+# which _email_status falls back to.
+_EMAIL_RUNS = {}
+_EMAIL_LOCK = _email_threading.Lock()
+
+
+def _email_mod():
+    import sys as _s, os as _o
+    _s.path.insert(0, _o.path.dirname(_o.path.abspath(__file__)))
+    import emailer
+    return emailer
+
+
+@app.route("/api/admin/email/audience")
+@_admin_required
+def admin_email_audience():
+    """Who would receive this campaign, without sending anything."""
+    em = _email_mod()
+    campaign = (request.args.get("campaign") or "").strip()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        people = em.audience(cur, campaign) if campaign else []
+        cur.execute("SELECT COUNT(*) AS n FROM users WHERE email_opt_out")
+        opted_out = cur.fetchone()["n"]
+        cur.execute("""SELECT COUNT(*) AS n FROM email_sends WHERE campaign=%s""",
+                    (campaign,))
+        already = cur.fetchone()["n"]
+        return jsonify({
+            "campaign": campaign,
+            "recipients": len(people),
+            "appleRelay": sum(1 for p in people if p["relay"]),
+            "optedOut": opted_out,
+            "alreadySent": already,
+            "problems": em.preflight(campaign or "x", "x", "x"),
+        })
+    finally:
+        try:
+            cur.close(); conn.rollback()
+        except Exception:
+            pass
+
+
+@app.route("/api/admin/email/campaigns")
+@_admin_required
+def admin_email_campaigns():
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT campaign,
+                   COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE status='sent')         AS sent,
+                   COUNT(*) FILTER (WHERE status LIKE 'failed%') AS failed,
+                   MAX(sent_at) AS last_at
+              FROM email_sends GROUP BY campaign ORDER BY MAX(sent_at) DESC LIMIT 20
+        """)
+        return jsonify({"campaigns": [{
+            "campaign": r["campaign"], "total": r["total"], "sent": r["sent"],
+            "failed": r["failed"], "lastAt": r["last_at"].isoformat() if r["last_at"] else None,
+        } for r in cur.fetchall()]})
+    finally:
+        try:
+            cur.close(); conn.rollback()
+        except Exception:
+            pass
+
+
+@app.route("/api/admin/email/test", methods=["POST"])
+@_admin_required
+def admin_email_test():
+    """Send one message to the admin's own address.
+
+    Uses a campaign id suffixed '__test' so a test can be repeated and never
+    consumes anyone's slot in the real campaign's ledger.
+    """
+    em = _email_mod()
+    admin = current_user()
+    body    = request.get_json(silent=True) or {}
+    subject = (body.get("subject") or "").strip()
+    text    = (body.get("body") or "").strip()
+    to      = (admin or {}).get("email")
+    if not to:
+        return jsonify({"error": "your admin account has no email address"}), 400
+
+    problems = em.preflight("test", subject, text)
+    if problems:
+        return jsonify({"error": "; ".join(problems)}), 400
+
+    postal = (os.getenv("POSTAL_ADDRESS") or "").strip()
+    html, txt = em.render(subject, em.body_to_html(text), (admin or {}).get("id"), postal)
+    pid, err = em.send_one(to, subject, html, txt, (admin or {}).get("id"))
+    if err:
+        return jsonify({"error": err}), 502
+    return jsonify({"ok": True, "to": to, "id": pid})
+
+
+@app.route("/api/admin/email/send", methods=["POST"])
+@_admin_required
+def admin_email_send():
+    """Start a real campaign on a background thread."""
+    em = _email_mod()
+    body     = request.get_json(silent=True) or {}
+    campaign = (body.get("campaign") or "").strip()
+    subject  = (body.get("subject") or "").strip()
+    text     = (body.get("body") or "").strip()
+    confirm  = body.get("confirm")
+
+    problems = em.preflight(campaign, subject, text)
+    if problems:
+        return jsonify({"error": "; ".join(problems)}), 400
+
+    conn = get_conn(); cur = conn.cursor()
+    people = em.audience(cur, campaign)
+    cur.close(); conn.rollback()
+    n = len(people)
+    if n == 0:
+        return jsonify({"error": "nobody to send to — everyone has already "
+                                 "received this campaign or opted out"}), 400
+
+    # The client must echo back the exact recipient count. A plain yes/no is
+    # too easy to click through for something with no undo; typing the number
+    # requires having read it.
+    if str(confirm) != str(n):
+        return jsonify({"error": f"confirmation mismatch — type {n} to send"}), 400
+
+    with _EMAIL_LOCK:
+        run = _EMAIL_RUNS.get(campaign)
+        if run and run.get("running"):
+            return jsonify({"error": "this campaign is already sending"}), 409
+        _EMAIL_RUNS[campaign] = {"running": True, "done": 0, "total": n,
+                                 "sent": 0, "failed": 0}
+
+    def _progress(p):
+        with _EMAIL_LOCK:
+            _EMAIL_RUNS[campaign].update(p)
+
+    def _run():
+        try:
+            res = em.send_campaign(campaign, subject, text, on_progress=_progress,
+                                   database_url=DATABASE_URL)
+            with _EMAIL_LOCK:
+                _EMAIL_RUNS[campaign].update(res or {})
+        except Exception as e:
+            print(f"[email] campaign {campaign} crashed: {e}", flush=True)
+            with _EMAIL_LOCK:
+                _EMAIL_RUNS[campaign]["error"] = str(e)[:200]
+        finally:
+            with _EMAIL_LOCK:
+                _EMAIL_RUNS[campaign]["running"] = False
+
+    threading.Thread(target=_run, daemon=True,
+                     name=f"email-{campaign}").start()
+    print(f"[email] campaign {campaign} started → {n} recipients", flush=True)
+    return jsonify({"ok": True, "started": True, "total": n})
+
+
+@app.route("/api/admin/email/status")
+@_admin_required
+def admin_email_status():
+    campaign = (request.args.get("campaign") or "").strip()
+    with _EMAIL_LOCK:
+        run = dict(_EMAIL_RUNS.get(campaign) or {})
+    # The in-memory run belongs to one gunicorn worker; a poll routed elsewhere
+    # sees nothing. email_sends is the shared truth, so read it either way.
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""SELECT COUNT(*) AS total,
+                              COUNT(*) FILTER (WHERE status='sent')         AS sent,
+                              COUNT(*) FILTER (WHERE status LIKE 'failed%%') AS failed
+                         FROM email_sends WHERE campaign=%s""", (campaign,))
+        led = cur.fetchone()
+    finally:
+        try:
+            cur.close(); conn.rollback()
+        except Exception:
+            pass
+    run.update({"ledgerTotal": led["total"], "ledgerSent": led["sent"],
+                "ledgerFailed": led["failed"]})
+    return jsonify(run)
+
+
 # ━━━ Email opt-out ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #
 # Every product email carries an unsubscribe link in its footer. CAN-SPAM

@@ -164,6 +164,34 @@ body::before {
   border:1px solid var(--rule); border-radius:6px; cursor:pointer; transition:all .15s; }
 .btn-more:hover { border-color:var(--orange); color:var(--orange); }
 
+/* ── Email composer ── */
+.mail-grid { display:grid; grid-template-columns:1fr 280px; gap:20px; align-items:start; }
+@media (max-width:860px) { .mail-grid { grid-template-columns:1fr; } }
+.mail-field { margin-bottom:14px; }
+.mail-label { display:block; font-family:var(--ff-mono); font-size:10px;
+  letter-spacing:.07em; text-transform:uppercase; color:var(--ink3); margin-bottom:5px; }
+.mail-hint { font-size:11px; color:var(--ink4); margin-top:4px; line-height:1.45; }
+.mail-body { width:100%; min-height:260px; resize:vertical; font-family:var(--ff-sans);
+  font-size:14px; line-height:1.6; padding:12px 14px; background:var(--bg-card);
+  border:1px solid var(--rule); border-radius:6px; color:var(--ink); outline:none; }
+.mail-body:focus { border-color:var(--orange); }
+.mail-stat { display:flex; justify-content:space-between; gap:10px; padding:7px 0;
+  font-family:var(--ff-mono); font-size:11px; color:var(--ink3);
+  border-bottom:1px solid var(--paper3); }
+.mail-stat:last-child { border-bottom:none; }
+.mail-stat b { color:var(--ink); font-weight:500; }
+.mail-actions { display:flex; flex-direction:column; gap:9px; margin-top:16px; }
+.btn-danger { font-family:var(--ff-mono); font-size:11px; letter-spacing:.05em;
+  text-transform:uppercase; padding:10px 16px; background:var(--red); color:#fff;
+  border:none; border-radius:6px; cursor:pointer; transition:opacity .15s; }
+.btn-danger:hover { opacity:.85; }
+.btn-danger:disabled, .btn-search:disabled { opacity:.4; cursor:not-allowed; }
+.mail-warn { margin-top:10px; padding:10px 12px; border-radius:6px; font-size:12px;
+  line-height:1.5; background:rgba(192,57,43,.08); color:var(--red); }
+.mail-prog { margin-top:12px; font-family:var(--ff-mono); font-size:11px; color:var(--ink3); }
+.mail-bar { height:4px; background:var(--paper3); border-radius:2px; overflow:hidden; margin-top:6px; }
+.mail-bar span { display:block; height:100%; background:var(--orange); transition:width .3s; }
+
 /* ── Gift Pro ── */
 .gift-grid { display:grid; grid-template-columns:1fr auto auto; gap:10px; align-items:center; }
 @media (max-width:560px) { .gift-grid { grid-template-columns:1fr; } }
@@ -224,6 +252,7 @@ body::before {
       <button class="nav-tab active" data-tab="insights" onclick="showTab('insights')">Insights</button>
       <button class="nav-tab" data-tab="moderation" onclick="showTab('moderation')">Moderation</button>
       <button class="nav-tab" data-tab="pro" onclick="showTab('pro')">Pro</button>
+      <button class="nav-tab" data-tab="email" onclick="showTab('email')">Email</button>
     </div>
     <span class="asof" id="asof"></span>
   </div>
@@ -274,9 +303,186 @@ function showTab(tab) {
     insightsTimer = setInterval(renderInsights, 60000);  // live refresh
   } else if (tab === 'pro') {
     renderPro();
+  } else if (tab === 'email') {
+    renderEmail();
   } else {
     renderPage();
   }
+}
+
+// ── Email composer ────────────────────────────────────────────
+// Shares the backend send path with the CLI, so opt-outs, the never-twice
+// ledger, the unsubscribe link and the postal-address check all apply here
+// too. The only thing this adds is a UI, and the only thing the UI adds is
+// the risk of a careless click — hence the typed confirmation.
+let mailPoll = null;
+
+function renderEmail() {
+  document.getElementById('page').innerHTML = `
+    <div class="page-header">
+      <div class="page-title">Email</div>
+      <div class="page-sub">Write once, send to everyone who hasn't opted out.</div>
+    </div>
+    <div class="mail-grid">
+      <div class="panel">
+        <div class="mail-field">
+          <label class="mail-label" for="mail-campaign">Campaign id</label>
+          <input class="search-input" id="mail-campaign" style="width:100%"
+                 placeholder="season_opener_2026" autocomplete="off"
+                 oninput="mailAudience()">
+          <div class="mail-hint">The never-send-twice key. Reusing an id skips
+            anyone it already reached — which is what lets a half-finished send resume.</div>
+        </div>
+        <div class="mail-field">
+          <label class="mail-label" for="mail-subject">Subject</label>
+          <input class="search-input" id="mail-subject" style="width:100%"
+                 placeholder="The NBA season starts Tuesday" autocomplete="off">
+        </div>
+        <div class="mail-field">
+          <label class="mail-label" for="mail-body">Body</label>
+          <textarea class="mail-body" id="mail-body"
+            placeholder="Plain text. Leave a blank line between paragraphs."></textarea>
+          <div class="mail-hint">Plain text only &mdash; it's wrapped in the ydkball
+            template with your unsubscribe link and postal address.</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Audience</h3>
+        <div id="mail-stats"><div class="table-state">Enter a campaign id</div></div>
+        <div class="mail-actions">
+          <button class="btn-search" id="mail-test" onclick="mailTest()">Send test to me</button>
+          <button class="btn-danger" id="mail-send" onclick="mailSendAll()" disabled>Send to everyone</button>
+        </div>
+        <div id="mail-prog"></div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:20px">
+      <h3>Past campaigns</h3>
+      <div id="mail-history"><div class="table-state">Loading…</div></div>
+    </div>`;
+  mailAudience();
+  mailHistory();
+}
+
+async function mailAudience() {
+  const c = document.getElementById('mail-campaign').value.trim();
+  const box = document.getElementById('mail-stats');
+  const sendBtn = document.getElementById('mail-send');
+  if (!c) {
+    box.innerHTML = '<div class="table-state">Enter a campaign id</div>';
+    sendBtn.disabled = true; return;
+  }
+  try {
+    const r = await fetch('/api/admin/email/audience?campaign=' + encodeURIComponent(c));
+    const d = await r.json();
+    const problems = (d.problems || []).filter(p => !/campaign id|subject|body/i.test(p));
+    box.innerHTML = `
+      <div class="mail-stat"><span>Will receive</span><b>${nfmt(d.recipients)}</b></div>
+      <div class="mail-stat"><span>Apple relay</span><b>${nfmt(d.appleRelay)}</b></div>
+      <div class="mail-stat"><span>Opted out</span><b>${nfmt(d.optedOut)}</b></div>
+      <div class="mail-stat"><span>Already sent</span><b>${nfmt(d.alreadySent)}</b></div>
+      ${problems.length ? `<div class="mail-warn">${problems.map(esc).join('<br>')}</div>` : ''}`;
+    sendBtn.disabled = d.recipients === 0 || problems.length > 0;
+    sendBtn.textContent = d.recipients ? `Send to ${nfmt(d.recipients)}` : 'Nobody to send to';
+    mailStatus(c);
+  } catch (e) {
+    box.innerHTML = '<div class="table-state">Could not load audience</div>';
+  }
+}
+
+async function mailTest() {
+  const btn = document.getElementById('mail-test');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const r = await fetch('/api/admin/email/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subject: document.getElementById('mail-subject').value,
+        body:    document.getElementById('mail-body').value,
+      }),
+    });
+    const d = await r.json();
+    toast(r.ok ? `Test sent to ${d.to}` : (d.error || 'Test failed'));
+  } catch (e) { toast('Test failed'); }
+  btn.disabled = false; btn.textContent = 'Send test to me';
+}
+
+async function mailSendAll() {
+  const campaign = document.getElementById('mail-campaign').value.trim();
+  const r0 = await fetch('/api/admin/email/audience?campaign=' + encodeURIComponent(campaign));
+  const { recipients } = await r0.json();
+  // Typed count, not a yes/no box. There is no unsend, so the confirmation
+  // should require having actually read the number.
+  const typed = prompt(
+    `This sends a real email to ${recipients} people and cannot be undone.\n\n` +
+    `Type ${recipients} to confirm:`);
+  if (typed === null) return;
+  if (String(typed).trim() !== String(recipients)) { toast('Confirmation did not match'); return; }
+
+  const btn = document.getElementById('mail-send');
+  btn.disabled = true; btn.textContent = 'Starting…';
+  try {
+    const r = await fetch('/api/admin/email/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        campaign,
+        subject: document.getElementById('mail-subject').value,
+        body:    document.getElementById('mail-body').value,
+        confirm: String(recipients),
+      }),
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || 'Could not start'); btn.disabled = false; return; }
+    toast(`Sending to ${d.total}…`);
+    mailStatus(campaign, true);
+  } catch (e) { toast('Could not start'); btn.disabled = false; }
+}
+
+async function mailStatus(campaign, startPolling) {
+  if (mailPoll && startPolling) { clearInterval(mailPoll); mailPoll = null; }
+  const draw = async () => {
+    try {
+      const r = await fetch('/api/admin/email/status?campaign=' + encodeURIComponent(campaign));
+      const d = await r.json();
+      const box = document.getElementById('mail-prog');
+      if (!box) { clearInterval(mailPoll); mailPoll = null; return; }
+      if (!d.total && !d.ledgerTotal) { box.innerHTML = ''; return; }
+      const done = d.done || d.ledgerTotal || 0;
+      const total = d.total || d.ledgerTotal || 1;
+      const pct = Math.min(100, Math.round(100 * done / total));
+      box.innerHTML = `
+        <div class="mail-prog">${d.running ? 'Sending' : 'Last run'} &middot;
+          ${nfmt(d.ledgerSent ?? d.sent ?? 0)} sent${(d.ledgerFailed || d.failed)
+            ? ` &middot; ${nfmt(d.ledgerFailed ?? d.failed)} failed` : ''}
+          <div class="mail-bar"><span style="width:${pct}%"></span></div>
+        </div>`;
+      if (!d.running && mailPoll) {
+        clearInterval(mailPoll); mailPoll = null;
+        mailHistory(); mailAudience();
+      }
+    } catch (e) {}
+  };
+  await draw();
+  if (startPolling && !mailPoll) mailPoll = setInterval(draw, 3000);
+}
+
+async function mailHistory() {
+  const box = document.getElementById('mail-history');
+  if (!box) return;
+  try {
+    const r = await fetch('/api/admin/email/campaigns');
+    const { campaigns } = await r.json();
+    if (!campaigns.length) { box.innerHTML = '<div class="table-state">Nothing sent yet</div>'; return; }
+    box.innerHTML = `<table class="review-table"><thead><tr>
+        <th>Campaign</th><th>Sent</th><th>Failed</th><th>Last</th></tr></thead><tbody>
+      ${campaigns.map(c => `<tr>
+        <td>${esc(c.campaign)}</td><td>${nfmt(c.sent)}</td>
+        <td>${c.failed ? `<span style="color:var(--red)">${nfmt(c.failed)}</span>` : '0'}</td>
+        <td class="td-date">${c.lastAt ? fmtDate(c.lastAt) : '—'}</td></tr>`).join('')}
+      </tbody></table>`;
+  } catch (e) { box.innerHTML = '<div class="table-state">Could not load</div>'; }
 }
 
 // ── Gift Pro ──────────────────────────────────────────────────
