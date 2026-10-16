@@ -14651,6 +14651,135 @@ def impact_page():
     return app.send_static_file("impact.html")
 
 
+# ━━━ Email opt-out ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# Every product email carries an unsubscribe link in its footer. CAN-SPAM
+# requires one that works without making the recipient sign in, so the link
+# authenticates itself: ?u=<id>&t=<hmac of id>. Guessing another user's token
+# means forging an HMAC, and the id alone is useless.
+#
+# The link unsubscribes on GET rather than asking for a confirming click. That
+# is what the bulk-sender rules expect, and the cost is that a mail scanner
+# prefetching links can opt someone out by accident — which is why the
+# confirmation page always offers a one-click resubscribe.
+
+def _unsub_token(user_id) -> str:
+    import hmac, hashlib
+    secret = (app.secret_key or "").encode() or b"ydkball-dev"
+    return hmac.new(secret, f"unsub:{user_id}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def _unsub_link(user_id) -> str:
+    """Absolute URL for an email footer."""
+    return f"https://ydkball.net/unsubscribe?u={user_id}&t={_unsub_token(user_id)}"
+
+
+def _unsub_page(title: str, body: str, action: str = "") -> str:
+    # Self-contained rather than a static file: this renders for someone who is
+    # not signed in, arriving from their mail client, and it must not depend on
+    # the app shell loading.
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title} · ydkball</title>
+<link rel="stylesheet" href="/site-nav.css">
+<style>
+  body {{ margin:0; min-height:100vh; display:flex; align-items:center;
+         justify-content:center; background:#f5f1e8; color:#1a1a1a;
+         font-family:'Instrument Sans',system-ui,sans-serif; padding:24px; }}
+  .card {{ background:#fff; border:1px solid #e0d9cc; border-radius:12px;
+          padding:36px 32px; max-width:440px; text-align:center; }}
+  h1 {{ font-family:'DM Serif Display',Georgia,serif; font-size:1.6rem;
+       margin:0 0 12px; font-weight:400; }}
+  p {{ color:#5a5248; font-size:14px; line-height:1.55; margin:0 0 20px; }}
+  a.btn {{ display:inline-block; padding:10px 20px; border-radius:6px;
+          background:#e67e22; color:#fff; text-decoration:none; font-size:14px;
+          font-weight:600; }}
+  a.home {{ display:block; margin-top:18px; color:#8a8073; font-size:12px; }}
+  @media (prefers-color-scheme: dark) {{
+    body {{ background:#15130f; color:#f0ebe3; }}
+    .card {{ background:#201d18; border-color:#35302a; }}
+    p {{ color:#a79e91; }}
+  }}
+</style></head><body><div class="card">
+<h1>{title}</h1><p>{body}</p>{action}
+<a class="home" href="https://ydkball.net">ydkball.net</a>
+</div></body></html>"""
+
+
+@app.route("/unsubscribe")
+def unsubscribe():
+    uid   = (request.args.get("u") or "").strip()
+    token = (request.args.get("t") or "").strip()
+    undo  = request.args.get("undo") == "1"
+
+    import hmac as _hmac
+    if not uid.isdigit() or not _hmac.compare_digest(token, _unsub_token(uid)):
+        return _unsub_page(
+            "Link not recognised",
+            "This unsubscribe link is invalid or incomplete. If you copied it "
+            "from an email, try tapping the link directly instead."), 400
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        if undo:
+            cur.execute("""UPDATE users SET email_opt_out = FALSE, email_opt_out_at = NULL
+                            WHERE id = %s RETURNING email""", (int(uid),))
+        else:
+            cur.execute("""UPDATE users SET email_opt_out = TRUE, email_opt_out_at = NOW()
+                            WHERE id = %s RETURNING email""", (int(uid),))
+        row = cur.fetchone()
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+
+    if not row:
+        return _unsub_page("Account not found",
+                           "We couldn't find an account for this link."), 404
+
+    email = row["email"] or "your address"
+    if undo:
+        return _unsub_page(
+            "You're back on the list",
+            f"{email} will receive ydkball product emails again.")
+    return _unsub_page(
+        "Unsubscribed",
+        f"{email} won't receive any more ydkball product emails. "
+        "Notifications you've set up inside the app are unaffected.",
+        f'<a class="btn" href="/unsubscribe?u={uid}&t={token}&undo=1">'
+        "Undo — resubscribe me</a>")
+
+
+def mailable_users(cur, only_active_days: int = None):
+    """Who may receive a product email.
+
+    Excludes anyone who has opted out. Apple Private Relay addresses are
+    returned but flagged: mail to @privaterelay.appleid.com BOUNCES unless the
+    sending domain is registered with Apple (Developer portal → Sign in with
+    Apple → Email Communication). About a fifth of the list is in that bucket,
+    so sending without registering silently loses them.
+    """
+    sql = """
+        SELECT id, email, display_name,
+               (email ILIKE '%%privaterelay.appleid.com') AS is_apple_relay
+          FROM users
+         WHERE email IS NOT NULL AND email <> ''
+           AND email_opt_out = FALSE
+    """
+    params = []
+    if only_active_days:
+        sql += " AND created_at > NOW() - (%s * INTERVAL '1 day')"
+        params.append(only_active_days)
+    sql += " ORDER BY id"
+    cur.execute(sql, params)
+    return cur.fetchall()
+
+
 @app.route("/privacy")
 @app.route("/privacy.html")
 def privacy_page():
