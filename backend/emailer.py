@@ -133,6 +133,11 @@ def send_one(to_email, subject, html, text, user_id):
             data=json.dumps({
                 "from": _env("RESEND_FROM", "ydkball <hello@ydkball.net>"),
                 "to": [to_email], "subject": subject, "html": html, "text": text,
+                # From must stay on the Resend-verified domain or DKIM stops
+                # aligning. REPLY_TO lets replies go somewhere else — useful
+                # when no mailbox exists at that domain yet, because a reply to
+                # an address nobody reads is worse than no reply address.
+                **({"reply_to": [_env("REPLY_TO")]} if _env("REPLY_TO") else {}),
                 "headers": {
                     "List-Unsubscribe": f"<{unsub_url(user_id)}>",
                     "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
