@@ -28,7 +28,16 @@ TEMPLATES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "emails")
 
 
 def _env(k, d=""):
-    return (os.getenv(k) or d).strip()
+    """Env var, with surrounding quotes removed.
+
+    Railway's raw variable editor stores KEY="value" with the quotes as part
+    of the value, and a quoted POSTAL_ADDRESS renders literally in the footer
+    of every email. Strip them here rather than relying on how it was pasted.
+    """
+    v = (os.getenv(k) or d).strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+        v = v[1:-1].strip()
+    return v
 
 
 def unsub_url(user_id) -> str:
@@ -39,6 +48,23 @@ def unsub_url(user_id) -> str:
     return f"https://ydkball.net/unsubscribe?u={user_id}&t={tok}"
 
 
+FOOTER_MARK = "You're getting this because"
+
+
+def strip_footer(body: str) -> str:
+    """Drop a footer the author pasted in with the copy.
+
+    The template appends its own unsubscribe line and postal address. Copy
+    taken from season_opener.txt carries one too, so without this the reader
+    sees both — which is what the first live test produced.
+    """
+    for mark in (FOOTER_MARK, "Unsubscribe:"):
+        i = (body or "").find(mark)
+        if i != -1:
+            body = body[:i]
+    return (body or "").rstrip()
+
+
 def body_to_html(body: str) -> str:
     """Plain text from the composer → paragraphs.
 
@@ -47,7 +73,7 @@ def body_to_html(body: str) -> str:
     email.
     """
     out = []
-    for para in (body or "").replace("\r\n", "\n").split("\n\n"):
+    for para in strip_footer(body).replace("\r\n", "\n").split("\n\n"):
         para = para.strip()
         if not para:
             continue
