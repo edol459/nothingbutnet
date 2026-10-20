@@ -140,15 +140,41 @@ def render(subject: str, body_html: str, user_id, postal: str,
 
 
 def audience(cur, campaign: str, only_email: str = None, include_relay=True):
-    """Everyone eligible for this campaign who has not already received it."""
+    """Everyone eligible for this campaign who has not already received it.
+
+    Retries HTTP failures, skips ambiguous ones. A 4xx/5xx from the provider
+    means the message was refused and definitively not delivered, so re-running
+    the campaign picks those people back up — which is what makes a run that
+    died on a rate limit recoverable. 'sent', 'sending' and network errors are
+    all excluded, because none of them can be distinguished from a successful
+    delivery.
+
+    This matters: on 2026-10-20 a send hit Resend's daily quota after 196 of
+    346, and without this the remaining 151 would have been permanently
+    skipped by their own failure rows.
+    """
     sql = """
         SELECT u.id, u.email, u.display_name,
                (u.email ILIKE '%%privaterelay.appleid.com') AS relay
           FROM users u
          WHERE u.email IS NOT NULL AND u.email <> ''
            AND u.email_opt_out = FALSE
-           AND NOT EXISTS (SELECT 1 FROM email_sends e
-                            WHERE e.campaign = %s AND e.user_id = u.id)
+           AND NOT EXISTS (
+                 SELECT 1 FROM email_sends e
+                  WHERE e.campaign = %s AND e.user_id = u.id
+                    AND (
+                      -- Delivered. Never again, under any circumstances.
+                      e.status = 'sent'
+                      -- Claimed but never resolved: the process died between
+                      -- the INSERT and the API call, so we cannot tell whether
+                      -- the message went out. Excluded deliberately — a silent
+                      -- double-send is worse than a missing one.
+                      OR e.status = 'sending'
+                      -- A network failure is equally ambiguous: the request may
+                      -- have been delivered with the response lost on the way
+                      -- back. Also excluded.
+                      OR e.status LIKE 'failed:network%%'
+                    ))
     """
     p = [campaign]
     if only_email:

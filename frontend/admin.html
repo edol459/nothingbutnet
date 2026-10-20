@@ -462,6 +462,12 @@ async function mailStatus(campaign, startPolling) {
         clearInterval(mailPoll); mailPoll = null;
         mailHistory(); mailAudience();
       }
+      // Reattach to a run already in progress. The poll interval lived in the
+      // page, so a refresh mid-send left the bar frozen and the send looking
+      // dead when it was fine — which is exactly what happened on 2026-10-20.
+      if (d.running && !mailPoll) {
+        mailPoll = setInterval(draw, 3000);
+      }
     } catch (e) {}
   };
   await draw();
