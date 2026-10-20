@@ -66,21 +66,59 @@ def strip_footer(body: str) -> str:
 
 
 def body_to_html(body: str) -> str:
-    """Plain text from the composer → paragraphs.
+    """Composer text → email HTML.
 
-    Escaped rather than passed through: the composer is a textarea, so a stray
-    `<` is a typo, not markup, and should not silently eat the rest of the
-    email.
+    Everything is escaped first, then a small whitelist is restored, so a stray
+    `<` is still a typo rather than markup that eats the rest of the message.
+    What survives:
+
+        <b>…</b>  <strong>  <i>  <em>        and  **bold**
+
+    A block whose FIRST LINE is entirely bold renders as a heading with the
+    rest beneath it, tighter. That is how feature lists get written in practice
+    — a short label, then a sentence — and it saves hand-building each one.
+
+    Unclosed bold is closed at end of line. One missing </b> would otherwise
+    bold every remaining section.
     """
+    import re
+
+    P_BODY = ('<p style="margin:0 0 16px;font:400 15px/1.6 -apple-system,Segoe UI,'
+              'sans-serif;color:#4a443c;">')
+    P_HEAD = ('<p style="margin:0 0 3px;font:600 15px/1.45 -apple-system,Segoe UI,'
+              'sans-serif;color:#1a1a1a;">')
+    P_UNDER = ('<p style="margin:0 0 16px;font:400 14px/1.6 -apple-system,Segoe UI,'
+               'sans-serif;color:#6b6358;">')
+
+    def inline(s: str) -> str:
+        # quote=False: this is a text node, not an attribute, so escaping
+        # apostrophes to &#x27; only adds noise.
+        s = _html.escape(s, quote=False)
+        for tag in ("b", "strong", "i", "em"):
+            s = s.replace(f"&lt;{tag}&gt;", f"<{tag}>").replace(f"&lt;/{tag}&gt;", f"</{tag}>")
+        s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+        # Close what the author left open, per line.
+        for tag in ("b", "strong", "i", "em"):
+            if s.count(f"<{tag}>") > s.count(f"</{tag}>"):
+                s += f"</{tag}>" * (s.count(f"<{tag}>") - s.count(f"</{tag}>"))
+        return s.strip()
+
+    def is_all_bold(s: str) -> bool:
+        return bool(re.fullmatch(r"<(b|strong)>.*</(b|strong)>[:：]?", s.strip()))
+
     out = []
-    for para in strip_footer(body).replace("\r\n", "\n").split("\n\n"):
-        para = para.strip()
-        if not para:
+    for block in re.split(r"\n\s*\n", strip_footer(body).replace("\r\n", "\n")):
+        lines = [ln.strip() for ln in block.split("\n") if ln.strip()]
+        if not lines:
             continue
-        out.append(
-            '<p style="margin:0 0 16px;font:400 15px/1.6 -apple-system,Segoe UI,'
-            f'sans-serif;color:#4a443c;">{_html.escape(para).replace(chr(10), "<br>")}</p>'
-        )
+        head = inline(lines[0])
+        if len(lines) > 1 and is_all_bold(head):
+            out.append(P_HEAD + head + "</p>")
+            out.append(P_UNDER + "<br>".join(inline(l) for l in lines[1:]) + "</p>")
+        elif is_all_bold(head) and len(lines) == 1:
+            out.append(P_HEAD + head + "</p>")
+        else:
+            out.append(P_BODY + "<br>".join(inline(l) for l in lines) + "</p>")
     return "\n".join(out)
 
 

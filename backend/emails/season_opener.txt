@@ -11,12 +11,11 @@ A few things are new since you last opened it:
   stamp the clock when something happens, and finish it when the game ends.
 
   A watchlist that marks your calendar
-  Follow a team and its games show up on your schedule. Flag the ones you
-  really don't want to miss.
+  Follow a team and its games show up on your schedule. Flag the ones you really don't want to miss.
 
   Your ticket stubs
-  Games you went to in person now live on your profile as a collection of
-  ticket stubs you can flip through.
+  Games you went to in person now live on your profile as a 
+  collection of ticket stubs you can flip through.
 
   Preseason ballots
   Call MVP, Rookie of the Year, and the champion before the season starts.
