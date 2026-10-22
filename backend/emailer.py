@@ -255,9 +255,32 @@ def send_campaign(campaign, subject, body, only_email=None, include_relay=True,
     sent = failed = skipped = 0
     for i, p in enumerate(people, 1):
         try:
-            cur.execute("""INSERT INTO email_sends (campaign, user_id, email, status)
-                           VALUES (%s,%s,%s,'sending')""", (campaign, p["id"], p["email"]))
+            # Claim the recipient before sending. A plain INSERT is not enough:
+            # a retry already HAS a row, so it raised UniqueViolation and was
+            # skipped — which is why the 2026-10-22 re-run reached only the 26
+            # brand-new users and silently passed over all 151 that the quota
+            # had refused two days earlier. audience() offered them and this
+            # step threw them away.
+            #
+            # The WHERE below is the real dedupe guard, and it mirrors
+            # audience() exactly: a provider refusal may be retried, while
+            # 'sent', 'sending' and network errors never are, because none of
+            # those can be distinguished from a delivery. If it excludes the
+            # row, nothing is returned and the recipient is skipped.
+            cur.execute("""
+                INSERT INTO email_sends (campaign, user_id, email, status)
+                VALUES (%s,%s,%s,'sending')
+                ON CONFLICT (campaign, user_id) DO UPDATE
+                   SET status = 'sending', sent_at = NOW()
+                 WHERE email_sends.status LIKE 'failed:%%'
+                   AND email_sends.status NOT LIKE 'failed:network%%'
+             RETURNING user_id
+            """, (campaign, p["id"], p["email"]))
+            claimed = cur.fetchone()
             conn.commit()
+            if not claimed:
+                skipped += 1
+                continue
         except psycopg2.errors.UniqueViolation:
             conn.rollback(); skipped += 1; continue
 
