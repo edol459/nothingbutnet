@@ -3711,14 +3711,28 @@ def preview_team_stats(abbr):
               SUM(fga * gp)  AS tot_fga,
               SUM(fg3m * gp) AS tot_fg3m,
               SUM(fg3a * gp) AS tot_fg3a,
-              MAX(gp)        AS max_gp
+              MAX(gp)        AS max_gp,
+              MAX(ps.season) AS season
             FROM player_seasons ps
             JOIN players p ON ps.player_id = p.player_id
             WHERE ps.team_abbr = %s          -- ← was p.team_abbreviation
-              AND ps.season = %s
               AND ps.season_type = %s
               AND ps.gp >= 5
-        """, (abbr, get_current_season(), "Regular Season"))
+              -- The most recent season this team actually has qualifying
+              -- players in, NOT get_current_season(). Pinning to the current
+              -- season and demanding gp >= 5 returns nothing for the first two
+              -- weeks of every season: on 2026-10-22 every team had max_gp = 1,
+              -- so every preview answered {"error":"no data"}.
+              --
+              -- Same trap the game posters hit (see the note above
+              -- team_candidates) and the same fix the WNBA twin already uses:
+              -- show last season until this one has volume behind it, then
+              -- switch over on its own.
+              AND ps.season = (
+                  SELECT MAX(season) FROM player_seasons
+                   WHERE team_abbr = %s AND season_type = %s AND gp >= 5
+              )
+        """, (abbr, "Regular Season", abbr, "Regular Season"))
         row = cur.fetchone()
         cur.close()
         conn.close()   # ← also close the connection
@@ -3731,6 +3745,9 @@ def preview_team_stats(abbr):
 
         return jsonify({
             "abbr":    abbr,
+            # Which season these came from, so a client can say so rather than
+            # implying they are the current one.
+            "season":  row.get("season"),
             "ppg":     round(row["tot_pts"]  / max_gp, 1) if row["tot_pts"]  else None,
             "rpg":     round(row["tot_reb"]  / max_gp, 1) if row["tot_reb"]  else None,
             "apg":     round(row["tot_ast"]  / max_gp, 1) if row["tot_ast"]  else None,
