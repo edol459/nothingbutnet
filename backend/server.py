@@ -16962,27 +16962,76 @@ def browse_players():
             # who he played for then, and who he plays for now. The filter stays
             # on the season's team, because filtering a season-scoped stats table
             # by today's roster would return players who never suited up for it.
-            conds  = ["ps.season = %s", "ps.season_type = 'Regular Season'"]
-            params = [season]
-            if q:        conds.append("p.player_name ILIKE %s");  params.append(f"%{q}%")
-            if team:     conds.append("ps.team_abbr ILIKE %s");   params.append(team)
-            if position: conds.append("p.position ILIKE %s");     params.append(f"{position}%")
-            inner_where = " AND ".join(conds)
-            cur.execute(f"""
-                SELECT * FROM (
-                    SELECT DISTINCT ON (p.player_id)
-                           p.player_id AS person_id, p.player_name, p.position,
-                           ps.team_abbr,
-                           NULLIF(p.current_team, ps.team_abbr) AS current_team,
-                           ps.pts, ps.reb, ps.ast, ps.stl, ps.blk, ps.gp
-                    FROM players p
-                    JOIN player_seasons ps ON p.player_id = ps.player_id
-                    WHERE {inner_where}
-                    ORDER BY p.player_id
-                ) t
-                ORDER BY {order_sql}
-                LIMIT %s OFFSET %s
-            """, params + [limit + 1, offset])
+            # Is this the season currently being played? If so the roster, not
+            # the stats table, decides who exists.
+            try:
+                import sys as _s
+                _s.path.insert(0, os.path.join(os.path.dirname(__file__), "ingest"))
+                import season_util as _su
+                _is_live_season = (season == _su.roster_season("nba"))
+            except Exception:
+                _is_live_season = (season == latest)
+
+            if _is_live_season:
+                # An INNER JOIN here empties the page in October. player_seasons
+                # only gains a row once a player has actually appeared — on
+                # 2026-10-22 that was 68 players out of 777 on rosters — so every
+                # rookie and everyone yet to play was invisible, which is what
+                # made Browse look broken rather than early.
+                #
+                # CLAUDE.md's rule applies: stats resolve from played games,
+                # membership resolves from the schedule. So the roster drives the
+                # row list and stats ride along when they exist.
+                conds  = ["(ps.player_id IS NOT NULL OR p.current_team IS NOT NULL)"]
+                params = [season]          # consumed by the LEFT JOIN below
+                if q:        conds.append("p.player_name ILIKE %s");  params.append(f"%{q}%")
+                if team:     conds.append("COALESCE(ps.team_abbr, p.current_team) ILIKE %s"); params.append(team)
+                if position: conds.append("p.position ILIKE %s");     params.append(f"{position}%")
+                inner_where = " AND ".join(conds)
+                cur.execute(f"""
+                    SELECT * FROM (
+                        SELECT DISTINCT ON (p.player_id)
+                               p.player_id AS person_id, p.player_name, p.position,
+                               COALESCE(ps.team_abbr, p.current_team) AS team_abbr,
+                               NULLIF(p.current_team,
+                                      COALESCE(ps.team_abbr, p.current_team)) AS current_team,
+                               ps.pts, ps.reb, ps.ast, ps.stl, ps.blk, ps.gp
+                        FROM players p
+                        LEFT JOIN player_seasons ps
+                               ON ps.player_id   = p.player_id
+                              AND ps.season      = %s
+                              AND ps.season_type = 'Regular Season'
+                        WHERE {inner_where}
+                        ORDER BY p.player_id
+                    ) t
+                    ORDER BY {order_sql}
+                    LIMIT %s OFFSET %s
+                """, params + [limit + 1, offset])
+            else:
+                # Finished season: the stats table IS the roster. Including
+                # today's rosters here would claim players suited up for seasons
+                # they were never on.
+                conds  = ["ps.season = %s", "ps.season_type = 'Regular Season'"]
+                params = [season]
+                if q:        conds.append("p.player_name ILIKE %s");  params.append(f"%{q}%")
+                if team:     conds.append("ps.team_abbr ILIKE %s");   params.append(team)
+                if position: conds.append("p.position ILIKE %s");     params.append(f"{position}%")
+                inner_where = " AND ".join(conds)
+                cur.execute(f"""
+                    SELECT * FROM (
+                        SELECT DISTINCT ON (p.player_id)
+                               p.player_id AS person_id, p.player_name, p.position,
+                               ps.team_abbr,
+                               NULLIF(p.current_team, ps.team_abbr) AS current_team,
+                               ps.pts, ps.reb, ps.ast, ps.stl, ps.blk, ps.gp
+                        FROM players p
+                        JOIN player_seasons ps ON p.player_id = ps.player_id
+                        WHERE {inner_where}
+                        ORDER BY p.player_id
+                    ) t
+                    ORDER BY {order_sql}
+                    LIMIT %s OFFSET %s
+                """, params + [limit + 1, offset])
 
         rows     = cur.fetchall()
         has_more = len(rows) > limit
@@ -17162,9 +17211,9 @@ def get_player_profile(person_id):
                            AVG(fg3m::float)                                     AS fg3m,
                            AVG(fg3a::float)                                     AS fg3a,
                            CASE WHEN SUM(fga) > 0
-                                THEN ROUND(SUM(fgm)::numeric / SUM(fga), 3) END AS fg_pct,
+                                THEN ROUND(SUM(fgm)::numeric / SUM(fga)::numeric, 3) END AS fg_pct,
                            CASE WHEN SUM(fg3a) > 0
-                                THEN ROUND(SUM(fg3m)::numeric / SUM(fg3a), 3) END AS fg3_pct,
+                                THEN ROUND(SUM(fg3m)::numeric / SUM(fg3a)::numeric, 3) END AS fg3_pct,
                            MAX(team)                                            AS team
                     FROM wnba_player_game_stats
                     WHERE player_id = %s AND season = %s
@@ -17226,9 +17275,9 @@ def get_player_profile(person_id):
                            AVG(min::float)                                      AS min,
                            AVG(fg3m::float)                                     AS fg3m,
                            CASE WHEN SUM(fga) > 0
-                                THEN ROUND(SUM(fgm)::numeric / SUM(fga), 3) END AS fg_pct,
+                                THEN ROUND(SUM(fgm)::numeric / SUM(fga)::numeric, 3) END AS fg_pct,
                            CASE WHEN SUM(fta) > 0
-                                THEN ROUND(SUM(ftm)::numeric / SUM(fta), 3) END AS ft_pct,
+                                THEN ROUND(SUM(ftm)::numeric / SUM(fta)::numeric, 3) END AS ft_pct,
                            AVG(ftm::float)                                      AS ftm,
                            AVG(fta::float)                                      AS fta,
                            AVG(ts_pct::float)                                   AS ts_pct,
