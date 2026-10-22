@@ -3716,23 +3716,24 @@ def preview_team_stats(abbr):
             FROM player_seasons ps
             JOIN players p ON ps.player_id = p.player_id
             WHERE ps.team_abbr = %s          -- ← was p.team_abbreviation
+              AND ps.season = %s
               AND ps.season_type = %s
-              AND ps.gp >= 5
-              -- The most recent season this team actually has qualifying
-              -- players in, NOT get_current_season(). Pinning to the current
-              -- season and demanding gp >= 5 returns nothing for the first two
-              -- weeks of every season: on 2026-10-22 every team had max_gp = 1,
-              -- so every preview answered {"error":"no data"}.
+              -- No GP floor. These are previews of upcoming games, so the
+              -- active season is the only one worth showing — last season's
+              -- averages describe a different team. But the old `gp >= 5`
+              -- meant nothing matched until two weeks in, when every team
+              -- still has max_gp = 1, and the endpoint answered
+              -- {"error":"no data"} for all 30 teams.
               --
-              -- Same trap the game posters hit (see the note above
-              -- team_candidates) and the same fix the WNBA twin already uses:
-              -- show last season until this one has volume behind it, then
-              -- switch over on its own.
-              AND ps.season = (
-                  SELECT MAX(season) FROM player_seasons
-                   WHERE team_abbr = %s AND season_type = %s AND gp >= 5
-              )
-        """, (abbr, "Regular Season", abbr, "Regular Season"))
+              -- Dropping the floor is also more correct arithmetic: this sums
+              -- SUM(pts*gp) and divides by the team's games, so excluding
+              -- low-GP players silently undercounted team scoring all season.
+              -- A row exists only once a player has appeared, so gp >= 1 is
+              -- already implied.
+              --
+              -- A team with no regular-season games yet has no averages, and
+              -- the empty response says so honestly.
+        """, (abbr, get_current_season(), "Regular Season"))
         row = cur.fetchone()
         cur.close()
         conn.close()   # ← also close the connection
