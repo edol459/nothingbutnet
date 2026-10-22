@@ -30,15 +30,16 @@ load_dotenv()
 import emailer  # noqa: E402
 
 CAMPAIGN = "season_opener_2026"
-SUBJECT  = "The NBA season starts Tuesday"
+SUBJECT  = "The NBA season is underway"
 
 
 def body_text():
-    with open(os.path.join(emailer.TEMPLATES, "season_opener.txt")) as f:
-        raw = f.read()
-    # The .txt template carries its own footer; emailer appends one, so strip
-    # the template's to avoid printing the unsubscribe line twice.
-    return raw.split("You're getting this because")[0].rstrip()
+    # The day-2 copy, not season_opener.txt. The first send went out on opening
+    # night and said so; everyone left is being reached after tip-off, and a
+    # mail that opens "Opening night is Tuesday" on the Thursday of week one
+    # reads as a mistake. emailer.strip_footer handles any footer in the file.
+    with open(os.path.join(emailer.TEMPLATES, "season_opener_body_day2.txt")) as f:
+        return f.read().rstrip()
 
 
 def main():
