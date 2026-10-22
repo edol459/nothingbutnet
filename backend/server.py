@@ -3614,7 +3614,12 @@ def get_top_performers():
 
     # Sort by total desc, take top 5
     all_players.sort(key=lambda x: x["total"], reverse=True)
-    top5 = all_players[:5]
+    # Ten, not five, because the clients merge NBA + WNBA into one list and
+    # then show the top 8. A merged top-8 built from two top-5s is simply wrong:
+    # on 2026-10-21 Siakam (39 PRA) was 6th in the NBA so he was never sent,
+    # while Angel Reese (36) topped the much shorter WNBA list and landed 6th
+    # overall. Whatever the clients display must be <= what each league returns.
+    top5 = all_players[:10]
 
     # Attach the crowd's avg performance rating (0–5) to each, if any exist.
     try:
@@ -16028,7 +16033,12 @@ def get_wnba_top_performers():
             print(f"[wnba] boxscore error {gid}: {e}", flush=True)
 
     all_players.sort(key=lambda x: x["total"], reverse=True)
-    top5 = all_players[:5]
+    # Ten, not five, because the clients merge NBA + WNBA into one list and
+    # then show the top 8. A merged top-8 built from two top-5s is simply wrong:
+    # on 2026-10-21 Siakam (39 PRA) was 6th in the NBA so he was never sent,
+    # while Angel Reese (36) topped the much shorter WNBA list and landed 6th
+    # overall. Whatever the clients display must be <= what each league returns.
+    top5 = all_players[:10]
 
     # Attach the crowd's avg performance rating (0–5) to each, if any exist.
     try:
