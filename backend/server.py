@@ -5704,14 +5704,20 @@ def potg_leaderboard():
                    MAX(t.league)      AS league,
                    COUNT(*) FILTER (WHERE t.votes = o.topv) AS wins,
                    SUM(t.votes)                             AS votes,
-                   (ARRAY_AGG(
+                   -- Every win in the window, newest first. This used to be
+                   -- sliced to [1:4], so a player with 5 wins could only ever
+                   -- show 4 of them and the client then trimmed to 3 — the row
+                   -- claimed "5 wins" beside three crests. The window already
+                   -- bounds this: nobody wins 30 games in 30 days, and the
+                   -- client scrolls when the list is long.
+                   ARRAY_AGG(
                         JSONB_BUILD_OBJECT(
                             'game_id',   t.game_id,
                             'away',      t.away_team_abbr,
                             'home',      t.home_team_abbr,
                             'game_date', t.game_date::text
                         ) ORDER BY t.game_date DESC
-                    ) FILTER (WHERE t.votes = o.topv))[1:4] AS recent_games
+                    ) FILTER (WHERE t.votes = o.topv) AS recent_games
               FROM tallies t JOIN tops o USING (game_id)
              GROUP BY t.person_id
             HAVING COUNT(*) FILTER (WHERE t.votes = o.topv) > 0
