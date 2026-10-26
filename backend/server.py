@@ -7004,6 +7004,151 @@ def admin_delete_review(review_id):
         return jsonify({"error": str(e)}), 500
 
 
+# ━━━ Admin: content reports ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# content_reports was write-only from launch until 2026-10-26: the table was
+# created and inserted into, and nothing ever read it. Meanwhile the app told
+# every reporter "We'll review this content within 24 hours."
+#
+# These endpoints are the other half of that promise, and the half App Store
+# guideline 1.2 actually asks about — a UGC app is expected to act on reports,
+# not merely collect them.
+
+
+@app.route("/api/admin/reports")
+@_admin_required
+def admin_list_reports():
+    """The moderation queue. Open first, newest first.
+
+    A report is shown with the content it is about, because a reporter id and a
+    review id alone cannot be judged — the decision needs the text, the author
+    and the game.
+    """
+    status = (request.args.get("status") or "open").lower()
+    limit  = min(int(request.args.get("limit", 50)), 200)
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        where = "WHERE cr.resolved_at IS NULL" if status == "open" else ""
+        cur.execute(f"""
+            SELECT cr.id, cr.created_at, cr.action, cr.resolved_at,
+                   cr.review_id,
+                   rep.id   AS reporter_id,  rep.display_name AS reporter_name,
+                   gr.user_id AS author_id,  au.display_name  AS author_name,
+                   gr.review_text, gr.rating, gr.game_id,
+                   g.home_team_abbr, g.away_team_abbr, g.game_date, g.league
+              FROM content_reports cr
+              LEFT JOIN users        rep ON rep.id = cr.reporter_id
+              LEFT JOIN game_reviews gr  ON gr.id  = cr.review_id
+              LEFT JOIN users        au  ON au.id  = gr.user_id
+              LEFT JOIN games        g   ON g.game_id = gr.game_id
+              {where}
+             ORDER BY cr.resolved_at IS NULL DESC, cr.created_at DESC
+             LIMIT %s
+        """, (limit,))
+        rows = cur.fetchall()
+
+        cur.execute("SELECT COUNT(*) AS n FROM content_reports WHERE resolved_at IS NULL")
+        open_n = cur.fetchone()["n"]
+
+        out = []
+        for r in rows:
+            matchup = None
+            if r["away_team_abbr"] and r["home_team_abbr"]:
+                matchup = f"{r['away_team_abbr']} @ {r['home_team_abbr']}"
+            out.append({
+                "id":           r["id"],
+                "createdAt":    r["created_at"].isoformat() if r["created_at"] else None,
+                "resolvedAt":   r["resolved_at"].isoformat() if r["resolved_at"] else None,
+                "action":       r["action"],
+                "reviewId":     r["review_id"],
+                "reporterId":   r["reporter_id"],
+                "reporterName": r["reporter_name"],
+                "authorId":     r["author_id"],
+                "authorName":   r["author_name"],
+                "reviewText":   r["review_text"],
+                "rating":       r["rating"],
+                "gameId":       r["game_id"],
+                "matchup":      matchup,
+                "gameDate":     str(r["game_date"]) if r["game_date"] else None,
+                "league":       r["league"],
+                # The review is gone — deleted by its author or an earlier
+                # moderation pass. Say so rather than drawing an empty card.
+                "contentGone":  r["author_id"] is None,
+            })
+        return jsonify({"reports": out, "openCount": open_n})
+    finally:
+        try:
+            cur.close(); conn.rollback()
+        except Exception:
+            pass
+
+
+@app.route("/api/admin/reports/<int:report_id>/resolve", methods=["POST"])
+@_admin_required
+def admin_resolve_report(report_id):
+    """Close a report. action='delete' also removes the reported review.
+
+    Deleting resolves EVERY open report against that review, not just this one
+    — several people flagging the same post is the normal case, and leaving the
+    rest open would show a queue of complaints about content that no longer
+    exists.
+    """
+    admin  = current_user()
+    body   = request.get_json(silent=True) or {}
+    action = (body.get("action") or "dismiss").lower()
+    if action not in ("dismiss", "delete"):
+        return jsonify({"error": "action must be 'dismiss' or 'delete'"}), 400
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT review_id, resolved_at FROM content_reports WHERE id = %s",
+                    (report_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            return jsonify({"error": "report not found"}), 404
+        if row["resolved_at"]:
+            conn.rollback()
+            return jsonify({"error": "report is already resolved"}), 409
+
+        review_id = row["review_id"]
+        deleted = False
+        if action == "delete" and review_id:
+            cur.execute("DELETE FROM game_reviews WHERE id = %s RETURNING id", (review_id,))
+            deleted = cur.fetchone() is not None
+
+        if action == "delete" and review_id:
+            cur.execute("""
+                UPDATE content_reports
+                   SET resolved_at = NOW(), resolved_by = %s, action = 'deleted'
+                 WHERE review_id = %s AND resolved_at IS NULL
+            """, ((admin or {}).get("id"), review_id))
+        else:
+            cur.execute("""
+                UPDATE content_reports
+                   SET resolved_at = NOW(), resolved_by = %s, action = %s
+                 WHERE id = %s
+            """, ((admin or {}).get("id"), "dismissed", report_id))
+        conn.commit()
+
+        print(f"[moderation] report {report_id} {action}ed by admin "
+              f"{(admin or {}).get('id')} (review {review_id}, deleted={deleted})", flush=True)
+        cur.execute("SELECT COUNT(*) AS n FROM content_reports WHERE resolved_at IS NULL")
+        n = cur.fetchone()["n"]
+        conn.commit()
+        return jsonify({"ok": True, "action": action, "reviewDeleted": deleted,
+                        "openCount": n})
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # GET /api/admin/reviews  — paginated list of all reviews
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

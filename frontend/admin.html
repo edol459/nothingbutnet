@@ -164,6 +164,24 @@ body::before {
   border:1px solid var(--rule); border-radius:6px; cursor:pointer; transition:all .15s; }
 .btn-more:hover { border-color:var(--orange); color:var(--orange); }
 
+/* ── Reports queue ── */
+.rep-card { background:var(--bg-card); border:1px solid var(--rule); border-radius:10px;
+  padding:14px 16px; margin-bottom:10px; }
+.rep-card.resolved { opacity:.55; }
+.rep-top { display:flex; justify-content:space-between; gap:12px; align-items:baseline;
+  flex-wrap:wrap; margin-bottom:8px; }
+.rep-meta { font-family:var(--ff-mono); font-size:11px; color:var(--ink3); }
+.rep-text { font-size:14px; line-height:1.55; color:var(--ink2); margin:8px 0 12px;
+  padding-left:10px; border-left:2px solid var(--rule); white-space:pre-wrap; }
+.rep-gone { font-size:13px; color:var(--ink4); font-style:italic; margin:8px 0 12px; }
+.rep-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.btn-dismiss { font-family:var(--ff-mono); font-size:10px; letter-spacing:.04em;
+  text-transform:uppercase; padding:5px 12px; background:none; border:1px solid var(--rule);
+  border-radius:4px; color:var(--ink3); cursor:pointer; transition:all .15s; }
+.btn-dismiss:hover { border-color:var(--ink3); color:var(--ink); }
+.rep-count { background:var(--red); color:#fff; border-radius:9px; padding:1px 7px;
+  font-family:var(--ff-mono); font-size:10px; margin-left:6px; }
+
 /* ── Email composer ── */
 .mail-grid { display:grid; grid-template-columns:1fr 280px; gap:20px; align-items:start; }
 @media (max-width:860px) { .mail-grid { grid-template-columns:1fr; } }
@@ -739,6 +757,13 @@ function renderPage() {
       <h1 class="page-title">Review Moderation</h1>
       <p class="page-sub">Delete reviews that violate community guidelines. Actions are immediate and irreversible.</p>
     </div>
+    <div class="panel" style="margin-bottom:24px">
+      <h3>Reported content <span id="rep-badge"></span></h3>
+      <div id="rep-list"><div class="table-state">Loading…</div></div>
+      <button class="btn-more" id="rep-toggle" onclick="toggleResolvedReports()"
+              style="margin-top:12px">Show resolved</button>
+    </div>
+    <div class="section-label" style="margin-bottom:10px">All reviews</div>
     <div class="stats-row">
       <div class="stat-chip"><div class="stat-chip-val" id="stat-total">—</div><div class="stat-chip-lbl">Total Reviews</div></div>
       <div class="stat-chip"><div class="stat-chip-val" id="stat-shown">—</div><div class="stat-chip-lbl">Shown</div></div>
@@ -761,7 +786,89 @@ function renderPage() {
   document.getElementById('search-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') doSearch();
   });
+  loadReports();
   loadReviews(true);
+}
+
+// ── Reported content ──────────────────────────────────────────
+// content_reports was written to from launch and never read once, while the
+// app told every reporter "We'll review this content within 24 hours". The
+// oldest open report had been sitting for five months.
+let repShowResolved = false;
+
+async function loadReports() {
+  const box = document.getElementById('rep-list');
+  if (!box) return;
+  try {
+    const r = await fetch('/api/admin/reports?status=' + (repShowResolved ? 'all' : 'open'));
+    const d = await r.json();
+    const badge = document.getElementById('rep-badge');
+    if (badge) badge.innerHTML = d.openCount
+      ? `<span class="rep-count">${d.openCount} open</span>` : '';
+    if (!d.reports.length) {
+      box.innerHTML = '<div class="table-state">' +
+        (repShowResolved ? 'No reports yet' : 'Nothing awaiting review') + '</div>';
+      return;
+    }
+    box.innerHTML = d.reports.map(repCard).join('');
+  } catch (e) {
+    box.innerHTML = '<div class="table-state">Could not load reports</div>';
+  }
+}
+
+function repCard(r) {
+  const resolved = !!r.resolvedAt;
+  const body = r.contentGone
+    ? '<div class="rep-gone">The review no longer exists — deleted by its author or an earlier action.</div>'
+    : `<div class="rep-text">${esc(r.reviewText || '(no text — rating or pick only)')}</div>`;
+  const game = r.matchup
+    ? `${esc(r.matchup)}${r.gameDate ? ' · ' + r.gameDate : ''}` : '—';
+  return `
+    <div class="rep-card${resolved ? ' resolved' : ''}">
+      <div class="rep-top">
+        <div>
+          <div style="font-size:14px;color:var(--ink)">
+            ${esc(r.authorName || 'unknown author')}
+            ${r.rating != null ? `<span class="rep-meta"> · ${(r.rating/2).toFixed(1)}★</span>` : ''}
+          </div>
+          <div class="rep-meta">${game}</div>
+        </div>
+        <div class="rep-meta" style="text-align:right">
+          reported by ${esc(r.reporterName || 'unknown')}<br>${fmtDate(r.createdAt)}
+        </div>
+      </div>
+      ${body}
+      ${resolved
+        ? `<div class="rep-meta">${esc(r.action || 'resolved')} · ${fmtDate(r.resolvedAt)}</div>`
+        : `<div class="rep-actions">
+             <button class="btn-dismiss" onclick="resolveReport(${r.id},'dismiss')">Dismiss</button>
+             ${r.contentGone ? '' :
+               `<button class="btn-delete" onclick="resolveReport(${r.id},'delete')">Delete review</button>`}
+           </div>`}
+    </div>`;
+}
+
+async function resolveReport(id, action) {
+  if (action === 'delete' &&
+      !confirm('Delete this review? This is immediate and cannot be undone.')) return;
+  try {
+    const r = await fetch(`/api/admin/reports/${id}/resolve`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || 'Could not resolve'); return; }
+    toast(action === 'delete' ? 'Review deleted' : 'Report dismissed');
+    loadReports();
+    if (action === 'delete') loadReviews(true);
+  } catch (e) { toast('Could not resolve'); }
+}
+
+function toggleResolvedReports() {
+  repShowResolved = !repShowResolved;
+  const b = document.getElementById('rep-toggle');
+  if (b) b.textContent = repShowResolved ? 'Show open only' : 'Show resolved';
+  loadReports();
 }
 
 async function loadReviews(reset = false) {
