@@ -287,6 +287,12 @@ _PERF_MIGRATE = "ALTER TABLE performance_reviews ADD COLUMN IF NOT EXISTS player
 # "team_abbr": "IND"}. A blob like `grades`, for the same reason — one author, edited
 # as a unit, nothing aggregates across drafts.
 _DRAFT_POTG_MIGRATE = "ALTER TABLE game_log_drafts ADD COLUMN IF NOT EXISTS potg JSONB"
+# Friend + custom tags mid-compose (schema_v23). Own columns rather than folded into
+# `tags`, which carries stat tags under the _clean_tags contract both paths share.
+_DRAFT_TAGS_MIGRATE = [
+    "ALTER TABLE game_log_drafts ADD COLUMN IF NOT EXISTS friend_tags JSONB DEFAULT '[]'::jsonb",
+    "ALTER TABLE game_log_drafts ADD COLUMN IF NOT EXISTS custom_tags JSONB DEFAULT '[]'::jsonb",
+]
 
 
 # Player performances: letter grades. INTERIM 10 — becomes 11 (adding C-) once
@@ -861,6 +867,31 @@ def _ensure_tables():
         cur.execute(_PERF_TABLE)
         cur.execute(_PERF_MIGRATE)
         cur.execute(_DRAFT_POTG_MIGRATE)
+        for _stmt in _DRAFT_TAGS_MIGRATE:
+            cur.execute(_stmt)
+        # Friend + custom tags. schema_v23.py is the real migration (and carries the
+        # full rationale); this keeps a fresh deploy from 500ing before it is run.
+        # Keyed (user_id, game_id) like potg_picks, NOT review_id — a log can be a
+        # Player-of-the-Game pick with no review row at all.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS review_tags (
+                id             SERIAL PRIMARY KEY,
+                user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                game_id        TEXT    NOT NULL,
+                kind           TEXT    NOT NULL CHECK (kind IN ('friend', 'custom')),
+                label          TEXT    NOT NULL,
+                label_norm     TEXT    NOT NULL,
+                friend_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (user_id, game_id, kind, label_norm)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_review_tags_log "
+                    "ON review_tags (user_id, game_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_review_tags_user_label "
+                    "ON review_tags (user_id, label_norm)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_review_tags_friend "
+                    "ON review_tags (friend_user_id, created_at DESC) WHERE kind = 'friend'")
         # Same reasoning as above: these two used to run inside the POST
         # /api/games/<id>/reviews handler, so every single review submission took an
         # ACCESS EXCLUSIVE lock on game_reviews and serialized against every reader.
@@ -4954,6 +4985,8 @@ def _format_review(r: dict) -> dict:
         "liked_by_me":    bool(r.get("liked_by_me", False)),
         "reply_count":    int(r.get("reply_count", 0)),
         "tags":           r.get("tags") or [],
+        "friend_tags":    r.get("friend_tags") or [],
+        "custom_tags":    r.get("custom_tags") or [],
         "attended":       bool(r.get("attended", False)),
         "ball_knowledge_level": _xp_to_level(int(r.get("xp") or 0)),
         "equipped_ring":        r.get("equipped_ring"),   # null=use rank, 0=no ring,  1-10=specific
@@ -5306,6 +5339,18 @@ _GAME_LOGS_SQL = """
         u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
         COALESCE(lc.like_count, 0) AS like_count,
         {liked_by_me},
+        -- Friend + custom tags (schema_v23). Correlated subqueries rather than a
+        -- join: review_tags has many rows per log, and joining would fan the log out
+        -- into one row per tag — which is precisely the bug grouping exists to fix.
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('userId', rt.friend_user_id,
+                                                      'name',   rt.label) ORDER BY rt.id)
+                    FROM review_tags rt
+                   WHERE rt.user_id = l.user_id AND rt.game_id = %(gid)s
+                     AND rt.kind = 'friend'), '[]'::jsonb)  AS friend_tags,
+        COALESCE((SELECT jsonb_agg(rt.label ORDER BY rt.id)
+                    FROM review_tags rt
+                   WHERE rt.user_id = l.user_id AND rt.game_id = %(gid)s
+                     AND rt.kind = 'custom'), '[]'::jsonb)  AS custom_tags,
         COALESCE((SELECT COUNT(*) FROM review_replies rr
                    WHERE rr.review_id = l.review_id), 0) AS reply_count
     FROM logs l
@@ -5531,6 +5576,220 @@ def submit_review(game_id):
 # is the fast path; this is the batch path.
 
 _LOG_MAX_PERFORMANCES = 40   # ~26 dress for an NBA game; anything past this is abuse
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Friend tags and custom tags (schema_v23 `review_tags`)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Stat tags stay in game_reviews.tags (see _clean_tags). These two kinds live in
+# their own table because they exist to be filtered and counted, and because a
+# friend tag points at a second user who has to be able to read it from their side.
+#
+# Keyed on (user_id, game_id) like potg_picks, NOT on review_id: a log can be a
+# Player-of-the-Game pick with no review row at all.
+_MAX_FRIEND_TAGS   = 10
+_MAX_CUSTOM_TAGS   = 5
+_CUSTOM_TAG_MAXLEN = 24
+
+
+def _norm_tag(label):
+    """The grouping key. Without it "Game 7" and "game 7" become two tags in a week."""
+    return " ".join((label or "").lower().split())
+
+
+def _clean_custom_tags(raw):
+    """Sanitise user-typed tags. Returns a list of display labels, deduped by norm.
+
+    Order is preserved so the chips render in the order they were typed, which is
+    what the user watched happen.
+    """
+    if not isinstance(raw, list):
+        return []
+    out, seen = [], set()
+    for t in raw:
+        if not isinstance(t, str):
+            continue
+        # Collapse internal whitespace and drop a leading '#'. People type the hash
+        # because the UI renders one; storing it would make "#dagger" and "dagger"
+        # two different tags.
+        label = " ".join(t.split()).lstrip("#").strip()[:_CUSTOM_TAG_MAXLEN]
+        if not label:
+            continue
+        key = _norm_tag(label)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(label)
+        if len(out) >= _MAX_CUSTOM_TAGS:
+            break
+    return out
+
+
+def _resolve_friend_tags(cur, user_id, raw):
+    """Turn a list of user ids into (id, display_name) pairs this user may tag.
+
+    Three gates, all server-side, because the client's friend list is a cache and
+    the only thing that matters is what is true at write time:
+
+      * must be an ACCEPTED friendship, in either direction — friendships has no
+        canonical ordering of sender/receiver
+      * must not be blocked in either direction. A friend tag notifies, so letting
+        a blocked user tag you would route around the block
+      * cannot be yourself — "watched with me" is not a thing
+
+    Returns [] for a malformed list rather than raising: a tag is not worth failing
+    an entire log submit over.
+    """
+    if not isinstance(raw, list) or not raw:
+        return []
+    ids = []
+    for v in raw[:_MAX_FRIEND_TAGS]:
+        try:
+            i = int(v)
+        except (TypeError, ValueError):
+            continue
+        if i != user_id and i not in ids:
+            ids.append(i)
+    if not ids:
+        return []
+    cur.execute("""
+        SELECT u.id, u.display_name
+          FROM users u
+         WHERE u.id = ANY(%(ids)s)
+           AND EXISTS (
+                 SELECT 1 FROM friendships f
+                  WHERE f.status = 'accepted'
+                    AND ((f.sender_id = %(me)s AND f.receiver_id = u.id)
+                      OR (f.receiver_id = %(me)s AND f.sender_id = u.id)))
+           AND NOT EXISTS (
+                 SELECT 1 FROM user_blocks b
+                  WHERE (b.blocker_id = %(me)s AND b.blocked_id = u.id)
+                     OR (b.blocker_id = u.id   AND b.blocked_id = %(me)s))
+    """, {"ids": ids, "me": user_id})
+    byid = {r["id"]: (r["display_name"] or "") for r in cur.fetchall()}
+    # Preserve the order the client sent, so the chips don't reshuffle on save.
+    return [(i, byid[i]) for i in ids if i in byid]
+
+
+def _write_review_tags(cur, user_id, game_id, friends, customs):
+    """Replace-all for one log's friend + custom tags. Returns the new friend ids.
+
+    Replace-all rather than diffing, mirroring how game_reviews.tags is rewritten
+    wholesale on every submit — the client always sends the full set, so a diff
+    would be two round trips to reach the same state.
+
+    Returns only the friend ids that are NEW to this log, which is what the caller
+    needs: re-saving a log must not re-notify everybody already tagged on it.
+    """
+    cur.execute("""SELECT friend_user_id FROM review_tags
+                    WHERE user_id = %s AND game_id = %s AND kind = 'friend'""",
+                (user_id, game_id))
+    already = {r["friend_user_id"] for r in cur.fetchall()}
+
+    cur.execute("DELETE FROM review_tags WHERE user_id = %s AND game_id = %s",
+                (user_id, game_id))
+    for fid, name in friends:
+        cur.execute("""
+            INSERT INTO review_tags (user_id, game_id, kind, label, label_norm, friend_user_id)
+            VALUES (%s, %s, 'friend', %s, %s, %s)
+            ON CONFLICT (user_id, game_id, kind, label_norm) DO NOTHING
+        """, (user_id, game_id, name, _norm_tag(name) or str(fid), fid))
+    for label in customs:
+        cur.execute("""
+            INSERT INTO review_tags (user_id, game_id, kind, label, label_norm)
+            VALUES (%s, %s, 'custom', %s, %s)
+            ON CONFLICT (user_id, game_id, kind, label_norm) DO NOTHING
+        """, (user_id, game_id, label, _norm_tag(label)))
+    return [fid for fid, _ in friends if fid not in already]
+
+
+def _notify_friend_tags(tagger, game_id, game_row, friend_ids):
+    """Push "X tagged you" to each newly tagged friend. Never raises.
+
+    Called AFTER the log's transaction commits. Pushing from inside it would
+    announce a log that a later error rolled back, and the whole point of this
+    endpoint is that a submit is all-or-nothing.
+
+    Deduped through `notification_sends`, whose primary key IS the never-twice
+    rule — kind 'friend_tag', reference "<tagger>:<game>". So re-saving a log,
+    or untagging and retagging, never fires a second push. That is also the
+    anti-nuisance property: one tagger can ping you about one game exactly once.
+
+    Everything here is wrapped: a dead APNs key or a network blip must not turn a
+    successfully saved log into a 500 the user sees.
+    """
+    if not friend_ids:
+        return
+    try:
+        import push as _push
+    except Exception:
+        return
+    try:
+        away = game_row.get("away_team_abbr") or ""
+        home = game_row.get("home_team_abbr") or ""
+        league = (game_row.get("league") or "nba").lower()
+        title = f"{tagger.get('display_name') or 'Someone'} tagged you"
+        body  = f"Watched {away} @ {home} with you" if away and home else "Tagged you in a game log"
+        data  = {"kind": "friend_tag", "game_id": game_id, "league": league}
+
+        conn = get_conn(); cur = conn.cursor()
+        try:
+            for fid in friend_ids:
+                # Claim first — same order as send_notifications._deliver, so a retry
+                # can never double-send.
+                cur.execute("""INSERT INTO notification_sends (user_id, kind, reference)
+                               VALUES (%s, 'friend_tag', %s) ON CONFLICT DO NOTHING""",
+                            (fid, f"{tagger['id']}:{game_id}"))
+                if cur.rowcount == 0:
+                    continue
+                cur.execute("""SELECT token, environment FROM device_tokens
+                                WHERE user_id = %s AND invalid_at IS NULL""", (fid,))
+                by_env = {}
+                for row in cur.fetchall():
+                    by_env.setdefault(row["environment"], []).append(row["token"])
+                for env, tokens in by_env.items():
+                    # The token decides the APNs host, not the key — a sandbox token
+                    # sent to production returns BadDeviceToken. Hence the grouping.
+                    for res in _push.send(tokens, title, body, data=data, environment=env,
+                                          collapse_id=f"friend_tag:{tagger['id']}:{game_id}"):
+                        if res.get("dead"):
+                            cur.execute("UPDATE device_tokens SET invalid_at = NOW() "
+                                        "WHERE token = %s", (res["token"],))
+            conn.commit()
+        finally:
+            cur.close(); conn.close()
+    except Exception as e:
+        # Logged, not raised. The log is already saved.
+        print(f"[friend_tag push] {e}")
+
+
+def _read_review_tags(cur, user_id, game_id):
+    """One log's tags, shaped for the client."""
+    cur.execute("""SELECT kind, label, friend_user_id FROM review_tags
+                    WHERE user_id = %s AND game_id = %s
+                    ORDER BY kind, id""", (user_id, game_id))
+    rows = cur.fetchall()
+    return {
+        "friendTags": [{"userId": r["friend_user_id"], "name": r["label"]}
+                       for r in rows if r["kind"] == "friend"],
+        "customTags": [r["label"] for r in rows if r["kind"] == "custom"],
+    }
+
+
+def _like_query(raw, limit=80):
+    """Turn user-typed search text into a safe ILIKE pattern, or None.
+
+    Two things have to happen here. LIKE treats `%` and `_` as wildcards, so a
+    search for "100%" matches every note in the database and reads as a bug rather
+    than as a feature; they are escaped against an explicit ESCAPE '\\'. And the
+    text is capped, because the pattern is interpolated into a scan and there is no
+    reason to accept a paragraph as a search term.
+    """
+    q = (raw or "").strip()[:limit]
+    if not q:
+        return None
+    q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{q}%"
 
 
 def _clean_tags(raw):
@@ -5789,9 +6048,27 @@ def submit_game_log(game_id):
     # the submit tripped the guard below and 400'd, so the only way out was deleting
     # the whole log.
     _clears_potg = "potg" in body and not _has_potg
+
+    # ── Friend + custom tags (schema_v23) ─────────────────────────────────────
+    # Validated here, with everything else, so a rejected tag never leaves a
+    # half-written log behind. Friend ids are resolved later, inside the
+    # transaction, because eligibility is a database question.
+    _custom_tags = _clean_custom_tags(body.get("customTags") or body.get("custom_tags"))
+    _raw_friends = body.get("friendTags") or body.get("friend_tags") or []
+    # Custom tags are Pro. Friend tags are not — tagging who you watched with is
+    # social reach, and walling it would cost the thing that spreads the app.
+    if _custom_tags and not user.get("is_pro"):
+        _log_pro_wall("custom_tags", user.get("id"))
+        return jsonify({"error": "Custom tags are a Pro feature.",
+                        "code": "pro_required"}), 402
+    for _t in _custom_tags:
+        if _contains_slur(_t):
+            return jsonify({"error": "That tag contains language that isn't allowed."}), 400
+    _has_tags = bool(_custom_tags) or bool(_raw_friends)
+
     if (rating is None and not raw_perfs and not (body.get("remove_grades") or [])
             and not _has_potg and not _watched_only and not _has_text
-            and not _clears_potg):
+            and not _clears_potg and not _has_tags):
         return jsonify({"error": "Nothing to log — rate it, pick a player, "
                                  "write a note, or mark it watched."}), 400
 
@@ -5836,8 +6113,12 @@ def submit_game_log(game_id):
         conn = get_conn()
         cur  = conn.cursor()
 
-        cur.execute("SELECT game_date, status, season, league FROM games WHERE game_id = %s",
-                    (game_id,))
+        # The team abbrs are here for the friend-tag push, which names the matchup
+        # ("Watched ORL @ NYK with you"). Without them the notification silently
+        # degrades to a generic "Tagged you in a game log".
+        cur.execute("""SELECT game_date, status, season, league,
+                              away_team_abbr, home_team_abbr
+                         FROM games WHERE game_id = %s""", (game_id,))
         game_row = cur.fetchone()
         if not game_row:
             cur.close(); conn.close()
@@ -5875,10 +6156,17 @@ def submit_game_log(game_id):
         # rating, note, tags or attendance. A log that carries none of them (a pick
         # alone, or grades alone) must NOT create or silently delete a review row: if
         # the user already reviewed this game, their review has to survive untouched.
+        #
+        # Friend/custom tags join that list even though they live in their own table.
+        # They need a `game_reviews` row to exist so the log appears in the three
+        # grouped queries (diary, feed, game page), which all hang off that row —
+        # exactly how `attended` already works. The row is rating-less and harmless:
+        # games.review_count is COUNT(rating), so it drags no average down.
         review = None
         _review_tags = _clean_tags(body.get("tags"))
         _review_attended = bool(body.get("attended", False))
-        if rating is not None or review_text or _review_tags or _review_attended:
+        if (rating is not None or review_text or _review_tags
+                or _review_attended or _has_tags):
             cur.execute("""
                 INSERT INTO game_reviews (user_id, game_id, rating, review_text, tags, attended)
                 VALUES (%s, %s, %s, %s, %s, %s)
@@ -5895,6 +6183,20 @@ def submit_game_log(game_id):
             review["display_name"]  = user["display_name"]
             review["avatar_url"]    = avatar_url
             review["favorite_team"] = (u["favorite_team"] if u else None) or ""
+
+        # ── Friend + custom tags ──────────────────────────────────────────────
+        # Inside the transaction with everything else, so a log and its tags land
+        # together or not at all.
+        #
+        # Only written when the client actually sent a tag field. An older build
+        # sends neither, and treating that silence as "replace with nothing" would
+        # wipe the tags off every log it touched.
+        _friends, new_friend_ids = [], []
+        if ("friendTags" in body or "friend_tags" in body
+                or "customTags" in body or "custom_tags" in body):
+            _friends = _resolve_friend_tags(cur, user["id"], _raw_friends)
+            new_friend_ids = _write_review_tags(cur, user["id"], game_id,
+                                                _friends, _custom_tags)
 
         saved_perfs = []
         for pid, (pr, pname, ptext) in perfs.items():
@@ -6004,6 +6306,11 @@ def submit_game_log(game_id):
             _today_sb_cache.clear()
 
         cur.close(); conn.close()
+
+        # "X tagged you" — after the commit, and only for friends newly added to
+        # this log, so editing a note never re-pings everyone on it.
+        _notify_friend_tags(user, game_id, game_row, new_friend_ids)
+
         _safe_log("log_published", source="log_sheet", user_id=user["id"], platform="ios",
                   metadata={
                       "game_id":      game_id,
@@ -6015,6 +6322,8 @@ def submit_game_log(game_id):
                       "note_length":  len(review_text or ""),
                       "attended":     bool(body.get("attended", False)),
                       "tags":         len(_clean_tags(body.get("tags"))),
+                      "friend_tags":  len(new_friend_ids),
+                      "custom_tags":  len(_custom_tags),
                       # Distinguishes a first publish from an edit to a live log, which is
                       # the difference between "people log" and "people come back".
                       "is_update":    was_update,
@@ -6028,6 +6337,11 @@ def submit_game_log(game_id):
             # 0 when the game was already logged, the daily cap is reached, or the
             # log carries no content. The client only toasts when this is non-zero.
             "xp_gained":         log_xp_granted,
+            # Echoed back so the sheet renders exactly what the server kept — the
+            # friend list is filtered server-side (accepted friends, not blocked),
+            # so what you sent and what was stored can legitimately differ.
+            "friendTags":        [{"userId": i, "name": n} for i, n in _friends],
+            "customTags":        _custom_tags,
         }), 201
     except Exception as e:
         try:
@@ -6179,12 +6493,17 @@ def get_game_log(game_id, log_user_id):
             FROM games WHERE game_id = %s
         """, (game_id,))
         g = cur.fetchone()
+        # Friend + custom tags live in their own table, keyed (user, game) — so they are
+        # readable even for a log that has no game_reviews row.
+        _tags = _read_review_tags(cur, log_user_id, game_id)
         cur.close(); conn.close()
 
-        # A log with none of a review, a pick or grades doesn't exist — say so rather than
-        # returning an empty shell the client has to special-case. `potg` counts: a pick
-        # alone is a complete log, and without it those 404'd.
-        if not review and not grades and not potg:
+        # A log with none of a review, a pick, grades or a tag doesn't exist — say so
+        # rather than returning an empty shell the client has to special-case. `potg`
+        # counts: a pick alone is a complete log, and without it those 404'd. Tags
+        # count for the same reason — "watched this with Dan" is a log.
+        if not review and not grades and not potg and not (
+                _tags["friendTags"] or _tags["customTags"]):
             return jsonify({"error": "No log found"}), 404
 
         return jsonify({
@@ -6204,6 +6523,8 @@ def get_game_log(game_id, log_user_id):
                 "status": g["status"],
             } if g else None),
             "potg": potg,
+            "friendTags": _tags["friendTags"],
+            "customTags": _tags["customTags"],
             "review": ({
                 "id": review["id"],
                 "rating": review["rating"],
@@ -6246,6 +6567,8 @@ def _format_draft(r: dict) -> dict:
         "grades":      {str(k): v for k, v in (r.get("grades") or {}).items()
                         if str(k).lstrip("-").isdigit()},
         "potg":        r.get("potg"),
+        "friendTags":  r.get("friend_tags") or [],
+        "customTags":  r.get("custom_tags") or [],
         "updated_at":  str(r.get("updated_at") or ""),
     }
 
@@ -6326,8 +6649,9 @@ def put_game_draft(game_id):
         cur.execute("""
             INSERT INTO game_log_drafts
                 (user_id, game_id, league, home_abbr, away_abbr,
-                 rating, review_text, tags, attended, grades, potg, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                 rating, review_text, tags, attended, grades, potg,
+                 friend_tags, custom_tags, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (user_id, game_id) DO UPDATE SET
                 league      = EXCLUDED.league,
                 home_abbr   = COALESCE(EXCLUDED.home_abbr, game_log_drafts.home_abbr),
@@ -6338,6 +6662,8 @@ def put_game_draft(game_id):
                 attended    = EXCLUDED.attended,
                 grades      = EXCLUDED.grades,
                 potg        = EXCLUDED.potg,
+                friend_tags = EXCLUDED.friend_tags,
+                custom_tags = EXCLUDED.custom_tags,
                 updated_at  = NOW()
             -- xmax is 0 on a genuine INSERT and non-zero when ON CONFLICT took the UPDATE
             -- path. The client re-PUTs the whole draft every couple of seconds while you
@@ -6350,7 +6676,13 @@ def put_game_draft(game_id):
               _json.dumps(_clean_tags(body.get("tags"))),
               bool(body.get("attended", False)),
               _json.dumps(grades),
-              _json.dumps(potg) if potg else None))
+              _json.dumps(potg) if potg else None,
+              # A draft is a private buffer, so the Pro gate and the friendship check
+              # are NOT applied here — they run at publish, where they matter. Blocking
+              # a draft save would throw away what someone already typed.
+              _json.dumps([int(v) for v in (body.get("friendTags") or [])
+                           if isinstance(v, (int, str)) and str(v).lstrip("-").isdigit()][:_MAX_FRIEND_TAGS]),
+              _json.dumps(_clean_custom_tags(body.get("customTags")))))
         row = dict(cur.fetchone())
         conn.commit(); cur.close(); conn.close()
         if row.pop("was_insert", False):
@@ -6496,7 +6828,16 @@ def delete_game_log(game_id):
                     (user["id"], game_id))
         potg_deleted = cur.rowcount or 0
 
-        if not review_deleted and grades_deleted == 0 and potg_deleted == 0:
+        # Friend + custom tags are part of the log too. They live in their own table
+        # rather than hanging off game_reviews.id, so nothing cascades them — which is
+        # the point (deleting a RATING must not delete who you watched it with), but it
+        # does mean deleting the whole log has to say so explicitly.
+        cur.execute("DELETE FROM review_tags WHERE user_id = %s AND game_id = %s",
+                    (user["id"], game_id))
+        tags_deleted = cur.rowcount or 0
+
+        if (not review_deleted and grades_deleted == 0 and potg_deleted == 0
+                and tags_deleted == 0):
             conn.rollback(); cur.close(); conn.close()
             return jsonify({"error": "Nothing logged for this game"}), 404
 
@@ -6524,7 +6865,8 @@ def delete_game_log(game_id):
         return jsonify({"ok": True,
                         "potg_deleted": potg_deleted,
                         "review_deleted": review_deleted,
-                        "grades_deleted": grades_deleted})
+                        "grades_deleted": grades_deleted,
+                        "tags_deleted": tags_deleted})
     except Exception as e:
         try:
             if conn is not None:
@@ -7610,6 +7952,18 @@ _FEED_GROUPED_SQL = """
         g.game_date, g.home_team_abbr, g.away_team_abbr, g.home_score, g.away_score, g.league,
         COALESCE(lc.like_count, 0) AS like_count,
         {liked_by_me},
+        -- Friend + custom tags (schema_v23). Correlated subqueries rather than a
+        -- join: review_tags has many rows per log, and joining would fan the log out
+        -- into one row per tag — which is precisely the bug grouping exists to fix.
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('userId', rt.friend_user_id,
+                                                      'name',   rt.label) ORDER BY rt.id)
+                    FROM review_tags rt
+                   WHERE rt.user_id = l.user_id AND rt.game_id = l.game_id
+                     AND rt.kind = 'friend'), '[]'::jsonb)  AS friend_tags,
+        COALESCE((SELECT jsonb_agg(rt.label ORDER BY rt.id)
+                    FROM review_tags rt
+                   WHERE rt.user_id = l.user_id AND rt.game_id = l.game_id
+                     AND rt.kind = 'custom'), '[]'::jsonb)  AS custom_tags,
         COALESCE((SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = l.review_id), 0) AS reply_count
     FROM logs l
     JOIN users u ON u.id = l.user_id
@@ -8029,6 +8383,18 @@ _DIARY_GROUPED_SQL = """
             g.home_score, g.away_score,
             COALESCE(lc.like_count, 0) AS like_count,
             {liked_by_me},
+        -- Friend + custom tags (schema_v23). Correlated subqueries rather than a
+        -- join: review_tags has many rows per log, and joining would fan the log out
+        -- into one row per tag — which is precisely the bug grouping exists to fix.
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('userId', rt.friend_user_id,
+                                                      'name',   rt.label) ORDER BY rt.id)
+                    FROM review_tags rt
+                   WHERE rt.user_id = l.user_id AND rt.game_id = l.game_id
+                     AND rt.kind = 'friend'), '[]'::jsonb)  AS friend_tags,
+        COALESCE((SELECT jsonb_agg(rt.label ORDER BY rt.id)
+                    FROM review_tags rt
+                   WHERE rt.user_id = l.user_id AND rt.game_id = l.game_id
+                     AND rt.kind = 'custom'), '[]'::jsonb)  AS custom_tags,
             COALESCE((SELECT COUNT(*) FROM review_replies rr
                        WHERE rr.review_id = l.review_id), 0) AS reply_count,
             NULL::integer AS pts, NULL::integer AS reb, NULL::integer AS ast
@@ -8047,7 +8413,8 @@ _DIARY_GROUPED_SQL = """
 """
 
 
-def _diary_grouped(user_id, viewer_id, limit, offset, sort, _filter, team):
+def _diary_grouped(user_id, viewer_id, limit, offset, sort, _filter, team, q=None,
+                   tag=None, friend_id=None):
     liked_by_me = ("EXISTS (SELECT 1 FROM review_likes rl_me WHERE rl_me.review_id = l.review_id "
                    "AND rl_me.user_id = %(viewer)s) AS liked_by_me") if viewer_id else "FALSE AS liked_by_me"
     where, params = [], {"uid": user_id, "limit": limit, "offset": offset}
@@ -8061,6 +8428,38 @@ def _diary_grouped(user_id, viewer_id, limit, offset, sort, _filter, team):
     if team:
         where.append("(home_team_abbr = %(team)s OR away_team_abbr = %(team)s)")
         params["team"] = team
+    # Keyword search over your own diary. Covers everything the entry actually shows:
+    # the note, who you gave Player of the Game to, the players in your stat tags, and
+    # the matchup — so one box answers "by team OR keyword" rather than making the team
+    # a separate control you have to know about.
+    #
+    # Deliberately NOT `tags::text ILIKE …`: that is the tempting one-liner and it
+    # matches the JSON *keys* too, so searching "team" or "stat" would hit every
+    # tagged review. Walk the array and compare the one field a human would mean.
+    if q:
+        where.append("""(
+                review_text ILIKE %(q)s ESCAPE '\\'
+             OR potg_name   ILIKE %(q)s ESCAPE '\\'
+             OR home_team_abbr ILIKE %(q)s ESCAPE '\\'
+             OR away_team_abbr ILIKE %(q)s ESCAPE '\\'
+             OR EXISTS (SELECT 1 FROM jsonb_array_elements(tags) _t
+                         WHERE _t->>'player_name' ILIKE %(q)s ESCAPE '\\')
+        )""")
+        params["q"] = q
+    # Tag filters. Matched on label_norm, not label, so "Game 7" finds "game 7".
+    if tag:
+        where.append("""EXISTS (SELECT 1 FROM review_tags rt
+                                 WHERE rt.user_id = combined.user_id
+                                   AND rt.game_id = combined.game_id
+                                   AND rt.label_norm = %(tag)s)""")
+        params["tag"] = tag
+    if friend_id:
+        where.append("""EXISTS (SELECT 1 FROM review_tags rt
+                                 WHERE rt.user_id = combined.user_id
+                                   AND rt.game_id = combined.game_id
+                                   AND rt.kind = 'friend'
+                                   AND rt.friend_user_id = %(friend)s)""")
+        params["friend"] = friend_id
     order = {
         "recent":      "COALESCE(game_date, created_at::date) DESC, created_at DESC",
         "oldest":      "COALESCE(game_date, created_at::date) ASC,  created_at ASC",
@@ -8099,11 +8498,20 @@ def get_user_activity(user_id):
     order_by = _ORDER.get(request.args.get("sort", "recent"), _ORDER["recent"])
     _filter  = request.args.get("filter", "all")
     team     = (request.args.get("team") or "").strip().upper()
+    # Search is grouped-path only. The legacy arm below is still reachable by old
+    # builds, and they have no search box to send `q` from.
+    q        = _like_query(request.args.get("q"))
+    tag      = _norm_tag(request.args.get("tag")) or None
+    try:
+        friend_id = int(request.args.get("friend") or 0) or None
+    except (TypeError, ValueError):
+        friend_id = None
 
     if request.args.get("grouped") in ("1", "true"):
         try:
             rows = _diary_grouped(user_id, viewer_id, limit, offset,
-                                  request.args.get("sort", "recent"), _filter, team)
+                                  request.args.get("sort", "recent"), _filter, team, q,
+                                  tag, friend_id)
             return jsonify({"items": _format_feed_rows(rows),
                             "has_more": len(rows) == limit})
         except Exception as e:
@@ -8268,6 +8676,9 @@ def _format_feed_rows(rows) -> list:
             "stars":              float(d["stars"]) if d.get("stars") is not None else None,
             "review_text":        d.get("review_text"),
             "tags":               d.get("tags") or [],
+            # Friend + custom tags, from review_tags rather than the stat-tag JSONB.
+            "friend_tags":        d.get("friend_tags") or [],
+            "custom_tags":        d.get("custom_tags") or [],
             "attended":           bool(d.get("attended", False)),
             "created_at":         str(d["created_at"]),
             "game_date":          str(d["game_date"]) if d.get("game_date") else None,
@@ -8413,6 +8824,345 @@ def get_user_insights(user_id):
         return jsonify(out)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/users/<user_id>/stats — the expanded diary statistics screen
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# A separate endpoint rather than a bigger /insights: shipped iOS builds decode
+# /insights into a fixed shape, so it stays exactly as it is.
+#
+# Two rules run through every query below, and both have already caused bugs
+# elsewhere in this file:
+#
+#   1. A LOG IS NOT A REVIEW. `game_reviews` is only one of the three tables a log
+#      can live in — 70 logs today are a Player-of-the-Game pick with no review row
+#      at all. Counting teams off `game_reviews` (which is what /insights does)
+#      silently reports "no games logged" to someone who only picks POTG. So every
+#      aggregate here starts from the same FULL OUTER JOIN `logs` CTE the diary,
+#      feed and game-page queries use.
+#
+#   2. COUNT(rating), NEVER COUNT(*). `rating` is nullable since schema_v14 — a note,
+#      a pick or an attendance mark is a complete log without stars. AVG skips NULLs
+#      and COUNT(*) does not, so pairing them understates every average.
+#
+# `logged` and `rated` are therefore different numbers on purpose, and the client
+# must label them differently ("12 logged · 9 rated"), not pick one.
+_USER_STATS_LOGS_CTE = """
+    WITH logs AS (
+        SELECT
+            COALESCE(gr.game_id, pl.game_id, pg.game_id) AS game_id,
+            gr.rating,
+            NULLIF(TRIM(COALESCE(gr.review_text, '')), '') AS review_text,
+            COALESCE(gr.attended, FALSE) AS attended,
+            pg.person_id                 AS potg_person_id,
+            pg.player_name               AS potg_name,
+            GREATEST(COALESCE(gr.updated_at, gr.created_at, pl.last_at, pg.updated_at),
+                     COALESCE(pl.last_at, gr.created_at, pg.updated_at),
+                     pg.updated_at)      AS activity_at
+        FROM (SELECT * FROM game_reviews WHERE user_id = %(uid)s) gr
+        FULL OUTER JOIN (
+            SELECT user_id, game_id, MAX(created_at) AS last_at
+            FROM performance_reviews WHERE user_id = %(uid)s
+            GROUP BY user_id, game_id
+        ) pl ON pl.game_id = gr.game_id
+        FULL OUTER JOIN (SELECT * FROM potg_picks WHERE user_id = %(uid)s) pg
+               ON pg.game_id = COALESCE(gr.game_id, pl.game_id)
+    ),
+    -- INNER JOIN: a log needs its game row to be attributable to a team, a season or
+    -- a date. `games` holds finished games only; a live game's log is still a draft.
+    lg AS (
+        SELECT l.*, g.league, g.season, g.season_type, g.game_date,
+               g.home_team_abbr, g.away_team_abbr, g.home_score, g.away_score,
+               g.review_count AS crowd_n, g.rating_sum AS crowd_sum
+        FROM logs l
+        JOIN games g ON g.game_id = l.game_id
+        {league_where}
+        {season_where}
+    )
+"""
+
+
+@app.route("/api/users/<int:user_id>/stats")
+def get_user_stats(user_id):
+    """Per-team / per-season / per-tag breakdown of everything one user has logged.
+
+    Public, like the rest of a profile. Aggregates only — no pagination, because the
+    busiest diary in the database is 140 logs and a 30-team payload is a few KB.
+    """
+    league = (request.args.get("league") or "all").strip().lower()
+    season = (request.args.get("season") or "").strip()
+
+    params = {"uid": user_id}
+    league_where = ""
+    if league in ("nba", "wnba"):
+        # games.league, never the game_id '10' prefix — recent WNBA games carry ESPN
+        # 4017… ids, and that heuristic leaked WNBA seasons onto NBA team pages once.
+        league_where = "AND LOWER(COALESCE(g.league, 'nba')) = %(league)s"
+        params["league"] = league
+    season_where = ""
+    if season:
+        season_where = "AND g.season = %(season)s"
+        params["season"] = season
+
+    cte = _USER_STATS_LOGS_CTE.format(
+        league_where=league_where, season_where=season_where)
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        out = {}
+
+        # ── Totals ────────────────────────────────────────────────────────────
+        cur.execute(cte + """
+            SELECT COUNT(*)                                   AS logs,
+                   COUNT(rating)                              AS rated,
+                   COUNT(review_text)                         AS notes,
+                   COUNT(*) FILTER (WHERE attended)           AS attended,
+                   COUNT(potg_person_id)                      AS picks,
+                   round(AVG(rating) / 2.0, 2)                AS avg_stars,
+                   MIN(game_date)                             AS first_game,
+                   MAX(game_date)                             AS last_game
+              FROM lg
+        """, params)
+        t = cur.fetchone() or {}
+        out["totals"] = {
+            "logs":      int(t.get("logs") or 0),
+            "rated":     int(t.get("rated") or 0),
+            "notes":     int(t.get("notes") or 0),
+            "attended":  int(t.get("attended") or 0),
+            "picks":     int(t.get("picks") or 0),
+            "avgStars":  float(t["avg_stars"]) if t.get("avg_stars") is not None else None,
+            "firstGameDate": t["first_game"].isoformat() if t.get("first_game") else None,
+            "lastGameDate":  t["last_game"].isoformat()  if t.get("last_game")  else None,
+        }
+
+        # ── Rating distribution ───────────────────────────────────────────────
+        # Ten half-star buckets. Returned dense (every bucket present, zeros
+        # included) so the client draws a histogram without inventing gaps.
+        cur.execute(cte + """
+            SELECT rating, COUNT(*) AS n
+              FROM lg WHERE rating IS NOT NULL
+             GROUP BY rating
+        """, params)
+        counts = {int(r["rating"]): int(r["n"]) for r in cur.fetchall()}
+        out["distribution"] = [{"rating": i, "stars": round(i / 2.0, 1),
+                                "n": counts.get(i, 0)} for i in range(1, 11)]
+
+        # ── By team ───────────────────────────────────────────────────────────
+        # A log attaches to BOTH teams on the floor — "games I watched involving
+        # LAL" is the question, so the UNION ALL is the point, not a duplicate.
+        #
+        # crowd_avg comes from games.rating_sum / review_count, already maintained
+        # on every write, rather than a second pass over game_reviews. `delta` is
+        # the most interesting number here: how much harsher you are than everyone
+        # else on this team's games. NULL when either side has no ratings, never 0 —
+        # "no opinion yet" and "exactly average" must not render identically.
+        cur.execute(cte + """
+            , per_team AS (
+                SELECT home_team_abbr AS abbr, * FROM lg
+                UNION ALL
+                SELECT away_team_abbr AS abbr, * FROM lg
+            )
+            SELECT abbr,
+                   COALESCE(league, 'nba')             AS league,
+                   COUNT(*)                            AS logged,
+                   COUNT(rating)                       AS rated,
+                   round(AVG(rating) / 2.0, 2)         AS avg_stars,
+                   COUNT(*) FILTER (WHERE attended)    AS attended,
+                   MAX(game_date)                      AS last_logged,
+                   -- Record of the games you watched, from the team's point of view.
+                   COUNT(*) FILTER (WHERE
+                        (abbr = home_team_abbr AND home_score > away_score) OR
+                        (abbr = away_team_abbr AND away_score > home_score)) AS seen_wins,
+                   COUNT(*) FILTER (WHERE
+                        (abbr = home_team_abbr AND home_score < away_score) OR
+                        (abbr = away_team_abbr AND away_score < home_score)) AS seen_losses,
+                   -- rating_sum is `real`, and round(double precision, int) does not
+                   -- exist in Postgres — the cast is load-bearing, not cosmetic.
+                   round((SUM(crowd_sum) FILTER (WHERE rating IS NOT NULL)
+                         / NULLIF(SUM(crowd_n) FILTER (WHERE rating IS NOT NULL), 0)
+                         / 2.0)::numeric, 2)           AS crowd_avg_stars
+              FROM per_team
+             WHERE abbr IS NOT NULL AND abbr <> ''
+             -- (abbr, league), NOT abbr. A team's identity needs the league: IND is
+             -- both the Pacers and the Fever, and so are ATL, CHI, DAL, MIN, PHX and
+             -- WAS. Grouping on abbr alone merged a user's Fever and Pacers logs into
+             -- one row and labelled the whole thing WNBA.
+             GROUP BY abbr, COALESCE(league, 'nba')
+             ORDER BY logged DESC, abbr
+        """, params)
+        teams = []
+        for r in cur.fetchall():
+            mine  = float(r["avg_stars"]) if r["avg_stars"] is not None else None
+            crowd = float(r["crowd_avg_stars"]) if r["crowd_avg_stars"] is not None else None
+            teams.append({
+                "abbr":        r["abbr"],
+                "league":      (r["league"] or "nba").lower(),
+                "logged":      int(r["logged"]),
+                "rated":       int(r["rated"]),
+                "avgStars":    mine,
+                "crowdAvgStars": crowd,
+                "delta":       round(mine - crowd, 2) if (mine is not None and crowd is not None) else None,
+                "attended":    int(r["attended"]),
+                "seenWins":    int(r["seen_wins"]),
+                "seenLosses":  int(r["seen_losses"]),
+                "lastLogged":  r["last_logged"].isoformat() if r["last_logged"] else None,
+            })
+        out["teams"] = teams
+
+        # ── By season ─────────────────────────────────────────────────────────
+        # NBA seasons read "2025-26" and WNBA seasons read "2026", so the two
+        # leagues can't share a row — league rides along and the client groups.
+        cur.execute(cte + """
+            SELECT season,
+                   COALESCE(league, 'nba')       AS league,
+                   COUNT(*)                      AS logged,
+                   COUNT(rating)                 AS rated,
+                   round(AVG(rating) / 2.0, 2)   AS avg_stars
+              FROM lg WHERE season IS NOT NULL
+             GROUP BY season, COALESCE(league, 'nba')
+             ORDER BY season DESC, league
+        """, params)
+        out["seasons"] = [{
+            "season":   r["season"],
+            "league":   (r["league"] or "nba").lower(),
+            "logged":   int(r["logged"]),
+            "rated":    int(r["rated"]),
+            "avgStars": float(r["avg_stars"]) if r["avg_stars"] is not None else None,
+        } for r in cur.fetchall()]
+
+        # ── Cadence ───────────────────────────────────────────────────────────
+        # Keyed on game_date, not created_at: this answers "when do I watch
+        # basketball", and a backfilled log written in July about a April game
+        # belongs to April.
+        cur.execute(cte + """
+            SELECT EXTRACT(MONTH FROM game_date)::int AS k, COUNT(*) AS n
+              FROM lg WHERE game_date IS NOT NULL GROUP BY k
+        """, params)
+        by_month = {int(r["k"]): int(r["n"]) for r in cur.fetchall()}
+        cur.execute(cte + """
+            SELECT EXTRACT(DOW FROM game_date)::int AS k, COUNT(*) AS n
+              FROM lg WHERE game_date IS NOT NULL GROUP BY k
+        """, params)
+        by_dow = {int(r["k"]): int(r["n"]) for r in cur.fetchall()}
+        out["cadence"] = {
+            # Dense again, so a heatmap has no holes to guess at.
+            "byMonth":   [{"month": m, "n": by_month.get(m, 0)} for m in range(1, 13)],
+            # 0 = Sunday, matching Postgres DOW and Swift's Calendar weekday - 1.
+            "byWeekday": [{"weekday": d, "n": by_dow.get(d, 0)} for d in range(0, 7)],
+        }
+
+        # ── Top Player-of-the-Game recipients ─────────────────────────────────
+        cur.execute(cte + """
+            SELECT potg_person_id AS person_id,
+                   MAX(potg_name) AS name,
+                   COUNT(*)       AS picks
+              FROM lg WHERE potg_person_id IS NOT NULL
+             GROUP BY potg_person_id
+             ORDER BY picks DESC, MAX(potg_name)
+             LIMIT 10
+        """, params)
+        out["players"] = [{"personId": r["person_id"], "name": r["name"] or "",
+                           "picks": int(r["picks"])} for r in cur.fetchall()]
+
+        # ── By tag (schema_v23) ───────────────────────────────────────────────
+        # Joined through `lg` rather than read straight off review_tags, so the
+        # league/season filters at the top of this endpoint apply here too.
+        cur.execute(cte + """
+            SELECT rt.kind, rt.label_norm,
+                   (ARRAY_AGG(rt.label ORDER BY rt.id DESC))[1] AS label,
+                   MAX(rt.friend_user_id)      AS friend_user_id,
+                   COUNT(*)                    AS logged,
+                   COUNT(lg.rating)            AS rated,
+                   round(AVG(lg.rating) / 2.0, 2) AS avg_stars
+              FROM review_tags rt
+              JOIN lg ON lg.game_id = rt.game_id
+             WHERE rt.user_id = %(uid)s
+             GROUP BY rt.kind, rt.label_norm
+             ORDER BY logged DESC, label
+             LIMIT 60
+        """, params)
+        out["tags"] = [{
+            "kind":      r["kind"],
+            "label":     r["label"],
+            "labelNorm": r["label_norm"],
+            "friendUserId": r["friend_user_id"],
+            "logged":    int(r["logged"]),
+            "rated":     int(r["rated"]),
+            "avgStars":  float(r["avg_stars"]) if r["avg_stars"] is not None else None,
+        } for r in cur.fetchall()]
+
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/me/tags — your own tag vocabulary, with counts
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+@app.route("/api/me/tags")
+@login_required
+def get_my_tags():
+    """Every tag this user has used, most-used first.
+
+    Serves two jobs, and the second is the important one:
+
+      * the filter chips on the diary
+      * autocomplete while typing a new custom tag — without it you end up with
+        "Game 7", "game 7" and "game7" as three separate tags inside a week, and
+        no filter can ever reunite them
+
+    `label` is the most recent spelling the user actually typed; `labelNorm` is what
+    the filter matches on.
+    """
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT label_norm,
+                   -- The newest spelling wins as the display label: it is the one the
+                   -- user last chose, and DISTINCT ON needs the ORDER BY to match.
+                   (ARRAY_AGG(label ORDER BY id DESC))[1] AS label,
+                   COUNT(*)                               AS n,
+                   MAX(created_at)                        AS last_used
+              FROM review_tags
+             WHERE user_id = %s AND kind = 'custom'
+             GROUP BY label_norm
+             ORDER BY n DESC, last_used DESC
+             LIMIT 100
+        """, (user["id"],))
+        customs = [{"label": r["label"], "labelNorm": r["label_norm"],
+                    "n": int(r["n"]),
+                    "lastUsed": r["last_used"].isoformat() if r["last_used"] else None}
+                   for r in cur.fetchall()]
+
+        # Friends you've tagged, so "watched with" is a filter and not just a label.
+        # Joined to users for the CURRENT display name — review_tags.label is a
+        # snapshot from tag time, which is right on the log and wrong in a filter list.
+        cur.execute("""
+            SELECT rt.friend_user_id AS user_id,
+                   COALESCE(u.display_name, (ARRAY_AGG(rt.label ORDER BY rt.id DESC))[1]) AS name,
+                   u.avatar_url,
+                   COUNT(*) AS n
+              FROM review_tags rt
+              LEFT JOIN users u ON u.id = rt.friend_user_id
+             WHERE rt.user_id = %s AND rt.kind = 'friend'
+                   AND rt.friend_user_id IS NOT NULL
+             GROUP BY rt.friend_user_id, u.display_name, u.avatar_url
+             ORDER BY n DESC, name
+             LIMIT 100
+        """, (user["id"],))
+        friends = [{"userId": r["user_id"], "name": r["name"] or "",
+                    "avatarUrl": r["avatar_url"] or "", "n": int(r["n"])}
+                   for r in cur.fetchall()]
+
+        return jsonify({"customTags": customs, "friendTags": friends})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -13402,6 +14152,14 @@ def get_notifications():
     # Opt-in for the same reason list_published is: an unknown `type` makes an
     # older build fail to decode the whole array, not just skip the row.
     include_xp = request.args.get("include_xp") in ("1", "true")
+    # Friend tags, same opt-in for the same reason — and it is worth restating,
+    # because this looks like a user preference and is not one. NotificationItem.type
+    # on the client is a NON-OPTIONAL enum with no fallback case, and the array is
+    # decoded strictly: one row of an unknown type makes the WHOLE response fail to
+    # decode, so a build that predates 'friend_tag' would lose its likes and friend
+    # requests too, not just skip the tag. Nothing here throttles or hides tags from
+    # the user; blocking is the remedy for a nuisance tagger.
+    include_friend_tags = request.args.get("include_friend_tags") in ("1", "true")
     # Ballots used to arrive as 'list_published' and read "published a list",
     # which is wrong for a ballot. Splitting them off needs its own type, and a
     # new type needs its own opt-in — an older build switching on `type` would
@@ -13539,6 +14297,44 @@ def get_notifications():
             """
             xp_params = [uid, uid]
 
+        tag_arm = ""
+        tag_params: list = []
+        if include_friend_tags:
+            tag_arm = """
+                UNION ALL
+
+                -- A friend tagged you in their game log ("watched this with you").
+                -- The tagger is the actor; the game is carried so the row can open it.
+                --
+                -- Blocked either way is excluded here as well as at write time: a
+                -- block placed AFTER the tag was written has to hide the existing row
+                -- too, or blocking the tagger would leave their tag sitting in your
+                -- notifications forever.
+                SELECT
+                    'friend_tag'            AS type,
+                    rt.created_at,
+                    u.id                    AS actor_id,
+                    u.display_name          AS actor_name,
+                    u.avatar_url            AS actor_avatar,
+                    NULL::int               AS review_id,
+                    rt.game_id,
+                    g.home_team_abbr,
+                    g.away_team_abbr,
+                    g.game_date,
+                    NULL::text              AS reply_text,
+                    COALESCE(g.league,'nba') AS league
+                FROM review_tags rt
+                JOIN users      u ON u.id = rt.user_id
+                LEFT JOIN games g ON g.game_id = rt.game_id
+                WHERE rt.kind = 'friend' AND rt.friend_user_id = %s
+                  AND rt.user_id != %s
+                  AND NOT EXISTS (
+                        SELECT 1 FROM user_blocks b
+                         WHERE (b.blocker_id = %s AND b.blocked_id = rt.user_id)
+                            OR (b.blocker_id = rt.user_id AND b.blocked_id = %s))
+            """
+            tag_params = [uid, uid, uid, uid]
+
         cur.execute(f"""
             SELECT type, created_at, actor_id, actor_name, actor_avatar,
                    review_id, game_id, home_team_abbr, away_team_abbr,
@@ -13608,10 +14404,12 @@ def get_notifications():
                 {list_arm}
                 {ballot_arm}
                 {xp_arm}
+                {tag_arm}
             ) n
             ORDER BY created_at DESC
             LIMIT %s
-        """, (uid, uid, uid, uid, uid, *list_params, *ballot_params, *xp_params, limit))
+        """, (uid, uid, uid, uid, uid, *list_params, *ballot_params, *xp_params,
+              *tag_params, limit))
 
         rows = cur.fetchall()
         cur.close(); conn.close()
