@@ -2650,6 +2650,8 @@ function syncImpactTabVisibility() {
   // Playoffs have far fewer minutes played — default to 0, regular season to 500
   const defaultMin = isPlayoffs ? 0 : 500;
   ST.minMin = defaultMin;
+  // A fresh selection gets a fresh default; see relaxMinIfEmpty().
+  ST.minMinTouched = false;
   const slider = document.getElementById('min-slider');
   const label  = document.getElementById('min-value');
   if (slider) slider.value = String(defaultMin);
@@ -2752,9 +2754,33 @@ const minValue  = document.getElementById('min-value');
 
 minSlider.addEventListener('input', function() {
   ST.minMin = parseInt(this.value, 10);
+  // From here on the number is the user's, not ours, so the adaptive default
+  // below must stop overriding it — someone who deliberately asks for 500+
+  // and gets nobody is entitled to see an empty table.
+  ST.minMinTouched = true;
   minValue.textContent = ST.minMin > 0 ? `${ST.minMin} min` : 'All players';
   renderStatsTable();
 });
+// The 500-minute default assumes a finished season. Four games into 2026-27
+// the league leader had 151 minutes, so every row was filtered out and the
+// page read "No players match your filters" over a table of 400 players that
+// had loaded fine — the data was there, the default was wrong.
+//
+// Same reasoning as the playoffs case just above: the bar should fit the
+// volume actually played. Rather than guess at a date, check the data — if
+// nobody clears the default, show everyone. Once players pass 500 in November
+// the default takes effect again on its own.
+//
+// Only ever overrides OUR default, never a number the user chose.
+function relaxMinIfEmpty() {
+  if (ST.minMinTouched || ST.minMin <= 0) return;
+  const anyQualify = ST.players.some(p => (p.min || 0) >= ST.minMin);
+  if (anyQualify) return;
+  ST.minMin = 0;
+  if (minSlider) minSlider.value = '0';
+  if (minValue)  minValue.textContent = 'All players';
+}
+
 // Default 500 min matches slider value & ST.minMin
 minSlider.value = String(ST.minMin);
 
@@ -2792,6 +2818,7 @@ async function loadStats() {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     ST.players = data.players || [];
+    relaxMinIfEmpty();
     renderStatsTable();
     const display = ST.season.replace('-', '–');
     setStatus(`${ST.players.length} players · ${display} ${ST.seasonType}`);

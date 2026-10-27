@@ -109,7 +109,37 @@ def run():
     rows = cur.fetchall()
 
     if not rows:
-        print("❌ No players found. Run fetch_stats.py first.")
+        # Two very different situations look identical here, and conflating
+        # them failed this pipeline every day from 2026-10-21.
+        #
+        # If the season has rows but nobody has yet played MIN_MINUTES, that is
+        # not an error — it is October. The default bar is 500 minutes, roughly
+        # 13 games at starter usage, so every season opens with about a month
+        # where no one qualifies. Exiting 1 marked the whole local pipeline
+        # failed each morning (compute_pctiles is treated as a hard stop) and
+        # the health report alarmed daily, while the ten steps before it had
+        # all succeeded and nothing was actually missing. Last season's
+        # percentiles stay in place meanwhile, which is what the Builder is
+        # already serving.
+        #
+        # If the season has no rows at all, the upstream fetch genuinely did
+        # not run, and that still deserves a failure.
+        cur.execute(
+            "SELECT COUNT(*) AS n, MAX(min) AS top FROM player_seasons "
+            "WHERE season = %s AND season_type = %s",
+            (SEASON, SEASON_TYPE))
+        probe = cur.fetchone()
+        if probe["n"]:
+            print(f"⏳ {SEASON} {SEASON_TYPE}: {probe['n']} players on file, but the "
+                  f"leader has {float(probe['top'] or 0):.0f} of the {MIN_MINUTES} "
+                  f"minutes needed to qualify.")
+            print("   Too early in the season to rank anyone. Leaving the existing "
+                  "percentiles alone; this will start producing results on its own.")
+            cur.close(); conn.close()
+            sys.exit(0)
+
+        print(f"❌ No {SEASON} {SEASON_TYPE} rows in player_seasons at all — "
+              f"the season fetch did not run.")
         sys.exit(1)
 
     print(f"   {len(rows)} qualifying players found.\n")
