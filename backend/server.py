@@ -9006,13 +9006,31 @@ def get_user_stats(user_id):
              GROUP BY abbr, COALESCE(league, 'nba')
              ORDER BY logged DESC, abbr
         """, params)
+        team_rows = cur.fetchall()
+
+        # Display names, keyed (abbr, league) — the only key that identifies a team,
+        # since nine abbrs exist in both leagues. DISTINCT ON takes the most recent
+        # season's name so a relocation or rename shows the current one.
+        cur.execute("""
+            SELECT DISTINCT ON (team_abbr, COALESCE(league, 'nba'))
+                   team_abbr, COALESCE(league, 'nba') AS league, team_name
+              FROM team_seasons
+             WHERE team_name IS NOT NULL AND team_name <> '' AND team_name <> team_abbr
+             ORDER BY team_abbr, COALESCE(league, 'nba'), season DESC
+        """)
+        names = {(r["team_abbr"], r["league"]): r["team_name"] for r in cur.fetchall()}
+
         teams = []
-        for r in cur.fetchall():
+        for r in team_rows:
             mine  = float(r["avg_stars"]) if r["avg_stars"] is not None else None
             crowd = float(r["crowd_avg_stars"]) if r["crowd_avg_stars"] is not None else None
+            lg = (r["league"] or "nba").lower()
             teams.append({
                 "abbr":        r["abbr"],
-                "league":      (r["league"] or "nba").lower(),
+                "league":      lg,
+                # Falls back to the abbr rather than null: every caller renders this,
+                # and a team the ingest hasn't named yet must still have a label.
+                "teamName":    names.get((r["abbr"], lg)) or r["abbr"],
                 "logged":      int(r["logged"]),
                 "rated":       int(r["rated"]),
                 "avgStars":    mine,
@@ -9045,6 +9063,22 @@ def get_user_stats(user_id):
             "rated":    int(r["rated"]),
             "avgStars": float(r["avg_stars"]) if r["avg_stars"] is not None else None,
         } for r in cur.fetchall()]
+
+        # ── Seasons available to the selector ─────────────────────────────────
+        # Deliberately ignores the `season` filter while respecting `league`: these are
+        # the selector's OPTIONS, and a list that shrinks to the one season you already
+        # picked would strand you there with no way back.
+        cur.execute(_USER_STATS_LOGS_CTE.format(league_where=league_where,
+                                                season_where="") + """
+            SELECT season, COALESCE(league, 'nba') AS league, COUNT(*) AS logged
+              FROM lg WHERE season IS NOT NULL
+             GROUP BY season, COALESCE(league, 'nba')
+             ORDER BY season DESC, league
+        """, params)
+        out["availableSeasons"] = [{"season": r["season"],
+                                    "league": (r["league"] or "nba").lower(),
+                                    "logged": int(r["logged"])}
+                                   for r in cur.fetchall()]
 
         # ── Cadence ───────────────────────────────────────────────────────────
         # Keyed on game_date, not created_at: this answers "when do I watch
