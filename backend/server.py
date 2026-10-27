@@ -5609,9 +5609,9 @@ def _clean_custom_tags(raw):
     for t in raw:
         if not isinstance(t, str):
             continue
-        # Collapse internal whitespace and drop a leading '#'. People type the hash
-        # because the UI renders one; storing it would make "#dagger" and "dagger"
-        # two different tags.
+        # Collapse internal whitespace and drop a leading '#'. Nothing in the UI shows
+        # or asks for a hash, but people type it out of habit — and storing it would
+        # make "#dagger" and "dagger" two different tags.
         label = " ".join(t.split()).lstrip("#").strip()[:_CUSTOM_TAG_MAXLEN]
         if not label:
             continue
