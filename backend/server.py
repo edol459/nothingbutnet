@@ -8381,6 +8381,12 @@ _DIARY_GROUPED_SQL = """
             u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
             g.game_date, g.home_team_abbr, g.away_team_abbr,
             g.home_score, g.away_score,
+            -- Needed to filter by team at all: nine abbrs exist in BOTH leagues
+            -- (ATL, CHI, DAL, IND, MIN, PHX, POR, SEA, TOR), so "IND" alone selects
+            -- the Pacers AND the Fever. Also sent to the client, which otherwise
+            -- guesses league from a '10' game-id prefix that is wrong for 576 of
+            -- the 936 WNBA games in the database.
+            COALESCE(g.league, 'nba') AS league,
             COALESCE(lc.like_count, 0) AS like_count,
             {liked_by_me},
         -- Friend + custom tags (schema_v23). Correlated subqueries rather than a
@@ -8414,7 +8420,7 @@ _DIARY_GROUPED_SQL = """
 
 
 def _diary_grouped(user_id, viewer_id, limit, offset, sort, _filter, team, q=None,
-                   tag=None, friend_id=None):
+                   tag=None, friend_id=None, league=None):
     liked_by_me = ("EXISTS (SELECT 1 FROM review_likes rl_me WHERE rl_me.review_id = l.review_id "
                    "AND rl_me.user_id = %(viewer)s) AS liked_by_me") if viewer_id else "FALSE AS liked_by_me"
     where, params = [], {"uid": user_id, "limit": limit, "offset": offset}
@@ -8428,6 +8434,11 @@ def _diary_grouped(user_id, viewer_id, limit, offset, sort, _filter, team, q=Non
     if team:
         where.append("(home_team_abbr = %(team)s OR away_team_abbr = %(team)s)")
         params["team"] = team
+    # Independent of `team`, but load-bearing WITH it: filtering to "IND" without a
+    # league returns Pacers and Fever games mixed together.
+    if league in ("nba", "wnba"):
+        where.append("league = %(league)s")
+        params["league"] = league
     # Keyword search over your own diary. Covers everything the entry actually shows:
     # the note, who you gave Player of the Game to, the players in your stat tags, and
     # the matchup — so one box answers "by team OR keyword" rather than making the team
@@ -8502,6 +8513,7 @@ def get_user_activity(user_id):
     # builds, and they have no search box to send `q` from.
     q        = _like_query(request.args.get("q"))
     tag      = _norm_tag(request.args.get("tag")) or None
+    league   = (request.args.get("league") or "").strip().lower() or None
     try:
         friend_id = int(request.args.get("friend") or 0) or None
     except (TypeError, ValueError):
@@ -8511,7 +8523,7 @@ def get_user_activity(user_id):
         try:
             rows = _diary_grouped(user_id, viewer_id, limit, offset,
                                   request.args.get("sort", "recent"), _filter, team, q,
-                                  tag, friend_id)
+                                  tag, friend_id, league)
             return jsonify({"items": _format_feed_rows(rows),
                             "has_more": len(rows) == limit})
         except Exception as e:
@@ -8679,6 +8691,8 @@ def _format_feed_rows(rows) -> list:
             # Friend + custom tags, from review_tags rather than the stat-tag JSONB.
             "friend_tags":        d.get("friend_tags") or [],
             "custom_tags":        d.get("custom_tags") or [],
+            # Authoritative, unlike the client's '10' game-id prefix guess.
+            "league":             d.get("league") or "nba",
             "attended":           bool(d.get("attended", False)),
             "created_at":         str(d["created_at"]),
             "game_date":          str(d["game_date"]) if d.get("game_date") else None,
@@ -9057,14 +9071,19 @@ def get_user_stats(user_id):
         cur.execute(cte + """
             SELECT potg_person_id AS person_id,
                    MAX(potg_name) AS name,
-                   COUNT(*)       AS picks
+                   COUNT(*)       AS picks,
+                   -- The headshot CDN differs per league, so the client cannot build
+                   -- the URL without this.
+                   MAX(COALESCE(league, 'nba')) AS league
               FROM lg WHERE potg_person_id IS NOT NULL
              GROUP BY potg_person_id
              ORDER BY picks DESC, MAX(potg_name)
              LIMIT 10
         """, params)
         out["players"] = [{"personId": r["person_id"], "name": r["name"] or "",
-                           "picks": int(r["picks"])} for r in cur.fetchall()]
+                           "picks": int(r["picks"]),
+                           "league": (r["league"] or "nba").lower()}
+                          for r in cur.fetchall()]
 
         # ── By tag (schema_v23) ───────────────────────────────────────────────
         # Joined through `lg` rather than read straight off review_tags, so the
