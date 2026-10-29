@@ -4987,6 +4987,11 @@ def _format_review(r: dict) -> dict:
         "tags":           r.get("tags") or [],
         "friend_tags":    r.get("friend_tags") or [],
         "custom_tags":    r.get("custom_tags") or [],
+        # Authoritative league. The client's fallback — a "10" game-id prefix — is
+        # wrong for 576 of the 936 WNBA games (2024 and 2025 carry ESPN-style ids
+        # like 401620178), which silently hid them from every WNBA filter.
+        # None when the query didn't join `games`; the client then falls back.
+        "league":         r.get("league"),
         "attended":       bool(r.get("attended", False)),
         "ball_knowledge_level": _xp_to_level(int(r.get("xp") or 0)),
         "equipped_ring":        r.get("equipped_ring"),   # null=use rank, 0=no ring,  1-10=specific
@@ -5327,6 +5332,8 @@ _GAME_LOGS_SQL = """
     SELECT
         COALESCE(l.review_id, 0) AS id,
         %(gid)s::text            AS game_id,
+        (SELECT COALESCE(g.league, 'nba') FROM games g
+          WHERE g.game_id = %(gid)s) AS league,
         l.user_id,
         -- 0, not NULL: `Review.rating` is non-optional on the client and a grades-only log
         -- is exactly the "no game rating" case the feed already encodes as 0.
@@ -9267,6 +9274,7 @@ def get_user_reviews(user_id):
                 gr.*, u.display_name, u.avatar_url, u.favorite_team, u.is_pro, u.xp, u.equipped_ring, u.equipped_title,
                 g.game_date, g.home_team_abbr, g.away_team_abbr,
                 g.home_score, g.away_score, g.season, g.season_type,
+                COALESCE(g.league, 'nba') AS league,
                 (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count,
                 (SELECT COUNT(*) FROM review_likes  rl WHERE rl.review_id = gr.id) AS like_count,
                 EXISTS(SELECT 1 FROM review_likes rl WHERE rl.review_id = gr.id AND rl.user_id = %s) AS liked_by_me
@@ -9365,6 +9373,7 @@ def get_user_games(user_id):
                 u.equipped_ring, u.equipped_title,
                 g.game_date, g.home_team_abbr, g.away_team_abbr,
                 g.home_score, g.away_score, g.season, g.season_type,
+                COALESCE(g.league, 'nba') AS league,
                 (SELECT COUNT(*) FROM review_replies rr WHERE rr.review_id = gr.id) AS reply_count,
                 (SELECT COUNT(*) FROM review_likes  rl WHERE rl.review_id = gr.id) AS like_count,
                 EXISTS(SELECT 1 FROM review_likes rl WHERE rl.review_id = gr.id AND rl.user_id = %s) AS liked_by_me
@@ -9407,6 +9416,9 @@ def get_user_games(user_id):
                 "away_score":     d["away_score"],
                 "season":         d["season"],
                 "season_type":    d["season_type"],
+                # So the client stops inferring it from the game id, which is wrong
+                # for every 2024 and 2025 WNBA game.
+                "league":         d.get("league") or "nba",
                 "display_name":   d.get("display_name", ""),
                 "avatar_url":     d.get("avatar_url") or "",
                 "favorite_team":  d.get("favorite_team") or "",
