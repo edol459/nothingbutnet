@@ -16880,7 +16880,11 @@ def _enrich_wnba_games(games: list):
         rs = review_stats.get(str(g.get("gameId", "")), {})
         g["avg_stars"]    = rs.get("avg_stars")
         g["review_count"] = rs.get("review_count", 0)
-        g["is_playoffs"]  = False
+        # is_playoffs is NOT reset here. It used to be hardcoded False, which
+        # undid the flag the series block above had just set — and the client
+        # gates its series display on `game.isPlayoffs == true`, so the records
+        # were computed, serialised, and then never drawn.
+        g.setdefault("is_playoffs", False)
 
 
 # ── /api/wnba/scoreboard?date=YYYY-MM-DD ─────────────────────────────────────
