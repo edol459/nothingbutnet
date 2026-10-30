@@ -16797,6 +16797,65 @@ def _enrich_wnba_games(games: list):
             if abbr in records and g[side].get("wins") is None:
                 g[side]["wins"], g[side]["losses"] = records[abbr]
 
+    # ── Playoff series records ──
+    #
+    # This function never set is_playoffs or series_wins, so a WNBA playoff card
+    # showed no series state in any game state — the 2026 Finals sat at 3-3 with
+    # nothing on the card to say so.
+    #
+    # season_type comes from the DB rather than the id, because WNBA ids are not
+    # one format: 104… is a playoff game, but 576 older WNBA rows carry
+    # ESPN-style 401… ids where position [2] means nothing. The table knows; the
+    # id does not.
+    try:
+        conn = get_conn()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT game_id, season_type, season, home_team_abbr, away_team_abbr "
+            "FROM games WHERE game_id = ANY(%s) AND league = 'wnba'",
+            (game_ids,))
+        meta = {r["game_id"]: r for r in cur.fetchall()}
+
+        pairs = set()
+        for g in games:
+            m = meta.get(str(g.get("gameId", "")))
+            is_po = bool(m and m["season_type"] == "Playoffs")
+            g["is_playoffs"] = is_po
+            if is_po:
+                t1, t2 = sorted([m["away_team_abbr"], m["home_team_abbr"]])
+                pairs.add((m["season"], t1, t2))
+
+        series = {}
+        for season, t1, t2 in pairs:
+            cur.execute(
+                "SELECT home_team_abbr, away_team_abbr, home_score, away_score "
+                "FROM games WHERE league = 'wnba' AND season_type = 'Playoffs' "
+                "  AND status = 'Final' AND season = %s "
+                "  AND ((home_team_abbr = %s AND away_team_abbr = %s) "
+                "    OR (home_team_abbr = %s AND away_team_abbr = %s))",
+                (season, t1, t2, t2, t1))
+            wins = {t1: 0, t2: 0}
+            for sg in cur.fetchall():
+                winner = (sg["home_team_abbr"]
+                          if int(sg["home_score"] or 0) > int(sg["away_score"] or 0)
+                          else sg["away_team_abbr"])
+                if winner in wins:
+                    wins[winner] += 1
+            series[(t1, t2)] = wins
+
+        for g in games:
+            if not g.get("is_playoffs"):
+                continue
+            a = (g.get("away") or {}).get("abbr", "")
+            h = (g.get("home") or {}).get("abbr", "")
+            w = series.get(tuple(sorted([a, h])))
+            if w:
+                g["away"]["series_wins"] = w.get(a, 0)
+                g["home"]["series_wins"] = w.get(h, 0)
+        cur.close(); conn.close()
+    except Exception as e:
+        print(f"[wnba enrich] series error: {e}", flush=True)
+
     review_stats: dict = {}
     try:
         conn = get_conn()
