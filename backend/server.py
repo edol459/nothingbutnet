@@ -1044,6 +1044,8 @@ ANALYTICS_SOURCES = {
     "survival_unlimited", "poeltl_unlimited", "review_length",
     "cosmetics",    # locked rings/titles in the Ball Knowledge picker
     "archive",      # tried to log a game older than the free season window
+    "custom_tags",  # tried to add a free-text tag to a log
+    "diary_stats",  # hit the gated depth on the diary's Stats tab
     "profile", "games_hub", "settings", "feed", "onboarding", "other",
 }
 
