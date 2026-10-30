@@ -2615,7 +2615,12 @@ def _enrich_games_with_records(games):
         if away_abbr: all_abbrs.add(away_abbr)
         if home_abbr: all_abbrs.add(home_abbr)
         game_id = str(g.get("gameId", ""))
-        is_po = game_id.startswith("004")
+        # Position [2] of the id, not a "004" prefix. NBA playoffs are 004…,
+        # WNBA playoffs are 104… — the league lives in the first two digits and
+        # the season type in the third. Matching the whole prefix meant no WNBA
+        # playoff game was ever treated as one, so the 2026 Finals showed no
+        # series record on any card.
+        is_po = _season_type_from_game_id(game_id) == "Playoffs"
         g["is_playoffs"] = is_po
         if is_po and away_abbr and home_abbr:
             playoff_pairs.add(tuple(sorted([away_abbr, home_abbr])))
@@ -2713,7 +2718,7 @@ def _enrich_games_with_records(games):
         home_abbr = home.get("abbr", "")
         game_id   = str(g.get("gameId", ""))
 
-        if game_id.startswith("004") and away_abbr and home_abbr:
+        if g.get("is_playoffs") and away_abbr and home_abbr:
             pair = tuple(sorted([away_abbr, home_abbr]))
             sr   = series_records.get(pair, {})
             away["series_wins"] = sr.get(away_abbr, 0)
@@ -2733,7 +2738,7 @@ def _enrich_games_with_records(games):
     # series_wins defaults to 0 if DB failed, so we fail-safe toward showing games.
     games[:] = [
         g for g in games
-        if not str(g.get("gameId", "")).startswith("004")
+        if not g.get("is_playoffs")
         or int(g.get("gameStatus", 1) or 1) == 3
         or max(
             (g.get("away", {}).get("series_wins", 0) or 0),
