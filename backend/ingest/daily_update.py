@@ -171,17 +171,27 @@ def main():
         #    this step short-circuit on jerseys we already have and never once look
         #    for the new season's. Same rule as CLAUDE.md states for rosters: stats
         #    resolve from played games, membership resolves from the schedule. ─────
+        #    --skip-if-present is deliberately NOT passed. It exits the moment
+        #    the season has ANY jersey, so from 2026-10-20 this step ran in 0.2s
+        #    every day and never looked again — which is how five Classic
+        #    Editions (BKN, DEN, IND, PHI, SAS) published later went missing for
+        #    nine days while Indiana wore theirs. Teams add editions mid-season
+        #    and LockerVision republishes art, so "we have some" is not the same
+        #    as "we have all".
+        #
+        #    A full probe is ~17s and ~150 requests. The upsert is keyed on
+        #    image_hash, so re-running changes nothing when nothing changed.
         (
             'ingest_lockervision_jerseys.py',
             'NBA jerseys (new season art)',
             ['--season', season_util.roster_season('nba').split('-')[0],
-             '--skip-if-present', '--ok-if-unpublished'],
+             '--ok-if-unpublished'],
         ),
         (
             'ingest_lockervision_wnba_jerseys.py',
             'WNBA jerseys (new season art)',
             ['--season', str(season_util.roster_season('wnba')),
-             '--skip-if-present', '--ok-if-unpublished'],
+             '--ok-if-unpublished'],
         ),
 
         # ── Take back gifted Pro once it lapses. Cheap no-op on most days: it

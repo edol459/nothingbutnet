@@ -49,6 +49,15 @@ EDITION_NAMES = {
     "IE": "Icon Edition",
     "SE": "Statement Edition",
     "CE": "City Edition",
+    # Classic Edition — a throwback only some teams run in a given year, and the
+    # code is "CLE", not the "CL" you would guess (nothing to do with Cleveland).
+    # Five teams have one for 2026-27: BKN, DEN, IND, PHI, SAS. Indiana wears
+    # theirs for 30+ games, so leaving it out was not a rounding error.
+    #
+    # Probing it for all 30 costs nothing: the 25 without one answer 200 with the
+    # shared 3958-byte placeholder, which the existing uniqueness check already
+    # discards. That is precisely what the placeholder guard is for.
+    "CLE": "Classic Edition",
 }
 
 TEAMS = [
