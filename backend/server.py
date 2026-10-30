@@ -16766,7 +16766,15 @@ def _enrich_wnba_games(games: list):
         cur  = conn.cursor()
         cur.execute("""
             WITH seasons AS (
+                -- Both tables. An UPCOMING game lives only in scheduled_games,
+                -- so looking in `games` alone resolved no season for it and the
+                -- card came back with no record at all — which is why Game 7 of
+                -- the 2026 WNBA Finals showed nothing while Games 1-6 showed
+                -- their series.
                 SELECT DISTINCT season FROM games
+                 WHERE game_id = ANY(%s) AND league = 'wnba'
+                UNION
+                SELECT DISTINCT season FROM scheduled_games
                  WHERE game_id = ANY(%s) AND league = 'wnba'
             ),
             sides AS (
@@ -16784,7 +16792,7 @@ def _enrich_wnba_games(games: list):
                    COUNT(*) FILTER (WHERE won)     AS wins,
                    COUNT(*) FILTER (WHERE NOT won) AS losses
               FROM sides GROUP BY team_abbr
-        """, (game_ids,))
+        """, (game_ids, game_ids))
         for r in cur.fetchall():
             records[r["team_abbr"]] = (int(r["wins"]), int(r["losses"]))
         cur.close(); conn.close()
@@ -16812,8 +16820,11 @@ def _enrich_wnba_games(games: list):
         cur  = conn.cursor()
         cur.execute(
             "SELECT game_id, season_type, season, home_team_abbr, away_team_abbr "
-            "FROM games WHERE game_id = ANY(%s) AND league = 'wnba'",
-            (game_ids,))
+            "  FROM games WHERE game_id = ANY(%s) AND league = 'wnba' "
+            "UNION ALL "
+            "SELECT game_id, season_type, season, home_team_abbr, away_team_abbr "
+            "  FROM scheduled_games WHERE game_id = ANY(%s) AND league = 'wnba'",
+            (game_ids, game_ids))
         meta = {r["game_id"]: r for r in cur.fetchall()}
 
         pairs = set()
