@@ -5912,7 +5912,11 @@ def player_potg(person_id):
             SELECT w.game_id, w.votes, g.game_date, g.season,
                    g.home_team_abbr, g.away_team_abbr, g.home_score, g.away_score
               FROM won w JOIN games g ON g.game_id = w.game_id
-             ORDER BY g.game_date DESC LIMIT 20
+             -- The client filters this list by the profile's selected season and shows
+             -- it beside that season's win COUNT, so a cap that truncates makes the two
+             -- disagree. 20 was already one win from biting: the leader is on 19.
+             -- Bounded, but far above any realistic career total.
+             ORDER BY g.game_date DESC LIMIT 200
         """, (person_id,))
         games = [{
             "game_id":   r["game_id"],
