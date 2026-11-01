@@ -7260,11 +7260,18 @@ def get_review_replies(review_id):
         conn = get_conn()
         cur  = conn.cursor()
         cur.execute("""
-            SELECT rr.id, rr.reply_text, rr.created_at,
-                   u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team
+            SELECT rr.id, rr.reply_text, rr.created_at, rr.parent_reply_id,
+                   u.id AS user_id, u.display_name, u.avatar_url, u.favorite_team,
+                   -- Who this answers, so a nested reply can say so without the
+                   -- client having to resolve ids against the same list.
+                   pu.display_name AS parent_display_name
             FROM review_replies rr
             JOIN users u ON rr.user_id = u.id
+            LEFT JOIN review_replies pr ON pr.id = rr.parent_reply_id
+            LEFT JOIN users pu ON pu.id = pr.user_id
             WHERE rr.review_id = %s
+            -- Flat and chronological. The client nests by parent_reply_id; doing
+            -- it here would mean recursive SQL for a tree that is two deep.
             ORDER BY rr.created_at ASC
             LIMIT %s OFFSET %s
         """, (review_id, limit, offset))
@@ -7300,11 +7307,28 @@ def post_review_reply(review_id):
         if not cur.fetchone():
             cur.close(); conn.close()
             return jsonify({"error": "Review not found"}), 404
+
+        # Optional parent. Validated against THIS review: a parent from another
+        # review would render as a thread that cannot exist, and the id comes
+        # from the client, so it is not trustworthy on its own.
+        parent_id = body.get("parent_reply_id")
+        if parent_id is not None:
+            try:
+                parent_id = int(parent_id)
+            except (TypeError, ValueError):
+                cur.close(); conn.close()
+                return jsonify({"error": "parent_reply_id must be an integer"}), 400
+            cur.execute("SELECT id FROM review_replies WHERE id = %s AND review_id = %s",
+                        (parent_id, review_id))
+            if not cur.fetchone():
+                cur.close(); conn.close()
+                return jsonify({"error": "parent reply not found on this review"}), 404
+
         cur.execute("""
-            INSERT INTO review_replies (review_id, user_id, reply_text)
-            VALUES (%s, %s, %s)
+            INSERT INTO review_replies (review_id, user_id, reply_text, parent_reply_id)
+            VALUES (%s, %s, %s, %s)
             RETURNING id, created_at
-        """, (review_id, user["id"], text))
+        """, (review_id, user["id"], text, parent_id))
         row = cur.fetchone()
         conn.commit()
         cur.close(); conn.close()
@@ -7316,6 +7340,7 @@ def post_review_reply(review_id):
             "avatar_url":   user.get("avatar_url"),
             "favorite_team": user.get("favorite_team"),
             "reply_text":   text,
+            "parent_reply_id": parent_id,
             "created_at":   str(row["created_at"]),
         }}), 201
     except Exception as e:
@@ -8954,8 +8979,18 @@ def get_user_stats(user_id):
               FROM lg
         """, params)
         t = cur.fetchone() or {}
+        cur.execute(cte + """
+            SELECT COUNT(DISTINCT rt.game_id) AS n
+              FROM review_tags rt JOIN lg ON lg.game_id = rt.game_id
+             WHERE rt.user_id = %(uid)s AND rt.kind = 'friend'
+        """, params)
+        with_friends = int((cur.fetchone() or {}).get("n") or 0)
+
         out["totals"] = {
             "logs":      int(t.get("logs") or 0),
+            # DISTINCT games, not tag rows: watching one game with three friends is
+            # one night out, not three.
+            "withFriends": with_friends,
             "rated":     int(t.get("rated") or 0),
             "notes":     int(t.get("notes") or 0),
             "attended":  int(t.get("attended") or 0),
@@ -9076,6 +9111,42 @@ def get_user_stats(user_id):
             "logged":   int(r["logged"]),
             "rated":    int(r["rated"]),
             "avgStars": float(r["avg_stars"]) if r["avg_stars"] is not None else None,
+        } for r in cur.fetchall()]
+
+        # ── Watched with ──────────────────────────────────────────────────────
+        # Joined through `lg`, so the league and season filters apply here like
+        # everywhere else on this page.
+        #
+        # The display name comes from `users`, NOT from review_tags.label: the label is
+        # a snapshot of how the name read at tag time, which is right on the log itself
+        # and wrong in a list of people you know. It is kept only as the fallback for a
+        # deleted account, where the join yields nothing.
+        cur.execute(cte + """
+            SELECT rt.friend_user_id                             AS user_id,
+                   COALESCE(u.display_name,
+                            (ARRAY_AGG(rt.label ORDER BY rt.id DESC))[1]) AS name,
+                   u.avatar_url,
+                   COUNT(DISTINCT rt.game_id)                    AS logged,
+                   COUNT(lg.rating)                              AS rated,
+                   round(AVG(lg.rating) / 2.0, 2)                AS avg_stars,
+                   MAX(lg.game_date)                             AS last_watched
+              FROM review_tags rt
+              JOIN lg ON lg.game_id = rt.game_id
+              LEFT JOIN users u ON u.id = rt.friend_user_id
+             WHERE rt.user_id = %(uid)s AND rt.kind = 'friend'
+                   AND rt.friend_user_id IS NOT NULL
+             GROUP BY rt.friend_user_id, u.display_name, u.avatar_url
+             ORDER BY logged DESC, name
+             LIMIT 50
+        """, params)
+        out["friends"] = [{
+            "userId":     r["user_id"],
+            "name":       r["name"] or "",
+            "avatarUrl":  r["avatar_url"] or "",
+            "logged":     int(r["logged"]),
+            "rated":      int(r["rated"]),
+            "avgStars":   float(r["avg_stars"]) if r["avg_stars"] is not None else None,
+            "lastWatched": r["last_watched"].isoformat() if r["last_watched"] else None,
         } for r in cur.fetchall()]
 
         # ── Seasons available to the selector ─────────────────────────────────
@@ -14452,7 +14523,16 @@ def get_notifications():
                 JOIN game_reviews gr ON gr.id = rr.review_id
                 JOIN users        u  ON u.id  = rr.user_id
                 LEFT JOIN games   g  ON g.game_id = gr.game_id
-                WHERE gr.user_id = %s AND rr.user_id != %s
+                LEFT JOIN review_replies pr ON pr.id = rr.parent_reply_id
+                -- Notify whoever is being answered: the parent reply's author
+                -- for a nested reply, the review's author for a top-level one.
+                --
+                -- This used to be `gr.user_id = %s` alone, so only the review
+                -- author ever heard anything. Comment on someone's review, get
+                -- a reply, and you were never told — the conversation simply
+                -- ended from your side.
+                WHERE COALESCE(pr.user_id, gr.user_id) = %s
+                  AND rr.user_id != %s
 
                 UNION ALL
 
