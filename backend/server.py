@@ -14527,10 +14527,18 @@ def get_notifications():
                 -- Notify whoever is being answered: the parent reply's author
                 -- for a nested reply, the review's author for a top-level one.
                 --
-                -- This used to be `gr.user_id = %s` alone, so only the review
+                -- This used to be `gr.user_id = %%s` alone, so only the review
                 -- author ever heard anything. Comment on someone's review, get
                 -- a reply, and you were never told — the conversation simply
                 -- ended from your side.
+                --
+                -- The %%s above is DOUBLED on purpose. psycopg2 interpolates this
+                -- string before Postgres ever parses it, so it cannot tell a
+                -- placeholder from one sitting inside a `--` comment: an unescaped one
+                -- is counted as a bind parameter, every argument after it shifts by
+                -- one, and the whole query dies with "tuple index out of range".
+                -- That emptied every user's notifications tab, because this endpoint
+                -- returning an error means the client decodes no rows at all.
                 WHERE COALESCE(pr.user_id, gr.user_id) = %s
                   AND rr.user_id != %s
 
