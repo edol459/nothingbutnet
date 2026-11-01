@@ -328,6 +328,72 @@ function showTab(tab) {
   }
 }
 
+// ── Email one person ──────────────────────────────────────────
+// Reuses the gift-pro lookup: same question ("who is this?"), same answer, and
+// one resolver is easier to trust than two that can drift.
+let oneFound = null;
+
+async function oneLookup() {
+  const q = document.getElementById('one-q').value.trim();
+  const box = document.getElementById('one-result');
+  oneFound = null;
+  if (!q) { box.innerHTML = ''; return; }
+  box.innerHTML = '<div class="table-state">Looking up…</div>';
+  try {
+    const r = await fetch('/api/admin/gift-pro/lookup?query=' + encodeURIComponent(q));
+    if (r.status === 404) {
+      box.innerHTML = '<div class="gift-who"><div class="gift-meta">No user matches that id or email.</div></div>';
+      return;
+    }
+    const { user } = await r.json();
+    oneFound = user;
+    box.innerHTML = `
+      <div class="gift-who">
+        <div class="gift-name">${esc(user.displayName || '(no name)')}</div>
+        <div class="gift-meta">${esc(user.email)} · id ${user.id}</div>
+        <div class="mail-field" style="margin-top:12px">
+          <label class="mail-label" for="one-subject">Subject</label>
+          <input class="search-input" id="one-subject" style="width:100%"
+                 placeholder="Thanks for going Pro" autocomplete="off">
+        </div>
+        <div class="mail-field">
+          <label class="mail-label" for="one-body">Message</label>
+          <textarea class="mail-body" id="one-body" style="min-height:150px"
+            placeholder="Plain text. Leave a blank line between paragraphs."></textarea>
+        </div>
+        <button class="btn-search" id="one-send" onclick="oneSend()">Send to ${esc(user.displayName || user.email)}</button>
+      </div>`;
+  } catch (e) {
+    box.innerHTML = '<div class="gift-who"><div class="gift-meta">Lookup failed.</div></div>';
+  }
+}
+
+async function oneSend() {
+  if (!oneFound) return;
+  const subject = document.getElementById('one-subject').value.trim();
+  const body    = document.getElementById('one-body').value.trim();
+  if (!subject || !body) { toast('Subject and message are both required'); return; }
+  if (!confirm(`Send this to ${oneFound.email}?`)) return;
+  const btn = document.getElementById('one-send');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const r = await fetch('/api/admin/email/user', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      // By id, never the typed text — the id is what was shown and confirmed.
+      body: JSON.stringify({ query: String(oneFound.id), subject, body }),
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || 'Could not send'); btn.disabled = false;
+                 btn.textContent = 'Send'; return; }
+    toast(`Sent to ${d.to}`);
+    document.getElementById('one-result').innerHTML =
+      `<div class="gift-who"><div class="gift-meta">Sent to ${esc(d.to)}.</div></div>`;
+    mailHistory();
+  } catch (e) {
+    toast('Could not send'); btn.disabled = false; btn.textContent = 'Send';
+  }
+}
+
 // ── Email composer ────────────────────────────────────────────
 // Shares the backend send path with the CLI, so opt-outs, the never-twice
 // ledger, the unsubscribe link and the postal-address check all apply here
@@ -374,6 +440,21 @@ function renderEmail() {
         </div>
         <div id="mail-prog"></div>
       </div>
+    </div>
+
+    <div class="panel" style="margin-top:20px">
+      <h3>Email one person</h3>
+      <div class="mail-hint" style="margin-bottom:10px">
+        A single message — thanking a subscriber, answering a reply. Same sender
+        and footer as a campaign, and logged, so you can see who you've written to.
+      </div>
+      <div class="gift-grid">
+        <input class="search-input" id="one-q" placeholder="email or user id"
+               autocomplete="off" onkeydown="if(event.key==='Enter')oneLookup()">
+        <span></span>
+        <button class="btn-search" onclick="oneLookup()">Look up</button>
+      </div>
+      <div id="one-result"></div>
     </div>
 
     <div class="panel" style="margin-top:20px">

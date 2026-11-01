@@ -15883,6 +15883,74 @@ def admin_email_test():
     return jsonify({"ok": True, "to": to, "id": pid})
 
 
+@app.route("/api/admin/email/user", methods=["POST"])
+@_admin_required
+def admin_email_user():
+    """Send one person one email.
+
+    Goes through the same emailer as a campaign, so it carries the postal
+    address CAN-SPAM requires and a working unsubscribe link, and it is logged.
+
+    The campaign id is `direct-YYYY-MM-DD`. That is not cosmetic: email_sends'
+    primary key is (campaign, user_id), so dating it means one direct email per
+    person per day — enough of a guard against a double-send from a double-click
+    or a retry, without blocking a genuine follow-up tomorrow.
+    """
+    em   = _email_mod()
+    body = request.get_json(silent=True) or {}
+    subject = (body.get("subject") or "").strip()
+    text    = (body.get("body") or "").strip()
+
+    conn = get_conn(); cur = conn.cursor()
+    row = _gift_lookup(cur, body.get("query"))
+    if not row:
+        conn.rollback()
+        return jsonify({"error": "No user matches that id or email"}), 404
+    if not row["email"]:
+        conn.rollback()
+        return jsonify({"error": "That account has no email address"}), 400
+
+    # Someone who asked not to be emailed is not a special case for the admin.
+    cur.execute("SELECT email_opt_out FROM users WHERE id = %s", (row["id"],))
+    if (cur.fetchone() or {}).get("email_opt_out"):
+        conn.rollback()
+        return jsonify({"error": f"{row['email']} has unsubscribed from email. "
+                                 "Reach them another way."}), 409
+
+    problems = em.preflight("direct", subject, text)
+    if problems:
+        conn.rollback()
+        return jsonify({"error": "; ".join(problems)}), 400
+
+    campaign = "direct-" + _dt.now().strftime("%Y-%m-%d")
+    try:
+        cur.execute("""
+            INSERT INTO email_sends (campaign, user_id, email, status)
+            VALUES (%s,%s,%s,'sending')
+        """, (campaign, row["id"], row["email"]))
+        conn.commit()
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        return jsonify({"error": f"{row['email']} already got a direct email today."}), 409
+
+    postal = (os.getenv("POSTAL_ADDRESS") or "").strip()
+    html, txt = em.render(subject, em.body_to_html(text), row["id"], postal)
+    pid, err = em.send_one(row["email"], subject, html, txt, row["id"])
+    if err:
+        cur.execute("UPDATE email_sends SET status=%s WHERE campaign=%s AND user_id=%s",
+                    (f"failed:{err[:80]}", campaign, row["id"]))
+        conn.commit()
+        return jsonify({"error": err}), 502
+
+    cur.execute("""UPDATE email_sends SET status='sent', provider_id=%s
+                    WHERE campaign=%s AND user_id=%s""", (pid, campaign, row["id"]))
+    conn.commit()
+    print(f"[email] direct to user {row['id']} <{row['email']}> "
+          f"by admin {(current_user() or {}).get('id')}", flush=True)
+    return jsonify({"ok": True, "to": row["email"],
+                    "displayName": row["display_name"], "id": pid})
+
+
 @app.route("/api/admin/email/send", methods=["POST"])
 @_admin_required
 def admin_email_send():
