@@ -3342,6 +3342,27 @@ def _fetch_injury_report(league: str = "nba") -> dict:
         return cache["data"]
 
 
+def _live_participant_ids(game_id: str) -> set | None:
+    """personIds with real minutes in a live game, or None if the boxscore is away.
+
+    Used to RESCUE players the injury report says are out. None and an empty set mean
+    different things: None is "we could not look", which must leave the injury report's
+    verdict standing, while an empty set is "nobody has played yet", which is a real
+    answer early in a game.
+    """
+    box = _fetch_live_boxscore_data(game_id)
+    if not box:
+        return None
+    out = set()
+    for side in ("homeTeam", "awayTeam"):
+        for pl in ((box.get(side) or {}).get("players") or []):
+            pid = pl.get("personId")
+            mins = _cdn_minutes(((pl.get("statistics") or {}).get("minutes")))
+            if pid and (mins or 0) > 0:
+                out.add(pid)
+    return out
+
+
 def _is_out(player_name: str, injury_report: dict) -> bool:
     """True if player is Out / Doubtful / Injured Reserve / Suspension."""
     if not injury_report or not player_name:
@@ -4178,9 +4199,11 @@ def players_today():
     sorted followed-first then by tier (Final > Live > Scheduled). Final uses
     real minutes/points (one-time boxscore fetch, cached forever); Live and
     Scheduled use season avg minutes/points (no live polling needed — cheap
-    and stable while a game is in progress). Scheduled players confirmed OUT
-    (ESPN injury report) are excluded entirely; Live/Final are unaffected
-    since they're built from actual boxscore/roster participants.
+    and stable while a game is in progress). Players confirmed OUT (ESPN injury
+    report) are excluded from scheduled AND live games — both are built from
+    the roster, not a boxscore, so neither can tell who actually played. Finals
+    need no such filter: they read the real boxscore and drop zero-minute
+    players.
 
     Body: {"date": "YYYY-MM-DD", "games": [{"gameId", "status": "scheduled"|
     "live"|"final", "gameTimeUTC", "homeAbbr", "awayAbbr"}, ...]}
@@ -4367,11 +4390,34 @@ def players_today():
                     injury_by_league[league] = _fetch_injury_report(league)
                 injury = injury_by_league[league]
                 season = wnba_season if league == "wnba" else nba_season
+
+                # A late upgrade, or the "doubtful" half of _is_out, can be on the floor
+                # while the morning's report still says OUT — and hiding someone the user
+                # is watching play is worse than the stale listing we are guarding against.
+                # So the report decides only until the boxscore can speak.
+                #
+                # Live only: scheduled games have no boxscore to consult, and finals never
+                # reach this branch. One fetch per live game, behind the same 20s cache the
+                # log sheet already fills, so this adds no new polling of its own.
+                live_played = _live_participant_ids(game_id) if status == "live" else None
                 for abbr in (home_abbr, away_abbr):
                     if not abbr:
                         continue
                     for p in _roster_with_avg_minutes(cur, abbr, league, season):
-                        if status == "scheduled" and _is_out(p["playerName"], injury):
+                        # Applies to LIVE as well as scheduled. This branch builds from
+                        # the roster and season averages, NOT from a boxscore — so
+                        # nothing here knows whether a player actually took the floor.
+                        # Gating the check on "scheduled" meant someone on the injury
+                        # report was correctly hidden before tipoff and then reappeared
+                        # the moment the game went live, which is when the rail is most
+                        # looked at. (Haliburton, out with a hamstring, surfaced in My
+                        # Players during a game he never dressed for.)
+                        #
+                        # Finals never reach this branch: no boxscore means `continue`
+                        # above, and with one they are filtered on real minutes.
+                        if _is_out(p["playerName"], injury) and not (
+                                live_played is not None
+                                and p["playerId"] in live_played):
                             continue
                         rows.append({
                             "playerId": p["playerId"], "playerName": p["playerName"],
