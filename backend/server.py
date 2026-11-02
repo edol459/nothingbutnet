@@ -5611,6 +5611,34 @@ def _norm_tag(label):
     return " ".join((label or "").lower().split())
 
 
+def _clean_draft_friend_tags(raw):
+    """Sanitise a DRAFT's friend tags. Shape is [{"userId": int, "name": str}].
+
+    Accepts the older bare-id form too, so a draft written by a previous build still
+    saves instead of 400ing. Eligibility is deliberately not checked here — a draft is
+    private, and the friendship and block rules run at publish (_resolve_friend_tags),
+    which is the only place they can actually be enforced.
+    """
+    if not isinstance(raw, list):
+        return []
+    out, seen = [], set()
+    for t in raw[:_MAX_FRIEND_TAGS]:
+        uid, name = None, ""
+        if isinstance(t, dict):
+            uid, name = t.get("userId"), str(t.get("name") or "")[:60]
+        elif isinstance(t, (int, str)):
+            uid = t
+        try:
+            uid = int(uid)
+        except (TypeError, ValueError):
+            continue
+        if uid in seen:
+            continue
+        seen.add(uid)
+        out.append({"userId": uid, "name": name})
+    return out
+
+
 def _clean_custom_tags(raw):
     """Sanitise user-typed tags. Returns a list of display labels, deduped by norm.
 
@@ -6698,8 +6726,10 @@ def put_game_draft(game_id):
               # A draft is a private buffer, so the Pro gate and the friendship check
               # are NOT applied here — they run at publish, where they matter. Blocking
               # a draft save would throw away what someone already typed.
-              _json.dumps([int(v) for v in (body.get("friendTags") or [])
-                           if isinstance(v, (int, str)) and str(v).lstrip("-").isdigit()][:_MAX_FRIEND_TAGS]),
+              #
+              # Stores {userId, name}, not bare ids: the client has to render a restored
+              # draft without a round trip, and an id alone gave it nothing to draw.
+              _json.dumps(_clean_draft_friend_tags(body.get("friendTags"))),
               _json.dumps(_clean_custom_tags(body.get("customTags")))))
         row = dict(cur.fetchone())
         conn.commit(); cur.close(); conn.close()
