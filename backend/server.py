@@ -14383,6 +14383,9 @@ def get_notifications():
     # requests too, not just skip the tag. Nothing here throttles or hides tags from
     # the user; blocking is the remedy for a nuisance tagger.
     include_friend_tags = request.args.get("include_friend_tags") in ("1", "true")
+    # Replies to your comment on a player's performance. Opt-in for the same
+    # decoding reason as every type above it.
+    include_perf_replies = request.args.get("include_perf_replies") in ("1", "true")
     # Ballots used to arrive as 'list_published' and read "published a list",
     # which is wrong for a ballot. Splitting them off needs its own type, and a
     # new type needs its own opt-in — an older build switching on `type` would
@@ -14558,6 +14561,42 @@ def get_notifications():
             """
             tag_params = [uid, uid, uid, uid]
 
+        perf_arm = ""
+        perf_params: list = []
+        if include_perf_replies:
+            # A REPLY to your comment, and only that. A top-level comment on a
+            # performance notifies nobody — there is no author of a performance to
+            # tell, and picking a stand-in recipient would spam people who never
+            # opened that player. `parent_id` names exactly one person, which is
+            # what makes this one safe to send.
+            perf_arm = """
+                UNION ALL
+
+                SELECT
+                    'perf_reply'            AS type,
+                    c.created_at,
+                    u.id                    AS actor_id,
+                    u.display_name          AS actor_name,
+                    u.avatar_url            AS actor_avatar,
+                    c.person_id             AS review_id,
+                    c.game_id,
+                    g.home_team_abbr,
+                    g.away_team_abbr,
+                    g.game_date,
+                    c.body                  AS reply_text,
+                    COALESCE(g.league,'nba') AS league
+                FROM performance_comments c
+                JOIN performance_comments p ON p.id = c.parent_id
+                JOIN users      u ON u.id = c.user_id
+                LEFT JOIN games g ON g.game_id = c.game_id
+                WHERE p.user_id = %s AND c.user_id != %s
+                  AND NOT EXISTS (
+                        SELECT 1 FROM user_blocks b
+                         WHERE (b.blocker_id = %s AND b.blocked_id = c.user_id)
+                            OR (b.blocker_id = c.user_id AND b.blocked_id = %s))
+            """
+            perf_params = [uid, uid, uid, uid]
+
         cur.execute(f"""
             SELECT type, created_at, actor_id, actor_name, actor_avatar,
                    review_id, game_id, home_team_abbr, away_team_abbr,
@@ -14645,11 +14684,12 @@ def get_notifications():
                 {ballot_arm}
                 {xp_arm}
                 {tag_arm}
+                {perf_arm}
             ) n
             ORDER BY created_at DESC
             LIMIT %s
         """, (uid, uid, uid, uid, uid, *list_params, *ballot_params, *xp_params,
-              *tag_params, limit))
+              *tag_params, *perf_params, limit))
 
         rows = cur.fetchall()
         cur.close(); conn.close()
@@ -15024,17 +15064,211 @@ def remove_friend(target_id):
 
 # ── Moderation ────────────────────────────────────────────────────
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Comments on a player's performance (schema_v24)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# A performance has no owner, so these are a READING surface: a top-level comment
+# notifies nobody. Only a reply notifies, because `parent_id` names exactly one
+# person. See schema_v24.py for why that is the design rather than an omission.
+_PERF_COMMENT_MAX = 1000
+
+
+def _ensure_perf_comments(cur):
+    """Create the table on a deploy that has not run schema_v24 yet."""
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS performance_comments (
+            id         SERIAL PRIMARY KEY,
+            game_id    TEXT    NOT NULL,
+            person_id  INTEGER NOT NULL,
+            user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            parent_id  INTEGER REFERENCES performance_comments(id) ON DELETE CASCADE,
+            body       TEXT    NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    cur.execute("""CREATE INDEX IF NOT EXISTS idx_perf_comments_card
+                     ON performance_comments (game_id, person_id, created_at)""")
+
+
+@app.route("/api/games/<game_id>/players/<int:person_id>/comments")
+def get_performance_comments(game_id, person_id):
+    """Every comment on one performance, oldest first.
+
+    Public: plenty of people will read a card without ever writing on one, and
+    gating the conversation behind an account hides the thing that makes the card
+    worth opening. Blocked users are filtered for signed-in viewers only — there is
+    nobody to filter against otherwise.
+
+    Flat on the wire, with `parentId` carried through, so the client decides how to
+    nest. One level is all the UI draws; the column allows more if that changes.
+    """
+    viewer = current_user()
+    viewer_id = viewer["id"] if viewer else None
+    limit = min(int(request.args.get("limit", 200)), 500)
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        block_where, params = "", {"gid": game_id, "pid": person_id, "limit": limit}
+        if viewer_id:
+            block_where = ("AND c.user_id NOT IN (SELECT blocked_id FROM user_blocks "
+                           "WHERE blocker_id = %(me)s)")
+            params["me"] = viewer_id
+        cur.execute(f"""
+            SELECT c.id, c.parent_id, c.body, c.created_at, c.user_id,
+                   u.display_name, u.avatar_url, u.favorite_team, u.is_pro,
+                   u.xp, u.equipped_ring, u.equipped_title
+              FROM performance_comments c
+              JOIN users u ON u.id = c.user_id
+             WHERE c.game_id = %(gid)s AND c.person_id = %(pid)s
+                   {block_where}
+             ORDER BY c.created_at ASC
+             LIMIT %(limit)s
+        """, params)
+        items = [{
+            "id":        r["id"],
+            "parentId":  r["parent_id"],
+            "body":      r["body"],
+            "createdAt": r["created_at"].strftime("%Y-%m-%dT%H:%M:%SZ") if r["created_at"] else None,
+            "userId":    r["user_id"],
+            "displayName": r["display_name"] or "",
+            "avatarUrl":   r["avatar_url"] or "",
+            "favoriteTeam": r["favorite_team"] or "",
+            "isPro":       bool(r["is_pro"]),
+            "ballKnowledgeLevel": _xp_to_level(int(r["xp"] or 0)),
+            "equippedRing":  r["equipped_ring"],
+            "equippedTitle": r["equipped_title"],
+            # So the client can offer delete without a second request.
+            "isMine":      viewer_id is not None and r["user_id"] == viewer_id,
+        } for r in cur.fetchall()]
+        return jsonify({"comments": items, "count": len(items)})
+    except Exception as e:
+        return jsonify({"comments": [], "count": 0, "error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/games/<game_id>/players/<int:person_id>/comments", methods=["POST"])
+@login_required
+def post_performance_comment(game_id, person_id):
+    user = current_user()
+    body = request.get_json(silent=True) or {}
+    text = (body.get("body") or body.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "A comment can't be empty."}), 400
+    if len(text) > _PERF_COMMENT_MAX:
+        return jsonify({"error": f"Comments are {_PERF_COMMENT_MAX} characters or fewer."}), 400
+    if _contains_slur(text):
+        return jsonify({"error": "Your comment contains language that isn't allowed."}), 400
+
+    parent_id = body.get("parentId") or body.get("parent_id")
+    try:
+        parent_id = int(parent_id) if parent_id is not None else None
+    except (TypeError, ValueError):
+        return jsonify({"error": "parentId must be an integer"}), 400
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        _ensure_perf_comments(cur)
+        if parent_id is not None:
+            # The parent has to be on THIS performance. Without the check a reply could
+            # be hung off a comment from another player's card, where it would render
+            # under a question nobody can see.
+            cur.execute("""SELECT user_id, parent_id FROM performance_comments
+                            WHERE id = %s AND game_id = %s AND person_id = %s""",
+                        (parent_id, game_id, person_id))
+            parent = cur.fetchone()
+            if not parent:
+                conn.rollback(); return jsonify({"error": "That comment no longer exists."}), 404
+            # One level deep: replying to a reply attaches to its parent instead, so a
+            # thread can't out-nest the UI that draws it.
+            if parent["parent_id"]:
+                parent_id = parent["parent_id"]
+
+        cur.execute("""
+            INSERT INTO performance_comments (game_id, person_id, user_id, parent_id, body)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, created_at
+        """, (game_id, person_id, user["id"], parent_id, text))
+        row = cur.fetchone()
+        conn.commit()
+
+        _safe_log("performance_comment", source="player_card", user_id=user["id"],
+                  platform="ios", metadata={"game_id": game_id, "person_id": person_id,
+                                            "is_reply": parent_id is not None,
+                                            "length": len(text)})
+        return jsonify({
+            "id": row["id"],
+            "parentId": parent_id,
+            "body": text,
+            "createdAt": row["created_at"].strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "userId": user["id"],
+            "displayName": user["display_name"],
+            "avatarUrl": user.get("avatar_url") or "",
+            "isMine": True,
+        }), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/performance-comments/<int:comment_id>", methods=["DELETE"])
+@login_required
+def delete_performance_comment(comment_id):
+    """Delete your own comment. Admins can delete anyone's, for the report queue.
+
+    Replies go with it (ON DELETE CASCADE) rather than being left answering
+    something nobody can see.
+    """
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT user_id FROM performance_comments WHERE id = %s", (comment_id,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "Comment not found"}), 404
+        if row["user_id"] != user["id"] and not _is_admin(user):
+            return jsonify({"error": "Not your comment"}), 403
+        cur.execute("DELETE FROM performance_comments WHERE id = %s", (comment_id,))
+        conn.commit()
+        return jsonify({"ok": True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
 @app.route("/api/reports", methods=["POST"])
 @login_required
 def report_content():
     me = current_user()
     data = request.get_json(force=True) or {}
-    review_id = data.get("review_id")
-    if not review_id:
-        return jsonify({"error": "review_id required"}), 400
+    review_id  = data.get("review_id")
+    # Performance comments are a second kind of reportable content (schema_v24).
+    # Both columns are nullable and a report names exactly one of them.
+    comment_id = data.get("comment_id")
+    if not review_id and not comment_id:
+        return jsonify({"error": "review_id or comment_id required"}), 400
     try:
         conn = get_conn()
         cur  = conn.cursor()
+        if comment_id:
+            cur.execute("INSERT INTO content_reports (reporter_id, comment_id) "
+                        "VALUES (%s, %s)", (me["id"], comment_id))
+            cur.execute("""
+                SELECT c.body AS review_text, u.display_name, c.game_id
+                  FROM performance_comments c
+                  JOIN users u ON u.id = c.user_id
+                 WHERE c.id = %s
+            """, (comment_id,))
+            row = cur.fetchone()
+            conn.commit(); cur.close(); conn.close()
+            _safe_log("content_report", source="player_card", user_id=me["id"],
+                      platform="ios", metadata={"comment_id": comment_id})
+            return jsonify({"ok": True})
         cur.execute(
             "INSERT INTO content_reports (reporter_id, review_id) VALUES (%s, %s)",
             (me["id"], review_id)
