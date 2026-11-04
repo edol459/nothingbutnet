@@ -18397,7 +18397,7 @@ def chain_daily():
     return jsonify({
         "date": today, "rounds": run.get("rounds", chain_api.CHAIN_LEN),
         "board": run["board"], "label": run["label"], "noun": run["noun"],
-        "unit": run["unit"], "chain": run["chain"],
+        "unit": run["unit"], "scope": run.get("scope", ""), "chain": run["chain"],
         "your_result": (done["score"] if done else None),
         "progress": picks, "best": best, "streak": streak,
         "is_pro": _chain_is_pro(cur, user["id"]),
@@ -18505,7 +18505,8 @@ def chain_run():
     if not run:
         return jsonify({"error": "no_chain"}), 503
     return jsonify({"rounds": run["rounds"], "board": run["board"], "label": run["label"],
-                    "noun": run["noun"], "unit": run["unit"], "chain": run["chain"]})
+                    "noun": run["noun"], "unit": run["unit"],
+                    "scope": run.get("scope", ""), "chain": run["chain"]})
 
 
 @app.route("/api/survival/chain/next")

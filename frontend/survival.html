@@ -49,8 +49,14 @@
   .hud-board{flex:1 1 auto; min-width:0}
   .hud-kicker{font-family:var(--ff-mono); font-size:10px; letter-spacing:.16em;
               text-transform:uppercase; color:var(--orange)}
-  .hud-label{font-family:var(--ff-serif); font-size:23px; line-height:1.1; color:var(--ink);
-             white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .hud-label{font-family:var(--ff-serif); font-size:clamp(24px,5.4vw,31px); line-height:1.08;
+             color:var(--ink); display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+  /* Scope is the thing a chain is most easily misread about — a run never restates
+     its own axis, so "all-time" vs "one season" gets its own chip, not fine print. */
+  .scope{font-family:var(--ff-mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase;
+         color:var(--orange); background:var(--orange-lt); border:1px solid #f6d8c8;
+         border-radius:100px; padding:4px 10px; white-space:nowrap; flex-shrink:0}
+  html.night-mode .scope{border-color:transparent}
   .hud-right{display:flex; align-items:center; gap:16px; flex-shrink:0}
   .hud-stat{text-align:right}
   .hud-n{font-family:var(--ff-serif); font-size:26px; line-height:1; color:var(--ink)}
@@ -60,7 +66,8 @@
 
   /* round pips — the run at a glance, and the share grid's on-screen twin */
   .pips{display:flex; gap:4px; align-items:center; margin-bottom:12px}
-  .pip{flex:1 1 0; height:4px; border-radius:2px; background:var(--paper3); transition:background .3s}
+  .pip{flex:1 1 0; min-width:5px; height:4px; border-radius:2px;
+       background:var(--paper3); transition:background .3s}
   .pip.won{background:var(--green)}
   .pip.lost{background:var(--red)}
   .pip.now{background:var(--orange)}
@@ -95,7 +102,7 @@
          display:flex; flex-direction:column; justify-content:center; gap:2px;
          max-width:62%}
   .pteam{align-self:flex-start; font-family:var(--ff-mono); font-size:10px; letter-spacing:.15em;
-         text-transform:uppercase; color:#fff; background:var(--c1,#2a2a32);
+         text-transform:uppercase; color:var(--chip-ink,#fff); background:var(--chip,#2a2a32);
          border:1px solid rgba(255,255,255,.22); border-radius:4px; padding:3px 8px; margin-bottom:5px}
   .pname{font-family:var(--ff-serif); font-size:clamp(23px,5.6vw,36px); line-height:1.04;
          letter-spacing:-.01em; text-wrap:balance}
@@ -104,8 +111,8 @@
         transition:color .3s}
   .pval.good{color:#5fd99a} .pval.bad{color:#ff8d7e}
   .pval.hidden-val{color:rgba(255,255,255,.34)}
-  .punit{font-family:var(--ff-mono); font-size:10.5px; letter-spacing:.14em;
-         text-transform:uppercase; color:rgba(255,255,255,.52); margin-top:5px}
+  .punit{font-family:var(--ff-mono); font-size:12.5px; letter-spacing:.11em;
+         text-transform:uppercase; color:rgba(255,255,255,.78); margin-top:7px}
   .pask{font-family:var(--ff-sans); font-size:14.5px; line-height:1.35; margin-top:9px;
         color:rgba(255,255,255,.80)}
   .pask b{font-weight:600; color:#fff}
@@ -275,6 +282,13 @@ const headshot = (id, big) =>
 
 // Career totals are whole numbers; everything else is a per-game average.
 const isTotal = () => S && S.board && S.board.startsWith('career');
+// Caption under a player's number: the unit plus WHEN it happened. On a career-best
+// board each player's season differs, which is the most useful thing on the card.
+function contextFor(link){
+  const u = S.unit || '';
+  if (isTotal()) return `${u} · all-time`;
+  return link.season ? `${u} · ${link.season}` : u;
+}
 const fmtVal  = v => isTotal() ? Math.round(v).toLocaleString() : v.toFixed(1);
 
 // The panel is built from the team's PRIMARY only, shaded into a darker version of
@@ -288,18 +302,30 @@ function shade(hex, f){
         b = Math.round((n & 255) * f);
   return '#' + [r,g,b].map(v => v.toString(16).padStart(2,'0')).join('');
 }
+function lum(hex){                       // perceived brightness, 0–255
+  const n = parseInt(String(hex).replace('#',''), 16);
+  if (isNaN(n)) return 0;
+  return 0.2126*((n>>16)&255) + 0.7152*((n>>8)&255) + 0.0722*(n&255);
+}
 function teamVars(abbr){
   // team-colors.js declares `const TEAM_COLORS` — a top-level const is script-scoped
   // and never becomes a window property, so this must read the bare identifier.
   const map = (typeof TEAM_COLORS !== 'undefined') ? TEAM_COLORS : {};
   const c = map[abbr] || {};
   const p = c.primary || '#2f2f3a';
-  return `--c1:${p}; --c2:${shade(p, 0.42)}`;
+  // A bright primary (Indiana gold, Phoenix orange) blows out the panel: white
+  // button labels and the ask line stop reading against it. Damp the wash and flip
+  // the chip to dark ink instead of letting the brand colour win over legibility.
+  const bright = lum(p) > 150;
+  const glow = bright ? shade(p, 0.52) : p;
+  return `--c1:${glow}; --c2:${shade(glow, 0.42)}; --chip:${p}; `
+       + `--chip-ink:${bright ? '#12121a' : '#fff'}`;
 }
 
 // ── chrome ───────────────────────────────────────────────────────────────────
 function renderHud(){
-  hudLabel.textContent = S.label || '';
+  hudLabel.innerHTML = `${esc(S.label || '')}` +
+    (S.scope ? `<span class="scope">${esc(S.scope)}</span>` : '');
   hudKicker.textContent = S.mode === 'run' ? 'Unlimited run' : 'Higher or Lower';
   const streakBit = (S.mode === 'daily' && S.streak != null)
     ? `<div class="hud-stat"><div class="hud-n">${S.streak}</div><div class="hud-l">days</div></div>` : '';
@@ -308,12 +334,19 @@ function renderHud(){
       <div class="hud-l">streak</div></div>`;
 }
 function renderPips(){
-  // Beyond the pre-built chain (Pro runs) a fixed bar stops meaning anything.
-  if (S.score > S.rounds) { pipsEl.innerHTML = ''; return; }
+  // The daily is a fixed 10-round chain, so its bar has a visible end to run out of.
+  // An unlimited run has no round limit — giving it ten empty slots would invent a
+  // target it doesn't have, so its bar just grows a segment per round survived.
   let h = '';
-  for (let i = 1; i <= S.rounds; i++){
-    const cls = i <= S.score ? 'won' : (i === S.round && !S.over ? 'now' : (S.bustedRound === i ? 'lost' : ''));
-    h += `<div class="pip ${cls}"></div>`;
+  if (S.mode === 'daily'){
+    for (let i = 1; i <= S.rounds; i++){
+      const cls = i <= S.score ? 'won' : (i === S.round && !S.over ? 'now' : (S.bustedRound === i ? 'lost' : ''));
+      h += `<div class="pip ${cls}"></div>`;
+    }
+  } else {
+    for (let i = 0; i < S.score; i++) h += `<div class="pip won"></div>`;
+    if (S.bustedRound)  h += `<div class="pip lost"></div>`;
+    else if (!S.over)   h += `<div class="pip now"></div>`;
   }
   pipsEl.innerHTML = h;
 }
@@ -335,9 +368,10 @@ function panelHTML(link, role){
         <div class="pname">${esc(link.name)}</div>
         ${revealed ? `
           <div class="pval">${esc(link.display)}</div>
-          <div class="punit">${esc(S.unit || '')}</div>
+          <div class="punit">${esc(contextFor(link))}</div>
         ` : `
           <div class="pval hidden-val" id="chal-val">?</div>
+          <div class="punit">${esc(contextFor(link))}</div>
           <div class="pask">higher or lower than
             <b>${esc(S.chain[S.round-1].display)}</b>?</div>
           <div class="calls" id="calls">
@@ -438,8 +472,11 @@ async function advance(){
   S.round++;
   if (S.round < S.chain.length) return renderRound();
 
-  // Out of pre-built chain: Pro runs extend forever, everyone else has cleared it.
-  if (S.isPro){
+  // Only an unlimited run extends past the pre-built chain. The daily stays a fixed
+  // 10 for everyone: the server caps its score at `rounds`, so letting Pro play on
+  // would climb a visible streak past a number that can never be recorded — and it
+  // would stop being the same chain everyone else is compared against.
+  if (S.mode === 'run'){
     const more = await extend();
     if (more) return renderRound();
   }
@@ -656,7 +693,7 @@ function renderAlreadyPlayed(d){
 function newState(src, mode){
   return {
     mode, date: src.date || '', board: src.board, label: src.label,
-    noun: src.noun, unit: src.unit, rounds: src.rounds, chain: src.chain,
+    noun: src.noun, unit: src.unit, scope: src.scope || '', rounds: src.rounds, chain: src.chain,
     round: 1, picks: [], score: 0, over: false, busy: false, bustedRound: null,
     best: src.best ?? 0, streak: src.streak ?? null, isPro: !!src.is_pro,
   };

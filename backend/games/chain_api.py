@@ -114,31 +114,38 @@ def _career_rows(conn, col):
             HAVING SUM(ps.gp) >= 200 AND MIN(ps.season) >= %s
             ORDER BY val DESC LIMIT %s
         """, (_DEBUT_FLOOR, _DEPTH["career"]))
-        return [(r["player_id"], r["name"], r["team"], float(r["val"])) for r in cur.fetchall()]
+        # No season: a career total spans all of them (the UI captions it "all-time").
+        return [(r["player_id"], r["name"], r["team"], float(r["val"]), None)
+                for r in cur.fetchall()]
 
 
 def _peak_rows(conn, col):
-    """Each player's best qualified single season on `col`."""
+    """Each player's best qualified single season on `col`, with the season it
+    happened in and the team they played it for.
+
+    Not `current_team`: a peak board is a historical claim, so tagging Vince
+    Carter's 2000-01 with whoever he last suited up for is simply wrong.
+    """
     with conn.cursor() as cur:
         cur.execute(f"""
-            WITH peaks AS (
-                SELECT ps.player_id, MAX(ps.{col}) AS val
-                FROM   player_seasons ps
-                WHERE  ps.season_type = 'Regular Season' AND ps.gp >= %s AND ps.{col} IS NOT NULL
-                GROUP  BY ps.player_id
-                HAVING MIN(ps.season) >= %s
+            WITH elig AS (
+                SELECT player_id FROM player_seasons
+                WHERE season_type = 'Regular Season'
+                GROUP BY player_id HAVING MIN(season) >= %s
             )
-            SELECT pk.player_id, p.player_name AS name, pk.val,
-                   COALESCE(p.current_team, (
-                       SELECT t.team_abbr FROM player_seasons t
-                       WHERE t.player_id = pk.player_id AND t.season_type = 'Regular Season'
-                         AND t.team_abbr IS NOT NULL
-                       ORDER BY t.season DESC LIMIT 1
-                   )) AS team
-            FROM peaks pk JOIN players p ON p.player_id = pk.player_id
-            ORDER BY pk.val DESC LIMIT %s
-        """, (qe.MIN_GP, _DEBUT_FLOOR, _DEPTH["peak"]))
-        return [(r["player_id"], r["name"], r["team"], float(r["val"])) for r in cur.fetchall()]
+            SELECT DISTINCT ON (ps.player_id)
+                   ps.player_id, p.player_name AS name, ps.team_abbr AS team,
+                   ps.{col} AS val, ps.season
+            FROM   player_seasons ps
+            JOIN   players p ON p.player_id = ps.player_id
+            JOIN   elig e    ON e.player_id = ps.player_id
+            WHERE  ps.season_type = 'Regular Season' AND ps.gp >= %s AND ps.{col} IS NOT NULL
+            ORDER  BY ps.player_id, ps.{col} DESC
+        """, (_DEBUT_FLOOR, qe.MIN_GP))
+        rows = [(r["player_id"], r["name"], r["team"], float(r["val"]), r["season"])
+                for r in cur.fetchall()]
+    rows.sort(key=lambda r: r[3], reverse=True)
+    return rows[:_DEPTH["peak"]]
 
 
 def _season_rows(conn, col, season):
@@ -152,7 +159,8 @@ def _season_rows(conn, col, season):
               AND  ps.gp >= %s AND ps.{col} IS NOT NULL
             ORDER BY val DESC LIMIT %s
         """, (season, qe.MIN_GP, _DEPTH["season"]))
-        return [(r["player_id"], r["name"], r["team"], float(r["val"])) for r in cur.fetchall()]
+        return [(r["player_id"], r["name"], r["team"], float(r["val"]), season)
+                for r in cur.fetchall()]
 
 
 def _fmt(kind, v):
@@ -183,7 +191,11 @@ def board(conn, key):
         rows = _season_rows(conn, col, season)
     else:
         raise ValueError(f"unknown board kind: {kind}")
-    spec = {"key": key, "kind": kind, "col": col, "label": label,
+    # `scope` answers "all-time or one season?" at a glance — the single thing a
+    # chain is most easily misread about, since the axis never restates itself.
+    scope = ({"career": "All-time",
+              "peak":   "Career-best season"}.get(kind) or f"{parts[2]} season")
+    spec = {"key": key, "kind": kind, "col": col, "label": label, "scope": scope,
             "noun": noun, "unit": unit, "rows": rows}
     _BOARD_CACHE[key] = spec
     return spec
@@ -269,7 +281,7 @@ def build_chain(conn, board_key=None, length=CHAIN_LEN, seed=None):
             return {
                 "v": PAYLOAD_V, "board": spec["key"], "label": spec["label"],
                 "noun": spec["noun"], "unit": spec["unit"], "kind": spec["kind"],
-                "rounds": length,
+                "scope": spec["scope"], "rounds": length,
                 "chain": [_link(spec["kind"], p) for p in chain],
             }
         board_key = None
@@ -277,8 +289,8 @@ def build_chain(conn, board_key=None, length=CHAIN_LEN, seed=None):
 
 
 def _link(kind, row):
-    pid, name, team, val = row
-    return {"id": pid, "name": name, "team": team,
+    pid, name, team, val, season = row
+    return {"id": pid, "name": name, "team": team, "season": season,
             "value": val, "display": _fmt(kind, val)}
 
 
