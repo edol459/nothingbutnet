@@ -65,8 +65,12 @@ virtualenv.
 
 ## Naming gotchas (important)
 
-- **"Higher or Lower"** is the user-facing name; the code says **`survival`**
-  (`backend/games/survival_api.py`, `survival_daily` table). See `docs/trivia-game.md`.
+- **"Higher or Lower"** is the user-facing name; the code says **`survival`**.
+  Two generations coexist: the live chain game is `backend/games/chain_api.py`
+  (`/api/survival/chain/*`, `survival_chain_daily`, results under `mode='chain'`),
+  while `survival_api.py` + `survival_daily` is the **legacy ten-question quiz,
+  kept only because the shipped iOS app calls it against production**. Don't change
+  the legacy endpoint shapes until the app is ported. See `docs/trivia-game.md`.
 - **"Guess Who"** is user-facing; the code/routes say **`poeltl`**
   (`backend/games/poeltl_api.py`, `poeltl_daily` table).
 - Repo is "nothingbutnet", product is "ydkball".

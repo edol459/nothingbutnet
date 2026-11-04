@@ -1,14 +1,113 @@
 # ydkball Trivia — Design & Status
 
-A procedurally-generated NBA trivia game built to keep users engaged year-round (esp. the
-offseason). The base game is **Survival**. Wired into the app (web): `/api/survival/*`
-endpoints + a `/survival` play page. A console prototype (`survival.py`) is still the
-tuning harness.
+Two things live here. **Higher or Lower** is the live game: a true chain
+(`backend/games/chain_api.py`, `/api/survival/chain/*`, `/survival`). The older
+ten-unrelated-questions quiz (`survival_api.py`, `/api/survival/daily`) is **still
+served** because the shipped iOS app talks to it against production — see
+"The legacy quiz" at the bottom. Do not change those endpoints' shapes until the
+app is ported.
 
-> The Wordle-style "one shared puzzle a day" format was deliberately **not** used for trivia
-> (binary recall doesn't suit a daily deduction ritual) — it's reserved for a future,
-> separate **performance-guessing** game. Trivia's natural rhythm is "how far can you get?",
-> i.e. Survival.
+## Higher or Lower (the chain game)
+
+A run is **one board** — a single stat axis — and a chain of players drawn from it.
+Round N shows the anchor with its number visible and a challenger with its number
+hidden; you call HIGHER or LOWER, the hidden number counts up, and the revealed
+card slides into the anchor slot as a new challenger slides in.
+
+Two rules carry the design:
+
+- **The revealed card becomes the next anchor**, never "the higher one stays". If
+  the higher player survived, the anchor would ratchet monotonically toward the top
+  of the board and "LOWER" would be correct nearly every time within five rounds.
+- **The board is fixed for the whole run.** The anchor's number stays on screen
+  across rounds, so the axis cannot change under it. Variety is across days.
+
+### Modes
+
+- **Daily (free, login required)** — a date-seeded 10-round chain, identical for
+  everyone, **sudden death**: one wrong call ends the day and your score is rounds
+  survived (0–10). Everyone plays the same chain, so the leaderboard is a straight
+  comparison. Resumable mid-run via `survival_chain_progress` (quitting can't be
+  used to reroll a bad start); one official attempt per ET day.
+- **Pro** — unlimited replays (`/chain/run`, a fresh random chain) and no round
+  limit: past the pre-built chain the client pulls one link at a time from
+  `/chain/next`, which is stateless (board key + anchor id + exclusions).
+
+### Boards
+
+Three kinds, keyed self-describingly (`career:pts`, `peak:reb`, `season:pts:2024-25`):
+
+| kind | what it is | pool depth |
+|---|---|---|
+| `career` | career totals (`SUM(stat·gp)`), 1997-98+ debuts | top 90 |
+| `peak` | each player's best qualified single season | top 100 |
+| `season` | one season's per-game leaderboard (recent seasons weighted up) | top 40 |
+
+Only **points, rebounds, assists and made threes** are boards. Steals, blocks and
+the percentage stats are deliberately excluded: a chain commits a whole run to one
+axis, so an axis nobody has a feel for (1.4 vs 1.6 SPG) doesn't cost one question
+like it did in the quiz — it ruins the day. Career rebounds/assists are drawn less
+often than points/threes because they reward longevity over fame.
+
+### Difficulty
+
+Difficulty is the **stat gap** between anchor and challenger as a fraction of the
+board's spread — a huge gap is obvious, a near-tie is a coinflip. It ramps across
+the run (`_GAP_EASY` 0.58 → `_GAP_HARD` 0.035, reaching `_DIFF_END` 0.85 by round
+10), so round 1 is a gimme and round 10 is genuinely hard; measured median relative
+gap runs ~30% down to ~10%. Past round 10 it keeps tightening toward a 0.97 cap.
+
+Tune and inspect it with the module's own CLI:
+
+```bash
+python backend/games/chain_api.py                      # print a chain with answers
+python backend/games/chain_api.py --board career:pts
+python backend/games/chain_api.py --simulate 400       # gap profile per round
+```
+
+### API
+
+- `GET  /api/survival/chain/daily` — today's chain + your standing (`your_result`,
+  `progress`, `best`, `streak`, `is_pro`). Login required.
+- `POST /api/survival/chain/daily/progress` `{picks}` — save calls so far.
+- `POST /api/survival/chain/daily/result` `{picks}` — **server scores it**: walks
+  the calls under sudden death and stops at the first miss, so padding picks past a
+  miss scores 0, not 10. Grants Ball Knowledge (+10 played, +5 per round survived).
+- `GET  /api/survival/chain/run` — a fresh random chain. Pro only (403).
+- `GET  /api/survival/chain/next?board=&anchor=&exclude=&round=` — one more link. Pro only.
+- `GET  /api/survival/chain/leaderboard` — today's ranking (mode `chain`).
+- `GET  /api/survival/chain/share.png?date=&score=&mode=&label=` — the result card
+  (Pillow, `og_image.render_chain_card`). Unauthenticated by design: the client
+  fetches it for the native share sheet and scrapers have no session.
+
+**XP uses the `survival_daily` event type on purpose** — Higher or Lower pays once
+per day whichever version you played, so the chain and the legacy quiz can coexist
+during the iOS port without double-dipping.
+
+### Tables
+
+- `survival_chain_daily(date PK, payload JSONB)` — the shared chain.
+- `survival_chain_progress(user_id, date, picks)` — in-progress calls (anti-replay).
+- `survival_results` with **`mode='chain'`** — scores. The legacy quiz uses
+  `mode='daily'` in the same table; they're a different scoring scale and must not mix.
+
+### Known limitation
+
+The daily ships the whole chain, values included, so devtools can read ahead — the
+same posture as the old quiz and as Wordle shipping its answer. What the server
+prevents is a *fabricated* score: the leaderboard only shows what it re-derived from
+the submitted calls.
+
+### Not yet done
+
+- **iOS is still on the legacy quiz** (`Survival.swift`, `SurvivalGameView.swift`).
+  Porting it means the chain endpoints above plus the two-panel board.
+- No `/hol/<date>` landing page, so a shared link previews the generic site card
+  rather than the day's result (the PNG endpoint exists and is ready for it).
+
+---
+
+## The legacy quiz (still served, iOS only)
 
 ## Concept
 **Every question is a this-or-that:** "Who [did more X] — A or B?" — two players, tap one
@@ -98,7 +197,7 @@ Internal tiers (still computed by `score_difficulty` / `generate_targeted`):
 - **Medium:** tier-1 90s leaders, old team pts/reb/ast, recent team-secondary, mid-era awards, single clubs.
 - **Hard:** tier-2 stats; old/MIP awards; old-team-secondary deep cuts; brutal hustle-stat leaders.
 
-## Survival (two modes)
+## Survival (two modes — the legacy quiz)
 **3 lives**, one guess per question, wrong = lose a life. Difficulty is a random weighted draw.
 
 - **Daily** (free, the headline): a **fixed 10-question run**, shared + seeded by date so scores are

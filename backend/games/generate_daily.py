@@ -1,10 +1,14 @@
 """
-generate_daily.py — pre-generate Survival daily runs.
-=====================================================
+generate_daily.py — pre-generate the Higher or Lower dailies.
+=============================================================
 
 Generation is slow over a remote DB (many leaderboard round-trips), so it must NOT run
-in the request path. A cron runs this once a day to populate `survival_daily`; the
-`/api/survival/daily` endpoint then just reads the cached row.
+in the request path. A cron runs this once a day to populate both daily stores; the
+endpoints then just read the cached row:
+
+  * `survival_chain_daily` — the live chain game (`/api/survival/chain/daily`)
+  * `survival_daily`       — the legacy ten-question quiz (`/api/survival/daily`),
+                             still generated for the un-ported iOS client
 
     python backend/games/generate_daily.py                    # today (+ default look-ahead)
     python backend/games/generate_daily.py --days 3           # today + next 2 days
@@ -24,6 +28,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "ingest"))
 import survival_api as sa  # noqa: E402
+import chain_api            # noqa: E402  — Higher or Lower, the chain game
 import pipeline_status      # noqa: E402  — from backend/ingest
 
 load_dotenv()
@@ -57,17 +62,26 @@ def main():
         for d in dates:
             if not args.force:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT 1 FROM survival_daily WHERE date = %s", (d,))
-                    if cur.fetchone():
+                    # Both stores must exist — a date that only has the legacy row
+                    # (generated before the chain shipped) still needs its chain.
+                    cur.execute("""SELECT (SELECT 1 FROM survival_chain_daily WHERE date = %s) AS c,
+                                          (SELECT 1 FROM survival_daily       WHERE date = %s) AS q""",
+                                (d, d))
+                    have = cur.fetchone()
+                    if have and have["c"] and have["q"]:
                         print(f"  {d}  already generated — skipping (use --force to regenerate)")
                         step_results.append({"label": d, "ok": None, "skipped": True})
                         continue
             t = datetime.datetime.now()
             try:
+                chain = chain_api.ensure_daily(conn, d, force=args.force, fresh=args.fresh)
+                if not chain:
+                    raise RuntimeError("chain generation returned nothing")
                 run = sa.ensure_daily(conn, d, force=args.force, fresh=args.fresh)
                 secs = (datetime.datetime.now() - t).total_seconds()
                 verb = "regenerated" if args.force else "generated"
-                print(f"  {d}  {verb} {len(run)} questions in {secs:.0f}s")
+                print(f"  {d}  {verb} chain [{chain['label']}] "
+                      f"+ {len(run)} legacy questions in {secs:.0f}s")
                 step_results.append({"label": d, "ok": True, "skipped": False})
             except Exception as e:
                 print(f"  {d}  FAILED: {e}")

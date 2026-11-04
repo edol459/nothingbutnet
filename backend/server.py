@@ -256,6 +256,7 @@ from datetime import timedelta
 import sys as _sys
 _sys.path.insert(0, os.path.join(os.path.dirname(__file__), "games"))
 import survival_api  # noqa: E402
+import chain_api     # noqa: E402  — Higher or Lower, the chain game (replaces survival_api's quiz)
 import poeltl_api    # noqa: E402  — "guess the performance" daily game
 
 app.secret_key = os.getenv("SECRET_KEY")
@@ -794,6 +795,28 @@ def _ensure_tables():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_survival_results_user ON survival_results(user_id, mode)")
+
+        # ── Higher or Lower, the chain game ──────────────────────────
+        # Its own daily store: the chain payload is a different shape from the old
+        # quiz's question list, and both have to coexist until the iOS client ports
+        # over. Results share `survival_results` under mode='chain' — a different
+        # scoring scale (rounds survived), so it must not mix with mode='daily'.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS survival_chain_daily (
+                date       DATE PRIMARY KEY,
+                payload    JSONB NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS survival_chain_progress (
+                user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                date       DATE NOT NULL,
+                picks      JSONB NOT NULL,        -- ordered 'more'/'less' calls so far
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (user_id, date)
+            )
+        """)
 
         # ── Poeltl ("guess the performance") ─────────────────────────
         cur.execute("""
@@ -18119,10 +18142,13 @@ def _survival_today():
     return _dt.now(ZoneInfo("America/New_York")).date()
 
 
-def _survival_streak_best(cur, user_id):
-    """Best score + current consecutive-day streak across this user's daily results."""
+def _survival_streak_best(cur, user_id, mode="daily"):
+    """Best score + current consecutive-day streak across this user's results.
+
+    `mode` separates the two games that live in this table: 'daily' is the old
+    ten-question quiz, 'chain' is Higher or Lower proper (rounds survived)."""
     cur.execute("SELECT date, score FROM survival_results "
-                "WHERE user_id = %s AND mode = 'daily' ORDER BY date DESC", (user_id,))
+                "WHERE user_id = %s AND mode = %s ORDER BY date DESC", (user_id, mode))
     rows = cur.fetchall()
     best = max((r["score"] for r in rows), default=0)
     streak, expected = 0, _survival_today()
@@ -18286,28 +18312,287 @@ def survival_players():
 _LB_LIMIT = 50  # daily leaderboards: how many ranked rows we return (`you` is always included separately)
 
 
-@app.route("/api/survival/leaderboard")
-@login_required
-def survival_leaderboard():
-    """Today's global daily leaderboard, ranked by score (ties share a rank)."""
-    user  = current_user()
-    today = _survival_today().isoformat()
-    conn  = get_conn(); cur = conn.cursor()
+def _survival_lb(cur, user_id, mode, today):
+    """Today's global leaderboard for one game mode, ranked by score (ties share a rank)."""
     cur.execute("""SELECT sr.user_id, sr.score, u.display_name, u.avatar_url
                    FROM survival_results sr JOIN users u ON u.id = sr.user_id
-                   WHERE sr.mode = 'daily' AND sr.date = %s
-                   ORDER BY sr.score DESC, sr.created_at ASC""", (today,))
+                   WHERE sr.mode = %s AND sr.date = %s
+                   ORDER BY sr.score DESC, sr.created_at ASC""", (mode, today))
     rows = cur.fetchall()
     entries, you, prev_score, rank = [], None, None, 0
     for i, r in enumerate(rows, start=1):
         if r["score"] != prev_score:
             rank, prev_score = i, r["score"]
         entry = {"rank": rank, "user_id": r["user_id"], "display_name": r["display_name"],
-                  "avatar_url": r["avatar_url"], "score": r["score"], "is_you": r["user_id"] == user["id"]}
+                  "avatar_url": r["avatar_url"], "score": r["score"], "is_you": r["user_id"] == user_id}
         entries.append(entry)
         if entry["is_you"]:
             you = entry
-    return jsonify({"date": today, "total_players": len(rows), "entries": entries[:_LB_LIMIT], "you": you})
+    return {"date": today, "total_players": len(rows),
+            "entries": entries[:_LB_LIMIT], "you": you}
+
+
+@app.route("/api/survival/leaderboard")
+@login_required
+def survival_leaderboard():
+    """Today's global daily leaderboard for the legacy quiz."""
+    conn = get_conn(); cur = conn.cursor()
+    return jsonify(_survival_lb(cur, current_user()["id"], "daily", _survival_today().isoformat()))
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Higher or Lower — the chain game (`chain_api`)
+#
+#   One board (career points, 2024-25 PPG…) per run. Round N shows the anchor's
+#   number and hides the challenger's; you call MORE or LESS. The revealed card
+#   becomes the next anchor.
+#
+#   Daily (free): a date-seeded 10-round chain, shared by everyone, SUDDEN DEATH —
+#     one miss ends the day and your score is rounds survived.
+#   Pro: unlimited replays, and a run keeps going past round 10 forever
+#     (`/api/survival/chain/next` extends the chain one link at a time).
+#
+#   Scoring is server-side: the client submits its MORE/LESS calls and the server
+#   walks them against the stored chain, stopping at the first miss.
+#
+#   Lives under /api/survival/chain/* rather than replacing /api/survival/* because
+#   the shipped iOS app talks to the old endpoints against production — changing
+#   their shape would break the live app on deploy. See CLAUDE.md.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CHAIN_XP_PLAY     = 10      # for showing up
+CHAIN_XP_PER_ROUND = 5      # per round survived (a clean 10 = +60)
+
+
+def _chain_is_pro(cur, user_id):
+    """is_pro lives in the DB, not the session — a mid-session upgrade must count."""
+    cur.execute("SELECT is_pro FROM users WHERE id = %s", (user_id,))
+    row = cur.fetchone()
+    return bool(row and row["is_pro"])
+
+
+@app.route("/api/survival/chain/daily")
+@login_required
+def chain_daily():
+    """Today's shared chain, plus this player's standing.
+
+    Resumes an unfinished run from `survival_chain_progress` so quitting mid-chain
+    can't be used to reroll a bad start. `your_result` being non-null means the day
+    is spent — the client shows the result screen, not a playable board."""
+    user  = current_user()
+    today = _survival_today().isoformat()
+    conn  = get_conn(); cur = conn.cursor()
+    run   = chain_api.ensure_daily(conn, today)
+    if not run:
+        return jsonify({"error": "no_chain", "message": "Today's run isn't ready yet."}), 503
+
+    cur.execute("SELECT score FROM survival_results "
+                "WHERE user_id = %s AND mode = 'chain' AND date = %s", (user["id"], today))
+    done = cur.fetchone()
+    cur.execute("SELECT picks FROM survival_chain_progress WHERE user_id = %s AND date = %s",
+                (user["id"], today))
+    prow = cur.fetchone()
+    picks = (prow["picks"] if prow else None) or []
+    best, streak = _survival_streak_best(cur, user["id"], mode="chain")
+    return jsonify({
+        "date": today, "rounds": run.get("rounds", chain_api.CHAIN_LEN),
+        "board": run["board"], "label": run["label"], "noun": run["noun"],
+        "unit": run["unit"], "chain": run["chain"],
+        "your_result": (done["score"] if done else None),
+        "progress": picks, "best": best, "streak": streak,
+        "is_pro": _chain_is_pro(cur, user["id"]),
+    })
+
+
+@app.route("/api/survival/chain/daily/progress", methods=["POST"])
+@login_required
+def chain_daily_progress():
+    """Save the calls made so far, so exiting mid-run resumes instead of restarting.
+    A no-op once the day has a final result."""
+    user  = current_user()
+    data  = request.get_json(force=True, silent=True) or {}
+    today = _survival_today().isoformat()
+    conn  = get_conn(); cur = conn.cursor()
+
+    cur.execute("SELECT 1 FROM survival_results "
+                "WHERE user_id = %s AND mode = 'chain' AND date = %s", (user["id"], today))
+    if cur.fetchone():
+        return jsonify({"ok": True, "final": True})
+
+    picks = [p for p in (data.get("picks") or []) if p in ("more", "less")]
+    cur.execute("""INSERT INTO survival_chain_progress (user_id, date, picks, updated_at)
+                   VALUES (%s, %s, %s, NOW())
+                   ON CONFLICT (user_id, date)
+                   DO UPDATE SET picks = EXCLUDED.picks, updated_at = NOW()""",
+                (user["id"], today, psycopg2.extras.Json(picks)))
+    conn.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/survival/chain/daily/result", methods=["POST"])
+@login_required
+def chain_daily_result():
+    """Score the daily run and grant Ball Knowledge. First attempt is the official one.
+
+    The client sends its ordered MORE/LESS calls; the server scores them against the
+    stored chain under sudden death (calls after the first miss are ignored), so the
+    score can't be inflated client-side.
+
+    XP uses the `survival_daily` type on purpose: Higher or Lower pays once per day
+    whichever version of the game you played, so the chain and the legacy quiz can
+    coexist during the iOS port without anyone double-dipping."""
+    user  = current_user()
+    data  = request.get_json(force=True, silent=True) or {}
+    today = _survival_today().isoformat()
+    conn  = get_conn(); cur = conn.cursor()
+
+    cur.execute("SELECT payload FROM survival_chain_daily WHERE date = %s", (today,))
+    row = cur.fetchone()
+    if not row:
+        return jsonify({"error": "no_chain"}), 400
+    payload = row["payload"]
+
+    picks = [p for p in (data.get("picks") or []) if p in ("more", "less")]
+    score, busted = chain_api.score_picks(payload, picks)
+
+    cur.execute("""INSERT INTO survival_results (user_id, mode, date, score)
+                   VALUES (%s, 'chain', %s, %s)
+                   ON CONFLICT (user_id, mode, date) DO NOTHING""",
+                (user["id"], today, score))
+    cur.execute("DELETE FROM survival_chain_progress WHERE user_id = %s AND date = %s",
+                (user["id"], today))
+
+    xp_amount = CHAIN_XP_PLAY + CHAIN_XP_PER_ROUND * score
+    new_total = _grant_xp(cur, user["id"], "survival_daily", today, xp_amount)
+    conn.commit()
+
+    granted   = new_total != -1
+    xp_gained = xp_amount if granted else 0
+    if granted:
+        total_xp = new_total
+    else:
+        cur.execute("SELECT xp FROM users WHERE id = %s", (user["id"],))
+        total_xp = (cur.fetchone() or {}).get("xp") or 0
+
+    cur.execute("SELECT score FROM survival_results "
+                "WHERE user_id = %s AND mode = 'chain' AND date = %s", (user["id"], today))
+    official = cur.fetchone()["score"]
+    best, streak = _survival_streak_best(cur, user["id"], mode="chain")
+    rounds = payload.get("rounds", chain_api.CHAIN_LEN)
+    return jsonify({
+        "recorded": official, "score": score, "busted_round": busted,
+        "rounds": rounds, "perfect": score >= rounds,
+        "best": best, "streak": streak,
+        "xp_gained": xp_gained, "total_xp": total_xp, "rank": get_rank_info(total_xp),
+        "xp_breakdown": {"play": CHAIN_XP_PLAY, "per_round": CHAIN_XP_PER_ROUND,
+                         "rounds": score, "rounds_xp": CHAIN_XP_PER_ROUND * score,
+                         "total": xp_amount},
+    })
+
+
+@app.route("/api/survival/chain/run")
+@login_required
+def chain_run():
+    """A fresh random chain for a Pro replay — same shape as the daily, no date seed,
+    nothing recorded. Pro only: the free tier gets the one shared daily."""
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    if not _chain_is_pro(cur, user["id"]):
+        _log_pro_wall("survival_unlimited", user["id"])
+        return jsonify({"error": "pro_required",
+                        "message": "Unlimited runs are a Pro feature."}), 403
+    run = chain_api.build_chain(conn)
+    if not run:
+        return jsonify({"error": "no_chain"}), 503
+    return jsonify({"rounds": run["rounds"], "board": run["board"], "label": run["label"],
+                    "noun": run["noun"], "unit": run["unit"], "chain": run["chain"]})
+
+
+@app.route("/api/survival/chain/next")
+@login_required
+def chain_next():
+    """One more link, for a run that has outlived its pre-built chain. Pro only.
+
+    Stateless: `board` + `anchor` (the current anchor's player_id) are enough to
+    continue, so an endless run needs no server-side session. `exclude` keeps players
+    from repeating within the run."""
+    user = current_user()
+    conn = get_conn(); cur = conn.cursor()
+    if not _chain_is_pro(cur, user["id"]):
+        _log_pro_wall("survival_unlimited", user["id"])
+        return jsonify({"error": "pro_required",
+                        "message": "Unlimited runs are a Pro feature."}), 403
+    board_key = (request.args.get("board") or "").strip()
+    try:
+        anchor = int(request.args.get("anchor", 0))
+    except ValueError:
+        return jsonify({"error": "bad_anchor"}), 400
+    exclude = [int(x) for x in request.args.get("exclude", "").split(",") if x.strip().isdigit()]
+    round_no = max(1, int(request.args.get("round", 1)))
+    try:
+        link = chain_api.next_link(conn, board_key, anchor, exclude, round_no)
+    except (ValueError, StopIteration):
+        return jsonify({"error": "bad_board"}), 400
+    if not link:
+        return jsonify({"error": "exhausted"}), 404
+    return jsonify({"link": link})
+
+
+@app.route("/api/survival/chain/share.png")
+def chain_share_image():
+    """The result as a rendered card — what gets posted to a group chat.
+
+    Deliberately unauthenticated and driven by query params: the client fetches it
+    to hand to the native share sheet, and a social scraper following a shared link
+    has no session. Nothing here is private (a score and a board label), and the
+    score the leaderboard trusts is the one the server derived at submit time, so a
+    hand-edited `?score=` only ever changes this picture."""
+    date_str = (request.args.get("date") or "").strip()
+    endless  = request.args.get("mode") == "run"
+    try:
+        score = max(0, int(request.args.get("score", 0)))
+    except ValueError:
+        score = 0
+    rounds = chain_api.CHAIN_LEN
+    label, date_label = "", ""
+    # Parse before querying: `date` is a DATE column, so handing psycopg2 "nonsense"
+    # raises mid-statement and leaves the thread-local connection poisoned for the
+    # next request on this thread.
+    try:
+        day = date.fromisoformat(date_str) if date_str else None
+    except ValueError:
+        day = None
+    if day:
+        date_label = day.strftime("%b %-d, %Y").upper()
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("SELECT payload FROM survival_chain_daily WHERE date = %s", (day,))
+        row = cur.fetchone()
+        if row:
+            label  = row["payload"].get("label") or ""
+            rounds = row["payload"].get("rounds", rounds)
+    if not endless:
+        score = min(score, rounds)
+    else:
+        # An endless run has no stored row, so its board comes from the client.
+        label = (request.args.get("label") or "")[:60]
+
+    import og_image
+    png = og_image.render_chain_card(label=label, score=score, rounds=rounds,
+                                     date_label=date_label, endless=endless)
+    resp = Response(png, mimetype="image/png")
+    resp.headers["Cache-Control"] = "public, max-age=600"
+    return resp
+
+
+@app.route("/api/survival/chain/leaderboard")
+@login_required
+def chain_leaderboard():
+    """Today's global chain leaderboard — everyone played the same chain, so the
+    ranking is a straight comparison for the first time."""
+    conn = get_conn(); cur = conn.cursor()
+    out = _survival_lb(cur, current_user()["id"], "chain", _survival_today().isoformat())
+    out["rounds"] = chain_api.CHAIN_LEN
+    return jsonify(out)
 
 
 # ── Poeltl: "guess the performance" ──────────────────────────────────────────

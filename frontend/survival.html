@@ -9,8 +9,9 @@
 <script>if(localStorage.getItem('ydkball_night')==='1')document.documentElement.classList.add('night-mode');</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/night-mode.css">
+<link rel="stylesheet" href="/site-nav.css">
 <style>
   *,*::before,*::after{box-sizing:border-box; margin:0; padding:0}
   :root{
@@ -21,251 +22,205 @@
     --ff-serif:'DM Serif Display',Georgia,serif;
     --ff-sans:'Instrument Sans',system-ui,sans-serif;
     --ff-mono:'DM Mono','Courier New',monospace;
-    --nav-h: 58px; font-size:15px;
+    --nav-h:58px; font-size:15px;
   }
-  html.night-mode{
-    --card:#222228; --field:#191920; --green-lt:#16271d; --red-lt:#2b1715;
-  }
-  html.night-mode .pill{border-color:transparent}
-  html.night-mode .note{border-color:transparent}
+  html.night-mode{ --card:#222228; --field:#191920; --green-lt:#16271d; --red-lt:#2b1715; }
   html{overflow-x:clip}
   body{
     font-family:var(--ff-sans); background:var(--paper); color:var(--ink);
-    min-height:100vh; -webkit-font-smoothing:antialiased; position:relative;
-    display:flex; flex-direction:column; align-items:center;
+    min-height:100vh; min-height:100dvh; -webkit-font-smoothing:antialiased;
+    display:flex; flex-direction:column;
   }
   /* film grain, same as the rest of the site */
   body::before{
-    content:''; position:absolute; inset:0; z-index:9999; pointer-events:none; opacity:.022;
+    content:''; position:fixed; inset:0; z-index:9999; pointer-events:none; opacity:.022;
     background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
+  a{color:var(--orange); text-decoration:none}
+  .hidden{display:none !important}
 
-  /* ── nav (shared site nav) ───────────────────────────── */
-  nav{position:fixed; top:0; left:0; right:0; height:var(--nav-h); background:var(--paper);
-      border-bottom:1px solid var(--rule); display:flex; align-items:center; padding:0 24px; gap:24px; z-index:100}
-  .nav-wordmark{font-family:var(--ff-serif); font-size:20px; color:var(--ink); letter-spacing:-.01em;
-                text-decoration:none; flex-shrink:0; display:flex; align-items:center}
-  .nav-logo{height:26px; width:auto; margin-right:8px}
-  .nav-wordmark span{color:var(--orange)}
-  .nav-tabs{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); display:flex; gap:2px}
-  .nav-tab{font-family:var(--ff-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase;
-           color:var(--ink3); background:none; border:none; padding:6px 14px; cursor:pointer; border-radius:4px;
-           transition:color .15s, background .15s; text-decoration:none; display:inline-block}
-  .nav-tab:hover{color:var(--ink); background:var(--paper2)}
-  .nav-tab.active{color:var(--ink); background:var(--paper3)}
-  .nav-auth{margin-left:auto; display:flex; align-items:center; gap:10px; flex-shrink:0}
-  .nav-auth-avatar{width:28px; height:28px; border-radius:50%; object-fit:cover; border:1.5px solid var(--rule)}
-  .nav-signin-btn{font-family:var(--ff-mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase;
-                  padding:5px 12px; background:var(--orange); color:#fff; border:none; border-radius:4px;
-                  cursor:pointer; text-decoration:none}
-  .nav-signin-btn:hover{opacity:.85}
-  .nav-signout-btn{font-family:var(--ff-mono); font-size:10px; letter-spacing:.04em; color:var(--ink3);
-                   background:none; border:none; cursor:pointer; padding:4px 6px}
-  .nav-signout-btn:hover{color:var(--ink)}
-  @media(max-width:720px){
-    nav{padding:0 14px; gap:12px}
-    .nav-tabs{position:static; transform:none; margin-left:6px; overflow-x:auto; -webkit-overflow-scrolling:touch}
-    .nav-tabs::-webkit-scrollbar{display:none}
-    .nav-tab{white-space:nowrap; padding:5px 12px}
+  .wrap{
+    width:100%; max-width:960px; margin:0 auto; flex:1; min-height:0;
+    padding:16px 16px 18px; display:flex; flex-direction:column;
   }
 
-  .eyebrow{font-family:var(--ff-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase;
-           color:var(--orange); text-align:center; margin-bottom:14px}
-  .wrap{width:100%; max-width:540px; padding:calc(var(--nav-h) + 22px) 18px 70px; flex:1; display:flex; flex-direction:column}
+  /* ── HUD: the board being played + the streak ─────────────────── */
+  .hud{display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:12px}
+  .hud-board{flex:1 1 auto; min-width:0}
+  .hud-kicker{font-family:var(--ff-mono); font-size:10px; letter-spacing:.16em;
+              text-transform:uppercase; color:var(--orange)}
+  .hud-label{font-family:var(--ff-serif); font-size:23px; line-height:1.1; color:var(--ink);
+             white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .hud-right{display:flex; align-items:center; gap:16px; flex-shrink:0}
+  .hud-stat{text-align:right}
+  .hud-n{font-family:var(--ff-serif); font-size:26px; line-height:1; color:var(--ink)}
+  .hud-n.hot{color:var(--orange)}
+  .hud-l{font-family:var(--ff-mono); font-size:9.5px; letter-spacing:.12em;
+         text-transform:uppercase; color:var(--ink3); margin-top:3px}
 
-  /* ── status row ──────────────────────────────────────── */
-  .statusbar{display:flex; align-items:center; justify-content:space-between; margin:6px 2px 22px}
-  .lives{display:flex; gap:7px; align-items:center}
-  .life{height:27px; width:auto; transition:filter .25s, opacity .25s}
-  .life.spent{filter:grayscale(1); opacity:.2}
-  .score{font-family:var(--ff-mono); font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink3)}
-  .score b{font-family:var(--ff-serif); color:var(--ink); font-size:24px; margin-left:8px; letter-spacing:0}
+  /* round pips — the run at a glance, and the share grid's on-screen twin */
+  .pips{display:flex; gap:4px; align-items:center; margin-bottom:12px}
+  .pip{flex:1 1 0; height:4px; border-radius:2px; background:var(--paper3); transition:background .3s}
+  .pip.won{background:var(--green)}
+  .pip.lost{background:var(--red)}
+  .pip.now{background:var(--orange)}
 
-  /* ── card ────────────────────────────────────────────── */
+  /* ── the arena: two panels, anchor then challenger ────────────── */
+  .arena{flex:1; min-height:0; display:flex; flex-direction:column; gap:10px}
+  @media(max-height:860px){ .panel{min-height:148px} }
+  .panel{
+    position:relative; overflow:hidden; border-radius:16px; flex:1 1 0; min-height:182px;
+    background:#17171c; color:#fff; isolation:isolate;
+    box-shadow:0 1px 0 rgba(0,0,0,.04), 0 12px 34px rgba(20,16,10,.10);
+  }
+  /* Team colour wash, then a dark scrim that is heavy only under the type — the
+     right half stays colourful so the panel reads as that team's card. */
+  .panel::before{
+    content:''; position:absolute; inset:0; z-index:0;
+    background:
+      linear-gradient(95deg, rgba(6,6,8,.90) 0%, rgba(6,6,8,.72) 24%,
+                             rgba(6,6,8,.24) 54%, rgba(6,6,8,0) 74%),
+      radial-gradient(120% 130% at 22% 112%, var(--c1,#2a2a32) 0%,
+                      var(--c2,#111116) 55%, #0a0a0d 100%);
+  }
+  /* The art occupies the right column only. Letting it run full-bleed put the
+     player's face directly under his own name. */
+  .shot{
+    position:absolute; z-index:1; right:0; top:0; width:52%; height:100%;
+    object-fit:cover; object-position:52% 16%;
+    -webkit-mask-image:linear-gradient(90deg, transparent 0, rgba(0,0,0,.6) 34%, #000 62%);
+            mask-image:linear-gradient(90deg, transparent 0, rgba(0,0,0,.6) 34%, #000 62%);
+  }
+  .pbody{position:relative; z-index:2; height:100%; padding:18px 20px;
+         display:flex; flex-direction:column; justify-content:center; gap:2px;
+         max-width:62%}
+  .pteam{align-self:flex-start; font-family:var(--ff-mono); font-size:10px; letter-spacing:.15em;
+         text-transform:uppercase; color:#fff; background:var(--c1,#2a2a32);
+         border:1px solid rgba(255,255,255,.22); border-radius:4px; padding:3px 8px; margin-bottom:5px}
+  .pname{font-family:var(--ff-serif); font-size:clamp(23px,5.6vw,36px); line-height:1.04;
+         letter-spacing:-.01em; text-wrap:balance}
+  .pval{font-family:var(--ff-mono); font-weight:500; font-size:clamp(30px,7.4vw,48px);
+        line-height:1.05; margin-top:6px; font-variant-numeric:tabular-nums;
+        transition:color .3s}
+  .pval.good{color:#5fd99a} .pval.bad{color:#ff8d7e}
+  .pval.hidden-val{color:rgba(255,255,255,.34)}
+  .punit{font-family:var(--ff-mono); font-size:10.5px; letter-spacing:.14em;
+         text-transform:uppercase; color:rgba(255,255,255,.52); margin-top:5px}
+  .pask{font-family:var(--ff-sans); font-size:14.5px; line-height:1.35; margin-top:9px;
+        color:rgba(255,255,255,.80)}
+  .pask b{font-weight:600; color:#fff}
+
+  /* the seam: which stat you are comparing on */
+  .seam{display:flex; align-items:center; gap:12px; flex-shrink:0}
+  .seam-rule{flex:1; height:1px; background:var(--rule)}
+  .seam-badge{font-family:var(--ff-mono); font-size:9.5px; letter-spacing:.18em;
+              text-transform:uppercase; color:var(--ink3)}
+
+  /* ── the calls ────────────────────────────────────────────────── */
+  .calls{display:flex; gap:10px; margin-top:14px; max-width:420px}
+  .call{
+    flex:1 1 0; display:flex; align-items:center; justify-content:center; gap:8px;
+    padding:13px 10px; border-radius:11px; cursor:pointer;
+    font-family:var(--ff-sans); font-size:14px; font-weight:700; letter-spacing:.04em;
+    background:rgba(255,255,255,.12); color:#fff; border:1.5px solid rgba(255,255,255,.26);
+    backdrop-filter:blur(3px); transition:background .14s, border-color .14s, transform .1s;
+  }
+  .call:hover:not(:disabled){background:rgba(255,255,255,.24); border-color:#fff; transform:translateY(-1px)}
+  .call:active:not(:disabled){transform:translateY(0)}
+  .call:disabled{cursor:default; opacity:.45}
+  .call .arrow{font-size:12px}
+  .call.chosen{background:#fff; color:#121216; border-color:#fff}
+
+  /* verdict chip over the challenger panel */
+  .verdict{
+    position:absolute; z-index:3; inset:auto 18px 18px auto;
+    font-family:var(--ff-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    padding:7px 13px; border-radius:100px; font-weight:500;
+    opacity:0; transform:translateY(6px); transition:opacity .22s, transform .22s;
+  }
+  .verdict.show{opacity:1; transform:translateY(0)}
+  .verdict.good{background:#1a7a4a; color:#fff}
+  .verdict.bad{background:#c0392b; color:#fff}
+
+  @media(min-width:860px){
+    .arena{flex-direction:row; align-items:stretch}
+    .panel{min-height:400px}
+    .seam{flex-direction:column; width:auto}
+    .seam-rule{width:1px; height:auto; flex:1}
+    .seam-badge{writing-mode:vertical-rl; text-orientation:mixed}
+    .pbody{max-width:76%}
+  }
+  @media(max-width:520px){
+    .pbody{padding:15px 16px; max-width:64%}
+    .shot{width:48%}
+  }
+
+  /* ── cards (sign-in, result, paywall) ─────────────────────────── */
   .card{
-    background:var(--card); border:1px solid var(--rule); border-radius:12px;
-    padding:26px 24px; box-shadow:0 1px 0 rgba(0,0,0,.03), 0 10px 30px rgba(20,16,10,.06);
+    background:var(--card); border:1px solid var(--rule); border-radius:14px;
+    padding:28px 24px; text-align:center;
+    box-shadow:0 1px 0 rgba(0,0,0,.03), 0 10px 30px rgba(20,16,10,.06);
   }
-  .qmeta{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px}
-  .qnum{font-family:var(--ff-mono); font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink3)}
-  .pill{font-family:var(--ff-mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase;
-        padding:4px 11px; border-radius:100px; font-weight:500; border:1px solid transparent}
-  .pill.easy{background:var(--green-lt); color:var(--green); border-color:#cfe6d8}
-  .pill.medium{background:var(--orange-lt); color:var(--orange); border-color:#f6d8c8}
-  .pill.hard{background:var(--red-lt); color:var(--red); border-color:#f0d2cf}
-  .qtext{font-family:var(--ff-serif); font-size:27px; line-height:1.22; color:var(--ink); margin:2px 0 22px}
-
-  /* ── picker ──────────────────────────────────────────── */
-  .picker{position:relative}
-  .picker input{
-    width:100%; padding:14px 16px; font-family:var(--ff-sans); font-size:16px; color:var(--ink);
-    background:var(--field); border:1.5px solid var(--rule); border-radius:9px; outline:none; transition:border-color .15s;
-  }
-  .picker input::placeholder{color:var(--ink4)}
-  .picker input:focus{border-color:var(--orange)}
-  .drop{
-    position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:20;
-    background:var(--field); border:1px solid var(--rule); border-radius:9px; overflow:hidden auto;
-    max-height:258px; box-shadow:0 14px 34px rgba(20,16,10,.14);
-  }
-  .drop div{padding:9px 14px; cursor:pointer; border-bottom:1px solid var(--paper2); font-size:15px;
-            display:flex; align-items:center; gap:11px}
-  .drop div:last-child{border-bottom:none}
-  .drop div.active,.drop div:hover{background:var(--orange-lt); color:var(--orange)}
-  /* player headshot bubble (dropdown + choice buttons) */
-  .shot{width:32px; height:32px; border-radius:50%; overflow:hidden; background:var(--paper3);
-        flex-shrink:0; display:inline-block}
-  .shot img{width:100%; height:100%; object-fit:cover; object-position:center top; display:block}
-
-  /* this-or-that two-button choice */
-  .choices{display:flex; gap:12px; margin-top:4px}
-  .choice{flex:1 1 0; display:flex; flex-direction:column; align-items:center; gap:11px; padding:20px 12px;
-          background:var(--field); border:1.5px solid var(--rule); border-radius:12px; cursor:pointer;
-          font-family:var(--ff-sans); color:var(--ink); transition:border-color .15s, background .15s, transform .1s}
-  .choice:hover:not(:disabled){border-color:var(--orange); transform:translateY(-2px)}
-  .choice:disabled{cursor:default}
-  .choice .shot{width:72px; height:72px}
-  .choice-name{font-family:var(--ff-serif); font-size:18px; text-align:center; line-height:1.16}
-  /* the stat value, revealed only after answering */
-  .choice-val{font-family:var(--ff-mono); font-size:14px; color:var(--ink3); margin-top:-4px;
-              opacity:0; transition:opacity .25s}
-  .choices[data-done] .choice-val{opacity:1}
-  .choice.correct .choice-val{color:var(--green)}
-  .choice.correct{border-color:var(--green); background:var(--green-lt)}
-  .choice.wrong{border-color:var(--red); background:var(--red-lt)}
-
-  /* ── buttons ─────────────────────────────────────────── */
+  .resultlogo{height:44px; width:auto; margin-bottom:10px}
+  .headline{font-family:var(--ff-serif); font-size:31px; line-height:1.08; color:var(--ink)}
+  .headline.win{color:var(--orange)}
+  .big{font-family:var(--ff-serif); font-size:64px; line-height:1; margin:12px 0 2px}
+  .big small{font-size:26px; color:var(--ink3)}
+  .sub{color:var(--ink3); font-size:14.5px; line-height:1.5; max-width:380px; margin:6px auto 0}
+  .bustline{display:flex; align-items:center; justify-content:center; gap:10px; flex-wrap:wrap;
+            margin:18px auto 2px; font-family:var(--ff-mono); font-size:12.5px; color:var(--ink2)}
+  .bustline .mini{width:34px; height:34px; border-radius:50%; overflow:hidden; background:var(--paper3);
+                  flex-shrink:0; display:inline-block; vertical-align:middle}
+  .bustline .mini img{width:100%; height:100%; object-fit:cover; object-position:center top}
+  .bustline b{font-family:var(--ff-sans); font-size:14px}
+  .stats{display:flex; justify-content:center; gap:34px; margin:22px 0 4px}
+  .stats .n{font-family:var(--ff-serif); font-size:27px; color:var(--ink)}
+  .stats .l{font-family:var(--ff-mono); font-size:9.5px; color:var(--ink3);
+            text-transform:uppercase; letter-spacing:.11em; margin-top:2px}
+  .grid-emoji{font-size:19px; letter-spacing:3px; margin:16px 0 2px; line-height:1.5}
   .btn{
-    display:block; width:100%; margin-top:14px; padding:14px; border:1.5px solid var(--orange);
-    border-radius:9px; font-family:var(--ff-sans); font-size:15px; font-weight:600; cursor:pointer;
-    background:var(--orange); color:#fff; transition:opacity .15s, background .15s;
+    display:block; width:100%; max-width:340px; margin:12px auto 0; padding:14px;
+    border:1.5px solid var(--orange); border-radius:9px; font-family:var(--ff-sans);
+    font-size:15px; font-weight:600; cursor:pointer; background:var(--orange); color:#fff;
+    transition:opacity .15s, background .15s;
   }
   .btn:hover{opacity:.92}
-  .btn:disabled{opacity:.35; cursor:default}
   .btn.ghost{background:transparent; color:var(--ink2); border-color:var(--rule)}
   .btn.ghost:hover{background:var(--paper2); opacity:1}
+  .xpcard{margin:18px auto 4px; max-width:300px; background:var(--orange-lt); border:1px solid #f6d8c8;
+          border-radius:10px; padding:14px 16px; text-align:left}
+  html.night-mode .xpcard{border-color:transparent}
+  .xpcard .xptitle{font-family:var(--ff-mono); font-size:9.5px; letter-spacing:.13em; text-transform:uppercase;
+                   color:var(--orange); text-align:center; margin-bottom:10px}
+  .xprow{display:flex; justify-content:space-between; align-items:baseline;
+         font-size:14px; color:var(--ink2); padding:3px 0}
+  .xprow span:last-child{font-family:var(--ff-mono); color:var(--orange); font-weight:500}
+  .xprow.xptotal{margin-top:6px; padding-top:9px; border-top:1px solid #f1cdb9; font-weight:600; color:var(--ink)}
+  .xprow.xptotal span:last-child{font-size:16px}
 
-  .verdict{margin-top:16px; text-align:center; font-size:16px; min-height:24px; font-weight:600; font-family:var(--ff-sans)}
-  .verdict.good{color:var(--green)} .verdict.bad{color:var(--red)}
-  .verdict small{display:block; color:var(--ink3); font-weight:400; margin-top:5px; font-size:14px}
-
-  /* ── results ─────────────────────────────────────────── */
-  .center{text-align:center}
-  .headline{font-family:var(--ff-serif); font-size:30px; line-height:1.1; color:var(--ink); margin-bottom:4px}
-  .headline.win{color:var(--orange)}
-  .big{font-family:var(--ff-serif); font-size:64px; line-height:1; color:var(--ink); margin:14px 0 6px}
-  .sub{color:var(--ink3); font-size:15px; line-height:1.5}
-  .stats{display:flex; justify-content:center; gap:34px; margin:24px 0 8px}
-  .stats .n{font-family:var(--ff-serif); font-size:28px; color:var(--ink)}
-  .stats .l{font-family:var(--ff-mono); font-size:10px; color:var(--ink3); text-transform:uppercase; letter-spacing:.1em; margin-top:2px}
-  .note{font-family:var(--ff-mono); font-size:11.5px; letter-spacing:.04em; color:var(--orange);
-        background:var(--orange-lt); border:1px solid #f6d8c8; border-radius:8px; padding:9px 14px;
-        text-align:center; margin-bottom:14px}
-  .resultlogo{height:46px; width:auto; margin-bottom:10px}
-  .lb-section{margin-top:20px; padding-top:16px; border-top:1px solid var(--rule); text-align:left}
-  .lb-title{font-family:var(--ff-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink3); margin-bottom:10px; text-align:center}
+  /* leaderboard */
+  .lb-section{margin-top:22px; padding-top:16px; border-top:1px solid var(--rule); text-align:left}
+  .lb-title{font-family:var(--ff-mono); font-size:9.5px; letter-spacing:.11em; text-transform:uppercase;
+            color:var(--ink3); margin-bottom:10px; text-align:center}
   .lb-row{display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--paper3)}
   .lb-row:last-child{border-bottom:none}
   .lb-row.lb-you{background:var(--paper3); border-radius:8px; padding:8px; margin:2px 0}
   .lb-rank{font-family:var(--ff-mono); font-size:12px; color:var(--ink3); width:20px; text-align:right; flex-shrink:0}
   .lb-avatar{width:26px; height:26px; border-radius:50%; object-fit:cover; border:1.5px solid var(--rule); flex-shrink:0}
-  .lb-avatar-initial{display:flex; align-items:center; justify-content:center; background:var(--paper2); font-size:11px; color:var(--ink3)}
+  .lb-avatar-initial{display:flex; align-items:center; justify-content:center; background:var(--paper2);
+                     font-size:11px; color:var(--ink3)}
   .lb-name{flex:1; font-size:13px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .lb-score{font-family:var(--ff-mono); font-size:12px; color:var(--ink2); flex-shrink:0}
   .lb-sep{text-align:center; color:var(--ink4); font-size:12px; padding:2px 0}
   .lb-toggle{display:block; width:100%; text-align:center; margin-top:10px; background:none; border:none;
              font-family:var(--ff-mono); font-size:11px; color:var(--orange); cursor:pointer; text-decoration:underline}
   .lb-loading{text-align:center; font-family:var(--ff-mono); font-size:11px; color:var(--ink4); padding:10px 0}
-  .xpline{font-family:var(--ff-mono); font-size:13px; letter-spacing:.04em; color:var(--orange);
-          background:var(--orange-lt); border:1px solid #f6d8c8; border-radius:100px;
-          padding:8px 18px; display:inline-block; margin-top:14px; font-weight:500}
-  /* Ball Knowledge breakdown panel on the daily result screen */
-  .xpcard{margin:18px auto 4px; max-width:300px; background:var(--orange-lt); border:1px solid #f6d8c8;
-          border-radius:10px; padding:14px 16px; text-align:left}
-  .xpcard .xptitle{font-family:var(--ff-mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase;
-                   color:var(--orange); text-align:center; margin-bottom:10px}
-  .xprow{display:flex; justify-content:space-between; align-items:baseline; font-family:var(--ff-sans);
-         font-size:14px; color:var(--ink2); padding:3px 0}
-  .xprow span:last-child{font-family:var(--ff-mono); color:var(--orange); font-weight:500}
-  .xprow.xptotal{margin-top:6px; padding-top:9px; border-top:1px solid #f1cdb9; font-weight:600; color:var(--ink)}
-  .xprow.xptotal span:last-child{font-size:16px}
 
-  .foot{margin-top:auto; padding-top:26px; text-align:center; font-family:var(--ff-mono);
-        font-size:11px; letter-spacing:.06em; color:var(--ink4); line-height:1.7}
-  a{color:var(--orange); text-decoration:none}
-  .hidden{display:none}
-
-/* ── Nav (updated) ──────────────────────────────────────────── */
-nav {
-  position:fixed; top:0; left:0; right:0;
-  height:var(--nav-h); background:var(--paper);
-  border-bottom:1px solid var(--rule);
-  display:flex; align-items:center;
-  padding:0 24px; gap:22px; z-index:100;
-}
-.nav-logo-link { display:flex; align-items:center; gap:9px; text-decoration:none; flex-shrink:0; }
-.nav-logo-link img { height:28px; width:auto; }
-.nav-wordmark { font-family:var(--ff-serif); font-size:21px; letter-spacing:-.01em; color:var(--ink); }
-.nav-wordmark span { color:var(--orange); }
-.nav-links {
-  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-  display:flex; gap:2px;
-}
-.nav-link {
-  font-family:var(--ff-mono); font-size:11px; letter-spacing:.07em;
-  text-transform:uppercase; color:var(--ink3); text-decoration:none;
-  padding:6px 13px; border-radius:4px; background:transparent;
-  transition:color .15s, background .15s;
-}
-.nav-link:hover { color:var(--ink); background:var(--paper2); }
-.nav-link.active { color:var(--ink); background:var(--paper3); }
-.nav-right { margin-left:auto; display:flex; align-items:center; gap:12px; flex-shrink:0; }
-#nav-live { display:none; align-items:center; gap:6px; font-family:var(--ff-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--red); }
-.install-btn {
-  display:none; align-items:center; gap:6px;
-  font-family:var(--ff-mono); font-size:10px; letter-spacing:.07em; text-transform:uppercase;
-  color:var(--ink3); background:none; border:1px solid var(--rule); border-radius:4px;
-  padding:5px 10px; cursor:pointer; white-space:nowrap; flex-shrink:0;
-  transition:color .15s, border-color .15s, background .15s;
-}
-.install-btn:hover { color:var(--ink); border-color:var(--ink3); background:var(--paper2); }
-.install-overlay {
-  display:none; position:fixed; inset:0;
-  background:rgba(12,12,13,.55); z-index:9000;
-  align-items:flex-end; justify-content:center;
-  padding-bottom:env(safe-area-inset-bottom,0px);
-}
-.install-overlay.open { display:flex; }
-.install-sheet {
-  background:var(--paper); border-radius:16px 16px 0 0;
-  padding:24px 24px 36px; width:100%; max-width:480px;
-  border-top:1px solid var(--rule); animation:sheetUp .22s ease;
-}
-.install-sheet-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
-.install-sheet-title { font-family:var(--ff-serif); font-size:20px; color:var(--ink); }
-.install-sheet-close { background:none; border:none; cursor:pointer; color:var(--ink3); padding:4px; line-height:1; font-size:20px; }
-.install-steps { list-style:none; display:flex; flex-direction:column; gap:16px; }
-.install-step { display:flex; align-items:flex-start; gap:14px; }
-.install-step-num { flex-shrink:0; width:26px; height:26px; border-radius:50%; background:var(--orange); color:#fff; font-family:var(--ff-mono); font-size:12px; font-weight:600; display:flex; align-items:center; justify-content:center; }
-.install-step-text { font-size:14px; color:var(--ink2); line-height:1.5; padding-top:3px; }
-.install-step-text strong { color:var(--ink); }
-@media (max-width:640px) {
-  :root { --nav-h:88px; }
-  nav { height:auto; padding:0 16px; flex-wrap:wrap; align-items:center; }
-  .nav-logo-link { padding:8px 0; }
-  .nav-right { padding:8px 0; }
-  .nav-links { position:static; transform:none; order:10; flex:0 0 100%; justify-content:space-evenly; overflow-x:auto; scrollbar-width:none; flex-wrap:nowrap; border-top:1px solid var(--rule); padding:7px 0 9px; gap:0; }
-  .nav-links::-webkit-scrollbar { display:none; }
-  .nav-link { white-space:nowrap; padding:5px 10px; }
-  .install-btn { display:flex; }
-}
-
-
+  .foot{margin-top:18px; text-align:center; font-family:var(--ff-mono);
+        font-size:10.5px; letter-spacing:.06em; color:var(--ink4); line-height:1.8}
 </style>
-  <link rel="stylesheet" href="/site-nav.css">
 </head>
 <body>
-    <!-- ── Site header (canonical) ── -->
 <header class="site-nav">
   <div class="site-nav__bar">
     <a class="site-nav__brand" href="/">
@@ -282,491 +237,487 @@ nav {
   </div>
 </header>
 
-  <div class="wrap">
-    <div class="eyebrow" id="mode">Higher or Lower</div>
-    <div class="statusbar">
-      <div class="lives" id="lives"></div>
-      <div class="score">score<b id="score">0</b></div>
+<div class="wrap">
+  <div class="hud">
+    <div class="hud-board">
+      <div class="hud-kicker" id="hud-kicker">Higher or Lower</div>
+      <div class="hud-label" id="hud-label">&nbsp;</div>
     </div>
-
-    <div id="stage"></div>
-
-    <div class="foot">
-      <span id="footnote">one question · two players · one answer</span><br>
-      <span id="streakline"></span>
-    </div>
+    <div class="hud-right" id="hud-right"></div>
   </div>
+  <div class="pips" id="pips"></div>
+  <div id="stage" class="arena"></div>
+  <div class="foot" id="foot"></div>
+</div>
 
+<script src="/team-colors.js"></script>
 <script>
 const API = window.location.protocol === 'file:' ? 'http://localhost:5000' : '';
-const stage = document.getElementById('stage');
-const livesEl = document.getElementById('lives');
-const scoreEl = document.getElementById('score');
-const modeEl = document.getElementById('mode');
-const streakEl = document.getElementById('streakline');
-const footEl = document.getElementById('footnote');
+const $ = s => document.querySelector(s);
+const stage = $('#stage'), pipsEl = $('#pips'), footEl = $('#foot');
+const hudLabel = $('#hud-label'), hudKicker = $('#hud-kicker'), hudRight = $('#hud-right');
 
-let PLAYERS = [];
-let state = null;
-
-function setLives(lives){
-  livesEl.innerHTML = '';
-  for(let i=0;i<3;i++){
-    const img = document.createElement('img');
-    img.src = '/transparent.png'; img.alt=''; img.className = 'life' + (i < lives ? '' : ' spent');
-    livesEl.appendChild(img);
-  }
-}
-// Daily has no lives (answer all 10 → get a score); only Unlimited shows the hoops.
-function showLives(on){ livesEl.style.display = on ? 'flex' : 'none'; }
-
-// Daily Ball Knowledge: +10 for playing + 5 per correct (no perfect bonus). Deterministic
-// from the correct count, so we can render the same breakdown live or on the locked screen.
-function xpBreakdownHTML(correct){
-  const play = 10, per = 5, cx = per * correct, total = play + cx;
-  return `<div class="xpcard">
-    <div class="xptitle">Ball Knowledge earned</div>
-    <div class="xprow"><span>Played today</span><span>+${play}</span></div>
-    <div class="xprow"><span>${correct} correct × ${per}</span><span>+${cx}</span></div>
-    <div class="xprow xptotal"><span>Total</span><span>+${total}</span></div>
-  </div>`;
-}
-// Score-tiered headline for a finished daily (everyone completes — no "out of lives").
-function dailyHeadline(score, total){
-  if(score === total)      return {text:'You KNOW ball.', cls:'win',  logo:true};
-  if(score >= total*0.7)   return {text:'You know ball.',  cls:'win',  logo:true};
-  if(score >= total*0.4)   return {text:'Solid run.',      cls:'',     logo:false};
-  return {text:'Hit the film room.', cls:'', logo:false};
-}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 function jfetch(url, opts){
   return fetch(API+url, Object.assign({credentials:'include'}, opts||{}))
-    .then(r=>r.json().then(j=>({ok:r.ok,status:r.status,body:j})));
+    .then(r => r.json().then(j => ({ok:r.ok, status:r.status, body:j})).catch(() => ({ok:false,status:r.status,body:{}})));
+}
+const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// ── state ────────────────────────────────────────────────────────────────────
+// A run is one board and a chain of players. `round` is 1-based: the anchor is
+// chain[round-1] and the challenger is chain[round]. Sudden death — `picks` only
+// ever holds correct calls, so score === picks.length while you're alive.
+let S = null;
+
+const headshot = (id, big) =>
+  `https://cdn.nba.com/headshots/nba/latest/${big ? '1040x760' : '260x190'}/${id}.png`;
+
+// Career totals are whole numbers; everything else is a per-game average.
+const isTotal = () => S && S.board && S.board.startsWith('career');
+const fmtVal  = v => isTotal() ? Math.round(v).toLocaleString() : v.toFixed(1);
+
+// The panel is built from the team's PRIMARY only, shaded into a darker version of
+// itself. Using the official secondary breaks constantly — half the league's is pure
+// black or white, which either kills the colour or blows out the type.
+function shade(hex, f){
+  const n = parseInt(String(hex).replace('#',''), 16);
+  if (isNaN(n)) return '#15151b';
+  const r = Math.round(((n >> 16) & 255) * f),
+        g = Math.round(((n >> 8) & 255) * f),
+        b = Math.round((n & 255) * f);
+  return '#' + [r,g,b].map(v => v.toString(16).padStart(2,'0')).join('');
+}
+function teamVars(abbr){
+  // team-colors.js declares `const TEAM_COLORS` — a top-level const is script-scoped
+  // and never becomes a window property, so this must read the bare identifier.
+  const map = (typeof TEAM_COLORS !== 'undefined') ? TEAM_COLORS : {};
+  const c = map[abbr] || {};
+  const p = c.primary || '#2f2f3a';
+  return `--c1:${p}; --c2:${shade(p, 0.42)}`;
 }
 
-// ── boot ──────────────────────────────────────────────────────────────
-async function boot(){
-  // Every question is now a this-or-that (two headshot buttons), so the autocomplete
-  // player bank is no longer needed.
-  // Deep-link straight into unlimited from the games hub (?mode=unlimited).
-  if (new URLSearchParams(location.search).get('mode') === 'unlimited') {
-    return startUnlimited();
+// ── chrome ───────────────────────────────────────────────────────────────────
+function renderHud(){
+  hudLabel.textContent = S.label || '';
+  hudKicker.textContent = S.mode === 'run' ? 'Unlimited run' : 'Higher or Lower';
+  const streakBit = (S.mode === 'daily' && S.streak != null)
+    ? `<div class="hud-stat"><div class="hud-n">${S.streak}</div><div class="hud-l">days</div></div>` : '';
+  hudRight.innerHTML = `${streakBit}
+    <div class="hud-stat"><div class="hud-n ${S.score > 0 ? 'hot' : ''}" id="hud-score">${S.score}</div>
+      <div class="hud-l">streak</div></div>`;
+}
+function renderPips(){
+  // Beyond the pre-built chain (Pro runs) a fixed bar stops meaning anything.
+  if (S.score > S.rounds) { pipsEl.innerHTML = ''; return; }
+  let h = '';
+  for (let i = 1; i <= S.rounds; i++){
+    const cls = i <= S.score ? 'won' : (i === S.round && !S.over ? 'now' : (S.bustedRound === i ? 'lost' : ''));
+    h += `<div class="pip ${cls}"></div>`;
   }
-  const daily = await jfetch('/api/survival/daily');
-  if (daily.status === 401) {   // must be signed in — the one-a-day lock needs an account
-    stage.innerHTML = `<div class="card center">
-      <img class="resultlogo" src="/transparent.png" alt="">
-      <div class="headline">Sign in to play</div>
-      <div class="sub">Higher or Lower is free with a ydkball account — your daily run, streak,
-        and Ball Knowledge are saved to it.</div>
-      <a class="btn" href="/auth/google/login?next=${encodeURIComponent('/survival')}"
-         style="text-decoration:none;margin-top:18px">Sign in</a></div>`;
-    return;
-  }
-  const d = daily.body;
-  // Already played today → locked: show the result, not a fresh playable run.
-  if (d.your_result != null) { return renderAlreadyPlayed(d); }
-  startRun({
-    mode:'daily',
-    questions: d.questions,
-    lives: d.lives,
-    date: d.date,
-    best: d.best, streak: d.streak,
+  pipsEl.innerHTML = h;
+}
+function setFoot(){
+  footEl.innerHTML = S.mode === 'daily'
+    ? `sudden death · one miss ends the day · same chain for everyone`
+    : `sudden death · no round limit · go as deep as you can`;
+}
+
+// ── the arena ────────────────────────────────────────────────────────────────
+function panelHTML(link, role){
+  const revealed = role === 'anchor';
+  return `
+    <div class="panel ${role}" id="p-${role}" style="${teamVars(link.team)}">
+      <img class="shot" src="${headshot(link.id, true)}" alt=""
+           onerror="this.onerror=null;this.src='${headshot(link.id,false)}'">
+      <div class="pbody">
+        <div class="pteam">${esc(link.team || 'NBA')}</div>
+        <div class="pname">${esc(link.name)}</div>
+        ${revealed ? `
+          <div class="pval">${esc(link.display)}</div>
+          <div class="punit">${esc(S.unit || '')}</div>
+        ` : `
+          <div class="pval hidden-val" id="chal-val">?</div>
+          <div class="pask">higher or lower than
+            <b>${esc(S.chain[S.round-1].display)}</b>?</div>
+          <div class="calls" id="calls">
+            <button class="call" data-call="more"><span class="arrow">&#9650;</span> HIGHER</button>
+            <button class="call" data-call="less"><span class="arrow">&#9660;</span> LOWER</button>
+          </div>
+        `}
+      </div>
+      ${revealed ? '' : `<div class="verdict" id="verdict"></div>`}
+    </div>`;
+}
+
+function renderRound(){
+  const anchor = S.chain[S.round - 1], chal = S.chain[S.round];
+  stage.className = 'arena';
+  stage.innerHTML = panelHTML(anchor, 'anchor')
+    + `<div class="seam"><div class="seam-rule"></div>
+         <div class="seam-badge">vs</div>
+         <div class="seam-rule"></div></div>`
+    + panelHTML(chal, 'challenger');
+  renderHud(); renderPips(); setFoot();
+  $('#calls').querySelectorAll('.call').forEach(b => {
+    b.onclick = () => onCall(b.dataset.call, b);
   });
 }
 
-// ── locked "already played today" screen ──────────────────────────────
-function renderAlreadyPlayed(d){
-  const total = (d.questions && d.questions.length) || 10;
-  const score = d.your_result;
-  const perfect = score === total;
-  // rebuild today's grid from what we saved when you played; if unavailable (e.g. another
-  // device), fall back to score-many 🏀 then ❌ padding.
-  let saved = null;
-  try { saved = JSON.parse(localStorage.getItem('survival_grid_' + d.date) || 'null'); } catch(e){}
-  const results = (saved && saved.results) ? saved.results : Array(score).fill(true);
-  state = { mode:'daily', best:d.best, streak:d.streak, date:d.date, total, score, results };
-  modeEl.textContent = 'Higher or Lower';
-  showLives(false); scoreEl.textContent = score;
-  footEl.textContent = 'one question · two players · one answer';
-  const head = dailyHeadline(score, total);
-  const shareTxt = buildShare();
-  stage.innerHTML = `
-    <div class="card center">
-      ${head.logo ? `<img class="resultlogo" src="/transparent.png" alt="">` : ''}
-      <div class="headline ${head.cls}">${head.text}</div>
-      <div class="big">${score}/${total}</div>
-      <div class="sub">You’ve already played today — come back tomorrow for a new run.</div>
-      ${xpBreakdownHTML(score)}
-      <div class="stats">
-        <div><div class="n">${d.streak??0}</div><div class="l">streak</div></div>
-        <div><div class="n">${d.best??score}</div><div class="l">best</div></div>
-      </div>
-      <button class="btn" id="share">Share result</button>
-      <button class="btn ghost" id="unlimited">Unlimited run · Pro</button>
-      <div id="lb-wrap"></div>
-    </div>`;
-  document.getElementById('share').onclick = ()=>{
-    if(navigator.share){ navigator.share({text:shareTxt}); }
-    else { navigator.clipboard.writeText(shareTxt); document.getElementById('share').textContent='Copied!'; }
-  };
-  document.getElementById('unlimited').onclick = startUnlimited;
-  loadLeaderboard();
-}
-
-function startRun(cfg){
-  // Daily: no lives — answer all 10, get a score. (Unlimited has its own start path.)
-  state = { ...cfg, total:cfg.questions.length, i:0, score:0, livesLeft:cfg.lives, over:false, picked:null, results:[], picks:[] };
-  modeEl.textContent = 'Higher or Lower';
-  footEl.textContent = 'answer all 10 · one guess each';
-  scoreEl.textContent = '0';
-  showLives(false);
-  streakEl.textContent = (cfg.streak!=null) ? `streak ${cfg.streak}  ·  best ${cfg.best}` : '';
-  renderQuestion();
-}
-
-// ── one question ──────────────────────────────────────────────────────
-function headshot(id){ return `https://cdn.nba.com/headshots/nba/latest/260x190/${id}.png`; }
-function shotHTML(id){ return `<span class="shot"><img src="${headshot(id)}" onerror="this.remove()" alt=""></span>`; }
-
-// ── share text: date + 🏀 (correct) / ❌ (wrong or not reached) ───────────────
-function fmtDate(iso){
-  const d = iso ? new Date(iso + 'T00:00:00') : new Date();
-  return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
-}
-function shareGrid(results, total){
-  let g = '';
-  for(let i=0;i<total;i++) g += (i < results.length ? (results[i] ? '🏀' : '❌') : '❌');
-  return g;
-}
-function buildShare(){
-  const results = state.results || [];
-  if(state.mode === 'daily'){
-    return `ydkball Higher or Lower ${state.score}/${state.total} · ${fmtDate(state.date)}\n${shareGrid(results, state.total)}`;
-  }
-  // unlimited: open-ended — score = correct count, grid is the whole run (ends on the 3rd ❌)
-  return `ydkball Higher or Lower · Unlimited ${state.score} · ${fmtDate()}\n${shareGrid(results, results.length)}`;
-}
-
-async function renderQuestion(){
-  // Daily is a fixed 10-question run (clearing all 10 ends it). Unlimited is open-ended —
-  // it keeps going until you lose 3 lives.
-  if(state.mode==='daily' && state.i >= state.total){ return gameOver(true); }
-  // unlimited: questions are generated one at a time on demand (the next is usually already
-  // prefetched, so this is instant; only the very first / a cold one shows "Loading…").
-  if(state.mode==='unlimited' && !state.questions[state.i]){
-    stage.innerHTML = `<div class="card center"><div class="sub">Loading…</div></div>`;
-    const err = await ensureUnlimited(state.i);
-    if(err) return gameOver(false);
-  }
-  const q = state.questions[state.i];
-  if(!q){ return gameOver(state.mode==='daily'); }   // daily out-of-Qs = cleared; unlimited = over
-  state.picked = null;
-  scoreEl.textContent = state.score;                 // correct-count, starts at 0
-  if(state.mode==='unlimited') prefetchUnlimited();  // load the next while they answer
-  // Daily shows "Question N / 10"; unlimited is open-ended, tracked by the score only (so the
-  // question number can't be misread as the score).
-  const meta = `
-      ${state.mode==='daily' ? `<div class="qmeta"><span class="qnum">Question ${state.i+1} / ${state.total}</span></div>` : ''}
-      <div class="qtext">${q.text}</div>`;
-
-  // this-or-that → two headshot buttons; pick one
-  if(q.options && q.options.length===2){
-    stage.innerHTML = `
-      <div class="card">${meta}
-        <div class="choices" id="choices">
-          ${q.options.map(o=>`<button class="choice" data-id="${o.id}">${shotHTML(o.id)}<span class="choice-name">${o.name}</span>${o.value?`<span class="choice-val">${o.value}</span>`:''}</button>`).join('')}
-        </div>
-        <div class="verdict" id="verdict"></div>
-      </div>`;
-    const choices = document.getElementById('choices');
-    choices.querySelectorAll('.choice').forEach(btn=>btn.onclick=()=>{
-      if(state.over || choices.dataset.done) return;
-      choices.dataset.done = '1';
-      resolveAnswer(q, +btn.dataset.id, btn);
+// Count the hidden number up from zero — the moment it passes (or fails to pass)
+// the anchor's number is the whole beat of the game.
+function countUp(el, to, dur = 900){
+  return new Promise(res => {
+    let t0 = null, done = false;
+    const finish = () => { if (done) return; done = true; el.textContent = fmtVal(to); res(); };
+    // A backgrounded tab throttles rAF to zero, and the whole turn is awaiting this
+    // promise — without a timer fallback, switching apps mid-answer strands the
+    // player on a board that never advances. Whichever lands first wins.
+    const bail = setTimeout(finish, dur + 400);
+    requestAnimationFrame(function tick(now){
+      if (done) return;
+      if (t0 === null) t0 = now;          // start from the first frame's own clock
+      // Clamp BOTH ends: an elapsed time below zero sends the ease-out cubic
+      // negative, which renders the hidden stat as "-0.3" before it counts up.
+      const p = Math.max(0, Math.min(1, (now - t0) / dur));
+      el.textContent = fmtVal(to * (1 - Math.pow(1 - p, 3)));
+      if (p < 1) { requestAnimationFrame(tick); }
+      else { clearTimeout(bail); finish(); }
     });
-    return;
-  }
-
-  // default → autocomplete picker
-  stage.innerHTML = `
-    <div class="card">${meta}
-      <div class="picker">
-        <input id="guess" placeholder="Name the player…" autocomplete="off" autocapitalize="off" spellcheck="false">
-        <div class="drop hidden" id="drop"></div>
-      </div>
-      <button class="btn" id="go" disabled>Guess</button>
-      <div class="verdict" id="verdict"></div>
-    </div>`;
-  wirePicker(q);
-}
-
-// shared scoring/verdict for both the picker and the this-or-that buttons
-function resolveAnswer(q, pid, chosenBtn){
-  if(state.over) return;
-  const verdict = document.getElementById('verdict');
-  const correct = pid!=null && q.answer_ids.includes(pid);
-  if(chosenBtn){
-    chosenBtn.classList.add(correct ? 'correct' : 'wrong');
-    if(!correct){
-      const right = document.querySelector(`.choice[data-id="${q.answer_ids[0]}"]`);
-      if(right) right.classList.add('correct');
-    }
-    document.querySelectorAll('.choice').forEach(b=>b.disabled=true);
-  }
-  state.results.push(correct);
-  state.picks.push(pid ?? null);
-  if(correct){
-    state.score = state.results.filter(Boolean).length; scoreEl.textContent = state.score;
-    verdict.className='verdict good';
-    verdict.innerHTML = `✓ ${q.answers[q.answer_ids.indexOf(pid)] || 'Correct'}`;
-  }else{
-    if(state.mode==='unlimited'){ state.livesLeft--; setLives(state.livesLeft); }  // daily = no lives
-    verdict.className='verdict bad';
-    verdict.innerHTML = `✗ <small>it was ${q.answers.slice(0,3).join(', ')}${q.answers.length>3?'…':''}</small>`;
-  }
-  setTimeout(()=>{
-    if(state.mode==='unlimited' && state.livesLeft<=0){ gameOver(false); }
-    else { state.i++; renderQuestion(); }
-  }, correct ? 750 : 1700);
-}
-
-function wirePicker(q){
-  const input = document.getElementById('guess');
-  const drop  = document.getElementById('drop');
-  const go    = document.getElementById('go');
-  let active = -1, matches = [];
-
-  function close(){ drop.classList.add('hidden'); active=-1; }
-  function pick(p){ state.picked=p; input.value=p.name; go.disabled=false; close(); input.focus(); }
-
-  input.addEventListener('input', ()=>{
-    state.picked=null; go.disabled=true;
-    const v = input.value.trim().toLowerCase();
-    if(v.length<2){ close(); return; }
-    matches = PLAYERS.filter(p=>p.name.toLowerCase().includes(v)).slice(0,8);
-    if(!matches.length){ close(); return; }
-    drop.innerHTML = matches.map((p,i)=>`<div data-i="${i}" class="${i===0?'active':''}">${shotHTML(p.id)}<span>${p.name}</span></div>`).join('');
-    active=0; drop.classList.remove('hidden');
-    [...drop.children].forEach(el=>el.onclick=()=>pick(matches[+el.dataset.i]));
   });
-  input.addEventListener('keydown', e=>{
-    if(drop.classList.contains('hidden')){
-      if(e.key==='Enter' && !go.disabled){ e.preventDefault(); commit(q); }
-      return;
-    }
-    if(e.key==='ArrowDown'){ e.preventDefault(); active=Math.min(active+1,matches.length-1); }
-    else if(e.key==='ArrowUp'){ e.preventDefault(); active=Math.max(active-1,0); }
-    else if(e.key==='Enter'){ e.preventDefault(); if(matches[active]) pick(matches[active]); return; }
-    else return;
-    [...drop.children].forEach((el,i)=>el.classList.toggle('active',i===active));
-  });
-  go.onclick = ()=>commit(q);
-  input.focus();
 }
 
-// ── evaluate one guess ────────────────────────────────────────────────
-function commit(q){
-  if(state.over) return;
-  const input = document.getElementById('guess');
-  const go = document.getElementById('go');
-  let pid = state.picked ? state.picked.id : null;
-  if(pid==null){
-    const exact = PLAYERS.find(p=>p.name.toLowerCase()===input.value.trim().toLowerCase());
-    pid = exact ? exact.id : null;
+async function onCall(call, btn){
+  if (S.busy || S.over) return;
+  S.busy = true;
+  const anchor = S.chain[S.round - 1], chal = S.chain[S.round];
+  const truth = chal.value > anchor.value ? 'more' : 'less';
+  const right = call === truth;
+
+  document.querySelectorAll('.call').forEach(b => b.disabled = true);
+  btn.classList.add('chosen');
+
+  const valEl = $('#chal-val');
+  valEl.classList.remove('hidden-val');
+  await countUp(valEl, chal.value);
+  valEl.textContent = chal.display;
+  valEl.classList.add(right ? 'good' : 'bad');
+
+  const v = $('#verdict');
+  v.className = 'verdict show ' + (right ? 'good' : 'bad');
+  v.textContent = right ? 'correct' : 'wrong';
+
+  if (right){
+    S.picks.push(call); S.score = S.picks.length;
+    $('#hud-score').textContent = S.score;
+    $('#hud-score').classList.add('hot');
+    if (S.mode === 'daily') saveProgress();
+    await sleep(620);
+    await advance();
+  } else {
+    S.bustedRound = S.round;
+    await sleep(1150);
+    finish(call);
   }
-  input.disabled = true; go.disabled = true; go.classList.add('hidden');
-  resolveAnswer(q, pid, null);
+  S.busy = false;
 }
 
-// ── game over ─────────────────────────────────────────────────────────
-async function gameOver(beat){
-  state.over = true;
-  let best=state.best, streak=state.streak, xpGained=0;
-  if(state.mode==='daily'){
-    const res = await jfetch('/api/survival/daily/result', {
+// The revealed card slides into the anchor slot and the spent anchor leaves —
+// the motion *is* the mechanic, so it animates rather than cutting.
+async function advance(){
+  const a = $('#p-anchor'), c = $('#p-challenger');
+  const ar = a.getBoundingClientRect(), cr = c.getBoundingClientRect();
+  const dx = ar.left - cr.left, dy = ar.top - cr.top;
+  a.style.transition = 'transform .46s cubic-bezier(.45,0,.2,1), opacity .36s ease';
+  a.style.transform  = `translate(${-dx}px, ${-dy}px) scale(.96)`;
+  a.style.opacity    = '0';
+  c.style.transition = 'transform .46s cubic-bezier(.45,0,.2,1)';
+  c.style.transform  = `translate(${dx}px, ${dy}px)`;
+  await sleep(470);
+
+  S.round++;
+  if (S.round < S.chain.length) return renderRound();
+
+  // Out of pre-built chain: Pro runs extend forever, everyone else has cleared it.
+  if (S.isPro){
+    const more = await extend();
+    if (more) return renderRound();
+  }
+  finish(null);
+}
+
+async function extend(){
+  const anchor = S.chain[S.round - 1];
+  const used = S.chain.map(l => l.id).join(',');
+  const r = await jfetch(`/api/survival/chain/next?board=${encodeURIComponent(S.board)}`
+    + `&anchor=${anchor.id}&exclude=${used}&round=${S.round}`);
+  if (r.ok && r.body.link){ S.chain.push(r.body.link); return true; }
+  return false;
+}
+
+function saveProgress(){
+  jfetch('/api/survival/chain/daily/progress', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({picks: S.picks})
+  }).catch(() => {});   // a failed save just means no resume, never a blocked answer
+}
+
+// ── share ────────────────────────────────────────────────────────────────────
+function shareGrid(){
+  const won = '\u{1F3C0}'.repeat(S.score);
+  return S.mode === 'daily'
+    ? won + (S.bustedRound ? '❌' : '') + '⬜'.repeat(Math.max(0, S.rounds - S.score - (S.bustedRound ? 1 : 0)))
+    : won + (S.bustedRound ? '❌' : '');
+}
+function shareText(){
+  const head = S.mode === 'daily'
+    ? `ydkball Higher or Lower — ${S.score}/${S.rounds}`
+    : `ydkball Higher or Lower · Unlimited — ${S.score} deep`;
+  return `${head}\n${S.label}\n${shareGrid()}\nydkball.net/survival`;
+}
+async function doShare(btn){
+  const text = shareText();
+  // The rendered card is the thing that actually travels; text is the fallback.
+  try {
+    const url = `/api/survival/chain/share.png?date=${encodeURIComponent(S.date||'')}`
+              + `&score=${S.score}&mode=${S.mode}&label=${encodeURIComponent(S.label||'')}`;
+    const res = await fetch(API + url, {credentials:'include'});
+    if (res.ok && navigator.canShare){
+      const file = new File([await res.blob()], 'ydkball-higher-or-lower.png', {type:'image/png'});
+      if (navigator.canShare({files:[file]})){
+        await navigator.share({files:[file], text});
+        return;
+      }
+    }
+  } catch(e){ /* fall through to text */ }
+  if (navigator.share){ try { await navigator.share({text}); return; } catch(e){ return; } }
+  try { await navigator.clipboard.writeText(text); btn.textContent = 'Copied!'; } catch(e){}
+}
+
+// ── end of run ───────────────────────────────────────────────────────────────
+function headlineFor(){
+  // `S.perfect` is the server's call once a daily is submitted; before that (and for
+  // Pro runs, which aren't scored server-side) fall back to "never busted".
+  const perfect = S.perfect != null ? S.perfect : (!S.bustedRound && S.score >= S.rounds);
+  if (S.mode === 'run'){
+    return S.score >= 15 ? {t:'Absurd.', c:'win', logo:true}
+         : S.score >= 8  ? {t:'You know ball.', c:'win', logo:true}
+         : {t:'Run over.', c:'', logo:false};
+  }
+  if (perfect)          return {t:'You KNOW ball.', c:'win', logo:true};
+  if (S.score >= 7)     return {t:'You know ball.', c:'win', logo:true};
+  if (S.score >= 4)     return {t:'Solid run.', c:'', logo:false};
+  return {t:'Hit the film room.', c:'', logo:false};
+}
+
+async function finish(call){
+  S.over = true;
+  renderPips();
+  let xp = null;
+  if (S.mode === 'daily'){
+    const res = await jfetch('/api/survival/chain/daily/result', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({picks: state.picks})
+      body: JSON.stringify({picks: S.picks})
     });
-    if(res.ok){ best=res.body.best; streak=res.body.streak; xpGained=res.body.xp_gained||0; }
-    // save the grid so the locked "already played" screen can still share it on reload
-    try { localStorage.setItem('survival_grid_' + state.date,
-          JSON.stringify({score:state.score, total:state.total, results:state.results})); } catch(e){}
-  } else if(state.mode==='unlimited'){
-    best = Math.max(best||0, state.score);
-    try { localStorage.setItem('survival_unlimited_best', best); } catch(e){}
+    if (res.ok){
+      S.score = res.body.recorded; S.best = res.body.best; S.streak = res.body.streak;
+      xp = res.body.xp_breakdown; S.xpGained = res.body.xp_gained;
+      S.perfect = res.body.perfect;
+      if (res.body.busted_round) S.bustedRound = res.body.busted_round;
+    }
+    try { localStorage.setItem('hol_chain_' + S.date,
+          JSON.stringify({score:S.score, busted:S.bustedRound})); } catch(e){}
+  } else {
+    S.best = Math.max(S.best || 0, S.score);
+    try { localStorage.setItem('hol_run_best', S.best); } catch(e){}
   }
+  renderResult({xp, bustCall: call});
+}
 
-  let headline, headClass='', sub, big, logo='';
-  if(state.mode==='daily'){
-    big = `${state.score}/${state.total}`;
-    const h = dailyHeadline(state.score, state.total);
-    headline = h.text; headClass = h.cls;
-    if(h.logo) logo = `<img class="resultlogo" src="/transparent.png" alt="">`;
-    sub = `${state.score} of ${state.total} correct. Come back tomorrow for a new run.`;
-  } else {  // unlimited — open-ended, score = how many you got right
-    big = `${state.score}`;
-    headline = 'Out of lives';
-    sub = `${state.score} ${state.score===1?'question':'questions'} right${state.score>=best&&best>0?' — new best!':''}`;
-  }
-  const shareTxt = buildShare();
-  // daily → full Ball Knowledge breakdown; unlimited → no XP
-  const xpHTML = state.mode==='daily' ? xpBreakdownHTML(state.score) : '';
+function bustLineHTML(call){
+  if (!S.bustedRound) return '';
+  const a = S.chain[S.bustedRound - 1], c = S.chain[S.bustedRound];
+  const said = call === 'more' ? 'higher' : 'lower';
+  return `<div class="bustline">
+      <span class="mini"><img src="${headshot(c.id,false)}" onerror="this.remove()" alt=""></span>
+      <span>you said <b>${said}</b> &mdash; ${esc(c.name)} had
+        <b>${esc(c.display)}</b> to ${esc(a.name.split(' ').slice(-1)[0])}'s <b>${esc(a.display)}</b></span>
+    </div>`;
+}
 
-  // daily: shows streak, links to Unlimited. unlimited: shows best, "Play again".
-  const statsHTML = state.mode==='daily'
-    ? `<div><div class="n">${streak??0}</div><div class="l">streak</div></div>
-       <div><div class="n">${best??state.score}</div><div class="l">best</div></div>`
-    : `<div><div class="n">${best??state.score}</div><div class="l">best</div></div>`;
-  const actionHTML = state.mode==='daily'
-    ? `<button class="btn ghost" id="again">Unlimited · Pro</button>`
-    : `<button class="btn" id="again">Play again</button>
-       <a class="btn ghost" href="/games" style="text-decoration:none">Back to games</a>`;
+function renderResult({xp, bustCall}){
+  const h = headlineFor();
+  const big = S.mode === 'daily'
+    ? `${S.score}<small>/${S.rounds}</small>` : `${S.score}`;
+  const sub = S.mode === 'daily'
+    ? (S.bustedRound ? `You got ${S.score} ${S.score===1?'round':'rounds'} deep. New chain tomorrow.`
+                     : `You ran the whole chain. New one tomorrow.`)
+    : `${S.score} ${S.score===1?'round':'rounds'} deep on ${S.label.toLowerCase()}.`;
+  const xpHTML = xp ? `<div class="xpcard">
+      <div class="xptitle">Ball Knowledge earned</div>
+      <div class="xprow"><span>Played today</span><span>+${xp.play}</span></div>
+      <div class="xprow"><span>${xp.rounds} rounds &times; ${xp.per_round}</span><span>+${xp.rounds_xp}</span></div>
+      <div class="xprow xptotal"><span>Total</span><span>+${xp.total}</span></div>
+    </div>` : '';
+  const statsHTML = S.mode === 'daily'
+    ? `<div><div class="n">${S.streak ?? 0}</div><div class="l">day streak</div></div>
+       <div><div class="n">${S.best ?? S.score}</div><div class="l">best</div></div>`
+    : `<div><div class="n">${S.best ?? S.score}</div><div class="l">best run</div></div>`;
+  const again = S.isPro
+    ? `<button class="btn ghost" id="again">New run</button>`
+    : `<a class="btn ghost" href="/games" style="text-decoration:none">Back to games</a>`;
 
-  stage.innerHTML = `
-    <div class="card center">
-      ${logo}
-      <div class="headline ${headClass}">${headline}</div>
+  stage.className = '';
+  stage.innerHTML = `<div class="card">
+      ${h.logo ? `<img class="resultlogo" src="/transparent.png" alt="">` : ''}
+      <div class="headline ${h.c}">${h.t}</div>
       <div class="big">${big}</div>
-      <div class="sub">${sub}</div>
+      <div class="sub">${esc(sub)}</div>
+      ${bustLineHTML(bustCall)}
+      <div class="grid-emoji">${shareGrid()}</div>
       ${xpHTML}
       <div class="stats">${statsHTML}</div>
       <button class="btn" id="share">Share result</button>
-      ${actionHTML}
-      ${state.mode==='daily' ? '<div id="lb-wrap"></div>' : ''}
+      ${again}
+      ${S.mode === 'daily' && !S.isPro
+        ? `<div class="sub" style="margin-top:14px">Pro plays unlimited runs with no round limit.</div>` : ''}
+      ${S.mode === 'daily' ? `<div id="lb-wrap"></div>` : ''}
     </div>`;
-  document.getElementById('share').onclick = ()=>{
-    if(navigator.share){ navigator.share({text:shareTxt}); }
-    else { navigator.clipboard.writeText(shareTxt); document.getElementById('share').textContent='Copied!'; }
-  };
-  document.getElementById('again').onclick = startUnlimited;
-  if(state.mode==='daily') loadLeaderboard();
+  $('#share').onclick = e => doShare(e.currentTarget);
+  if ($('#again')) $('#again').onclick = startRun;
+  if (S.mode === 'daily') loadLeaderboard();
 }
 
-// ── today's leaderboard (daily mode only) ────────────────────────────────
+// ── leaderboard ──────────────────────────────────────────────────────────────
 async function loadLeaderboard(){
-  const wrap = document.getElementById('lb-wrap');
-  if(!wrap) return;
+  const wrap = $('#lb-wrap'); if (!wrap) return;
   wrap.innerHTML = `<div class="lb-loading">Loading today's leaderboard…</div>`;
-  const res = await jfetch('/api/survival/leaderboard');
-  if(!res.ok){ wrap.innerHTML=''; return; }
-  renderLeaderboard(wrap, res.body, false);
+  const res = await jfetch('/api/survival/chain/leaderboard');
+  if (!res.ok) { wrap.innerHTML = ''; return; }
+  drawLb(wrap, res.body, false);
 }
-function renderLeaderboard(wrap, data, full){
-  const shown = full ? data.entries : data.entries.slice(0,5);
-  const rows = shown.map(lbRowHTML).join('');
-  const youRow = (!full && data.you && !shown.some(e=>e.is_you)) ? `<div class="lb-sep">···</div>${lbRowHTML(data.you)}` : '';
+function drawLb(wrap, data, full){
+  const shown = full ? data.entries : data.entries.slice(0, 5);
+  const rows = shown.map(lbRow).join('');
+  const youRow = (!full && data.you && !shown.some(e => e.is_you))
+    ? `<div class="lb-sep">···</div>${lbRow(data.you)}` : '';
   const toggle = (!full && data.total_players > shown.length)
     ? `<button class="lb-toggle" id="lb-toggle">See full leaderboard (${data.total_players})</button>` : '';
   wrap.innerHTML = `<div class="lb-section">
-      <div class="lb-title">Today's Leaderboard</div>
-      ${rows}${youRow}${toggle}
-    </div>`;
-  if(toggle) document.getElementById('lb-toggle').onclick = ()=>renderLeaderboard(wrap, data, true);
+      <div class="lb-title">Today's Leaderboard</div>${rows}${youRow}${toggle}</div>`;
+  if (toggle) $('#lb-toggle').onclick = () => drawLb(wrap, data, true);
 }
-function lbRowHTML(e){
+function lbRow(e){
   const initial = e.display_name ? e.display_name.charAt(0).toUpperCase() : '?';
   const avatar = e.avatar_url
-    ? `<img class="lb-avatar" src="${e.avatar_url}" alt="">`
-    : `<div class="lb-avatar lb-avatar-initial">${initial}</div>`;
-  return `<div class="lb-row ${e.is_you?'lb-you':''}">
-      <div class="lb-rank">${e.rank}</div>
-      ${avatar}
-      <div class="lb-name">${e.display_name}${e.is_you?' (you)':''}</div>
-      <div class="lb-score">${e.score}/${state.total}</div>
+    ? `<img class="lb-avatar" src="${esc(e.avatar_url)}" alt="">`
+    : `<div class="lb-avatar lb-avatar-initial">${esc(initial)}</div>`;
+  return `<div class="lb-row ${e.is_you ? 'lb-you' : ''}">
+      <div class="lb-rank">${e.rank}</div>${avatar}
+      <div class="lb-name">${esc(e.display_name)}${e.is_you ? ' (you)' : ''}</div>
+      <div class="lb-score">${e.score}/${S.rounds}</div></div>`;
+}
+
+// ── cards ────────────────────────────────────────────────────────────────────
+function simpleCard(inner){ stage.className = ''; stage.innerHTML = `<div class="card">${inner}</div>`; }
+
+function renderAlreadyPlayed(d){
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('hol_chain_' + d.date) || 'null'); } catch(e){}
+  S.score = d.your_result;
+  S.bustedRound = saved && saved.busted ? saved.busted
+                : (d.your_result < S.rounds ? d.your_result + 1 : null);
+  S.perfect = d.your_result >= S.rounds;
+  S.over = true;
+  renderHud(); renderPips(); setFoot();
+  const h = headlineFor();
+  stage.className = '';
+  stage.innerHTML = `<div class="card">
+      ${h.logo ? `<img class="resultlogo" src="/transparent.png" alt="">` : ''}
+      <div class="headline ${h.c}">${h.t}</div>
+      <div class="big">${S.score}<small>/${S.rounds}</small></div>
+      <div class="sub">You've already run today's chain — a new one lands tomorrow.</div>
+      <div class="grid-emoji">${shareGrid()}</div>
+      <div class="stats">
+        <div><div class="n">${d.streak ?? 0}</div><div class="l">day streak</div></div>
+        <div><div class="n">${d.best ?? S.score}</div><div class="l">best</div></div>
+      </div>
+      <button class="btn" id="share">Share result</button>
+      ${S.isPro ? `<button class="btn ghost" id="again">New run</button>`
+                : `<a class="btn ghost" href="/games" style="text-decoration:none">Back to games</a>`}
+      <div id="lb-wrap"></div>
     </div>`;
+  $('#share').onclick = e => doShare(e.currentTarget);
+  if ($('#again')) $('#again').onclick = startRun;
+  loadLeaderboard();
 }
 
-// ── unlimited: questions generated one at a time, on demand ─────────────────────
-// Each run is 3 lives, random difficulty, score = depth. We fetch one question at a
-// time (passing the answer players already used, so none repeat) and prefetch the next
-// while you answer — so transitions feel instant.
-async function fetchUnlimited(pos){
-  let res;
-  try { res = await jfetch('/api/survival/unlimited?pos=' + pos + '&exclude=' + state.used.join(',')); }
-  catch(e){ return {error:'net'}; }
-  if(res.status===401) return {error:'auth'};
-  if(res.status===403) return {error:'pro'};
-  if(res.ok && res.body.question) return {q:res.body.question};
-  return {error:'fail'};
+// ── boot ─────────────────────────────────────────────────────────────────────
+function newState(src, mode){
+  return {
+    mode, date: src.date || '', board: src.board, label: src.label,
+    noun: src.noun, unit: src.unit, rounds: src.rounds, chain: src.chain,
+    round: 1, picks: [], score: 0, over: false, busy: false, bustedRound: null,
+    best: src.best ?? 0, streak: src.streak ?? null, isPro: !!src.is_pro,
+  };
 }
-function addUnlimitedQ(q){
-  state.questions.push(q);
-  if(q.answer_ids && q.answer_ids.length===1) state.used.push(q.answer_ids[0]);
+
+async function startRun(){
+  const prevPro = S ? S.isPro : true;   // cold deep-link: let the 403 do the gating
+  const prevBest = +(localStorage.getItem('hol_run_best') || 0);
+  stage.className = '';
+  stage.innerHTML = `<div class="card"><div class="sub">Dealing a new chain…</div></div>`;
+  const r = await jfetch('/api/survival/chain/run');
+  if (r.status === 403) return simpleCard(`
+      <img class="resultlogo" src="/transparent.png" alt="">
+      <div class="headline">Unlimited is Pro</div>
+      <div class="sub">Unlimited runs with no round limit are a ydkball Pro feature.<br>
+        Today's chain is always free.</div>
+      <a class="btn ghost" href="/games" style="text-decoration:none">Back to games</a>`);
+  if (!r.ok) return simpleCard(`<div class="sub">Couldn't deal a new chain. Try again.</div>`);
+  S = newState(r.body, 'run');
+  S.isPro = prevPro; S.best = prevBest;
+  renderRound();
 }
-function startNextFetch(){
-  const pos = state.questions.length + 1;
-  state.nextPromise = fetchUnlimited(pos).then(r=>{
-    state.nextPromise = null;
-    if(r.q) addUnlimitedQ(r.q);
-    return r;
-  });
-  return state.nextPromise;
-}
-function prefetchUnlimited(){
-  if(state.mode==='unlimited' && !state.nextPromise) startNextFetch();
-}
-async function ensureUnlimited(idx){            // returns null if loaded, else an error code
-  while(state.questions.length <= idx){
-    const r = await (state.nextPromise || startNextFetch());
-    if(r.error) return r.error;
+
+async function boot(){
+  // The games hub deep-links straight into a Pro run.
+  if (new URLSearchParams(location.search).get('mode') === 'unlimited') return startRun();
+  const d = await jfetch('/api/survival/chain/daily');
+  if (d.status === 401){
+    S = {mode:'daily', rounds:10, score:0, chain:[], label:''};
+    return simpleCard(`
+      <img class="resultlogo" src="/transparent.png" alt="">
+      <div class="headline">Sign in to play</div>
+      <div class="sub">Higher or Lower is free with a ydkball account — your daily chain,
+        streak and Ball Knowledge are saved to it.</div>
+      <a class="btn" href="/auth/google/login?next=${encodeURIComponent('/survival')}"
+         style="text-decoration:none">Sign in</a>`);
   }
-  return null;
-}
-function unlimitedErrorCard(code){
-  if(code==='auth') return `<div class="card center"><div class="sub">Sign in to play unlimited runs.</div><a class="btn" href="/auth/google/login?next=/survival?mode=unlimited" style="text-decoration:none;margin-top:18px">Sign in</a></div>`;
-  if(code==='pro'){
-    window.ydkTrack && ydkTrack('paywall_shown', 'survival_unlimited');
-    return `<div class="card center"><img class="resultlogo" src="/transparent.png" alt=""><div class="headline">Unlimited is Pro</div><div class="sub">Unlimited runs with ydkball Pro.<br>Free includes today's daily Higher or Lower.</div><a class="btn ghost" href="/games" style="text-decoration:none;margin-top:18px">Back to games</a></div>`;
+  if (!d.ok){
+    S = {mode:'daily', rounds:10, score:0, chain:[], label:''};
+    return simpleCard(`<div class="sub">${esc(d.body.message || "Couldn't load today's chain.")}</div>`);
   }
-  return `<div class="card center"><div class="sub">Couldn't start unlimited. Try again.</div></div>`;
+  S = newState(d.body, 'daily');
+
+  if (d.body.your_result != null) return renderAlreadyPlayed(d.body);
+
+  // Resume an unfinished run — quitting mid-chain can't be used to reroll a bad start.
+  const saved = (d.body.progress || []).filter(p => p === 'more' || p === 'less');
+  if (saved.length){
+    S.picks = saved.slice(0, S.rounds);
+    S.score = S.picks.length;
+    S.round = S.score + 1;
+    if (S.round >= S.chain.length) return finish(null);   // finished but never submitted
+  }
+  renderRound();
 }
 
-async function startUnlimited(){
-  // Open-ended: 3 lives, go as far as you can. Score = how many you got right.
-  const prevBest = +(localStorage.getItem('survival_unlimited_best') || 0);
-  state = { mode:'unlimited', i:0, score:0, livesLeft:3, over:false,
-            best:prevBest, streak:null, questions:[], used:[], nextPromise:null, results:[], picks:[] };
-  modeEl.textContent = 'Unlimited';
-  footEl.textContent = '3 lives · one guess each';
-  showLives(true); setLives(3); scoreEl.textContent = '0';
-  streakEl.textContent = `best ${prevBest}`;
-  stage.innerHTML = `<div class="card center"><div class="sub">Starting…</div></div>`;
-  const r = await startNextFetch();               // first question
-  if(r.error){ stage.innerHTML = unlimitedErrorCard(r.error); return; }
-  renderQuestion();
-}
-
-boot().catch(e=>{ stage.innerHTML = `<div class="card center"><div class="sub">Couldn't load today's run.<br>${e}</div></div>`; });
+boot().catch(e => {
+  S = S || {mode:'daily', rounds:10, score:0, chain:[], label:''};
+  simpleCard(`<div class="sub">Couldn't load today's chain.<br>${esc(e)}</div>`);
+});
 </script>
-<script>
-// ── Nav auth (shared across all pages) ───────────────────────
-async function initNavAuth() {
-  const slot = document.getElementById('nav-auth-slot');
-  if (!slot) return;
-  try {
-    const res = await fetch(API + '/auth/me', {credentials:'include'});
-    const data = await res.json();
-    const user = data.user;
-    if (user) {
-      slot.innerHTML = `
-        <a href="/profile" style="text-decoration:none;cursor:pointer">${user.avatar_url ? `<img class="nav-auth-avatar" src="${user.avatar_url}" alt="">` : ''}</a>`;
-      if (typeof user.night_mode !== 'undefined') {
-        const enabled = !!user.night_mode;
-        localStorage.setItem('ydkball_night', enabled ? '1' : '0');
-        document.documentElement.classList.toggle('night-mode', enabled);
-      }
-    } else {
-      slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login?next=${encodeURIComponent(window.location.pathname)}">Sign in</a>`;
-    }
-  } catch {
-    slot.innerHTML = `<a class="nav-signin-btn" href="/auth/google/login">Sign in</a>`;
-  }
-}
-function navSignOut() {
-  window.location.href = '/auth/logout?next=' + encodeURIComponent(window.location.pathname);
-}
-/* initNavAuth(); — replaced by /site-nav.js */
-</script>
-  <script src="/site-nav.js"></script>
+<script src="/site-nav.js"></script>
 </body>
 </html>

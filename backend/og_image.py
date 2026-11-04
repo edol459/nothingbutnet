@@ -195,3 +195,78 @@ def _verdict_fill(correct):
     if correct is False:
         return RED
     return ORANGE
+
+
+def render_chain_card(label: str, score: int, rounds: int, date_label: str,
+                      endless: bool = False) -> bytes:
+    """A Higher or Lower result as one image — the thing people actually post.
+
+    Typographic for the same reason `render_ballot_card` is: pulling headshots from
+    the NBA CDN at request time is the call Akamai blocks from Railway
+    (docs/cdn-akamai-bot-manager.md), and a share endpoint is the worst place to
+    inherit that flakiness. The score and the board carry it.
+
+    `endless` renders a Pro run (a depth, with no denominator) instead of the daily.
+    """
+    img = Image.new("RGB", (W, H), PAPER)
+    d = ImageDraw.Draw(img)
+    d.rectangle([16, 16, W - 16, H - 16], outline=RULE, width=2)
+
+    kicker = "HIGHER OR LOWER" + (f"  ·  {date_label}" if date_label else "")
+    if endless:
+        kicker = "HIGHER OR LOWER  ·  UNLIMITED"
+    d.text((PAD, PAD), kicker, font=_font(_MONO, 26), fill=ORANGE)
+    fw = _font(_SERIF, 36)
+    d.text((W - PAD - d.textlength("ydkball", font=fw), PAD - 8), "ydkball", font=fw, fill=INK)
+
+    # The number is the whole card. A depth with no ceiling gets no denominator.
+    y = PAD + 74
+    fs = _font(_SERIF, 188)
+    big = str(score) if endless else f"{score}"
+    d.text((PAD, y), big, font=fs, fill=INK)
+    x = PAD + d.textlength(big, font=fs)
+    if not endless:
+        fd = _font(_SERIF, 92)
+        d.text((x + 6, y + 86), f"/{rounds}", font=fd, fill=INK3)
+        x += 6 + d.textlength(f"/{rounds}", font=fd)
+    else:
+        fd = _font(_MONO, 40)
+        d.text((x + 18, y + 128), "DEEP", font=fd, fill=INK3)
+
+    # The board line only claims vertical space when there is one — an endless run
+    # with no label would otherwise leave a hole between the score and the pips.
+    y += 214
+    if label:
+        fl = _font(_SERIF, 54)
+        line = _wrap(d, label, fl, W - 2 * PAD, 1)
+        d.text((PAD, y), line[0], font=fl, fill=INK)
+        y += 86
+    else:
+        y += 24
+
+    # Round pips — the on-page bar, so the image and the game look like each other.
+    if not endless:
+        bar_w, gap = (W - 2 * PAD - (rounds - 1) * 10) // max(1, rounds), 10
+        for i in range(rounds):
+            x0 = PAD + i * (bar_w + gap)
+            if i < score:
+                fill = GREEN
+            elif i == score and score < rounds:
+                fill = RED
+            else:
+                fill = RULE
+            d.rounded_rectangle([x0, y, x0 + bar_w, y + 14], radius=7, fill=fill)
+    else:
+        bar_w = (W - 2 * PAD) // max(1, score + 1)
+        for i in range(score):
+            x0 = PAD + i * bar_w
+            d.rounded_rectangle([x0, y, x0 + bar_w - 8, y + 14], radius=7, fill=GREEN)
+
+    d.text((PAD, H - PAD - 4), "ydkball.net/survival", font=_font(_MONO, 24), fill=INK3)
+    tag = "SUDDEN DEATH"
+    ft = _font(_MONO, 24)
+    d.text((W - PAD - d.textlength(tag, font=ft), H - PAD - 4), tag, font=ft, fill=ORANGE)
+
+    buf = BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
