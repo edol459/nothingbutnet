@@ -92,6 +92,16 @@
   }
   /* The art occupies the right column only. Letting it run full-bleed put the
      player's face directly under his own name. */
+  /* No portrait on the CDN: a monogram set in the team colour, sized like the art
+     it replaces, so the card reads as designed rather than as a failed image. */
+  .mono{
+    position:absolute; z-index:1; right:0; top:0; width:52%; height:100%;
+    display:flex; align-items:center; justify-content:flex-end; padding-right:7%;
+    font-family:var(--ff-serif); font-size:clamp(76px,18vw,132px); line-height:1;
+    color:rgba(255,255,255,.15); letter-spacing:.01em; user-select:none;
+  }
+  /* Deliberately unmasked. The left-edge fade exists to blend a PHOTO into the
+     type column; applied to a letterform it just erases half the monogram. */
   .shot{
     position:absolute; z-index:1; right:0; top:0; width:52%; height:100%;
     object-fit:cover; object-position:52% 16%;
@@ -278,6 +288,14 @@ const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;'
 // ever holds correct calls, so score === picks.length while you're alive.
 let S = null;
 
+// First letter of the first and last name — "SM" for Shawn Marion.
+function initials(name){
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  const first = parts[0][0] || '';
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
+  return (first + last).toUpperCase();
+}
 const headshot = (id, big) =>
   `https://cdn.nba.com/headshots/nba/latest/${big ? '1040x760' : '260x190'}/${id}.png`;
 
@@ -366,8 +384,10 @@ function panelHTML(link, role){
   const revealed = role === 'anchor';
   return `
     <div class="panel ${role}" id="p-${role}" style="${teamVars(link.team)}">
-      <img class="shot" src="${headshot(link.id, true)}" alt=""
-           onerror="this.onerror=null;this.src='${headshot(link.id,false)}'">
+      ${link.art === false
+        ? `<div class="mono" aria-hidden="true">${esc(initials(link.name))}</div>`
+        : `<img class="shot" src="${headshot(link.id, true)}" alt=""
+             onerror="this.onerror=null;this.src='${headshot(link.id,false)}'">`}
       <div class="pbody">
         <div class="pteam">${esc(link.team || 'NBA')}</div>
         <div class="pname">${esc(link.name)}</div>

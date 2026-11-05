@@ -45,11 +45,19 @@ import question_engine as qe  # noqa: E402  — MIN_GP and the season list
 CHAIN_LEN = 10          # rounds in the daily (a chain of CHAIN_LEN + 1 players)
 PAYLOAD_V = 1           # payload shape version, so a future change can migrate
 
-# Difficulty is the stat GAP between anchor and challenger, as a fraction of the
-# board's spread: a huge gap is obvious, a near-tie is a coinflip. It ramps across
-# a run, so round 1 is a gimme and round 10 is genuinely hard.
-_GAP_EASY = 0.58        # fraction of board spread at difficulty 0
-_GAP_HARD = 0.035       # …and at difficulty 1
+# Difficulty is how far apart the two players sit IN THE BOARD'S ORDER — a rank
+# distance, not a value gap.
+#
+# Measuring the gap as a fraction of the board's spread looked right and was wrong:
+# every board is 3-6x skewed (LeBron on career points, Curry on threes), so one
+# outlier stretches the scale and even the "hardest" target stayed wider than a
+# fifth of the field. A player could run 46 rounds deep on career threes per game,
+# where everyone below Curry is packed between 0 and 1.5.
+#
+# Rank distance has no such failure mode: N places apart is N places apart whatever
+# the distribution does, so the last rounds really are neighbours on the board.
+_RANK_EASY = 0.34       # fraction of the board away at difficulty 0
+_RANK_HARD = 0.008      # …and at difficulty 1
 _DIFF_END = 0.85        # difficulty reached by the last round of the daily
 # How far a challenger's gap may stray from the target, and how many of those
 # near-target players to choose between. Together these are the variety dial: 1
@@ -79,6 +87,12 @@ _POOL_CACHE = {}
 # without ever being the only players available. Without it a 333-man pool drifts
 # deep-cut, because role players outnumber stars about two to one.
 _FAME_W = {}
+# Players the CDN has no portrait for — it answers 200 for everyone and serves a
+# shared silhouette (sync_headshots.py records which). They stay in the pool: the
+# cutoff is an era boundary, not a fame one, and filtering it would quietly delete
+# Shawn Marion and Jermaine O'Neal from the game. The clients draw a monogram
+# instead, so a missing photo reads as designed rather than broken.
+_NO_ART = set()
 _FAME_FLOOR = 1.0          # a journeyman's weight
 _FAME_PER_ALLSTAR = 1.6
 
@@ -125,6 +139,8 @@ def _pool_ids(conn, min_minutes=_MIN_MINUTES):
             _POOL_CACHE[min_minutes] = [r["player_id"] for r in rows]
             for r in rows:
                 _FAME_W[r["player_id"]] = _FAME_FLOOR + _FAME_PER_ALLSTAR * r["allstars"]
+            cur.execute("SELECT player_id FROM players WHERE has_headshot = FALSE")
+            _NO_ART.update(r["player_id"] for r in cur.fetchall())
     return _POOL_CACHE[min_minutes]
 
 
@@ -284,6 +300,17 @@ def _season_rows(conn, col, season):
                 for r in cur.fetchall()]
 
 
+def _round(kind, v):
+    """Collapse a value to the precision the player actually sees.
+
+    The card shows one decimal, so 1.54 and 1.49 both read "1.5" — comparing the raw
+    floats marked one of them lower and scored the player wrong on two numbers that
+    were identical on screen. Rounding here makes the stored value *be* the displayed
+    value, so ordering, tie detection and scoring all agree with the card.
+    """
+    return round(v) if kind in ("career", "high") else round(v, 1)
+
+
 def _fmt(kind, v):
     """Career totals read as whole numbers with separators, single-game bests as
     plain whole numbers, and everything else as a per-game average."""
@@ -329,6 +356,10 @@ def board(conn, key):
               "avg":    "Career average",
               "high":   "Single game",
               "peak":   "Career-best season"}.get(kind) or f"{parts[2]} season")
+    # Round to what the card shows, then re-sort so equal-on-screen players end up
+    # adjacent — the rank targeting and the tie rule both rely on that ordering.
+    rows = [(pid, nm, tm, _round(kind, val), sn) for pid, nm, tm, val, sn in rows]
+    rows.sort(key=lambda r: r[3], reverse=True)
     spec = {"key": key, "kind": kind, "col": col, "label": label, "scope": scope,
             "noun": noun, "unit": unit, "rows": rows}
     _BOARD_CACHE[key] = spec
@@ -369,49 +400,47 @@ def _difficulty(round_no, length):
     return min(_DIFF_CAP, _DIFF_END + (round_no - length) * _DIFF_CREEP)
 
 
-def _next_link(rows, anchor_val, used, difficulty, rng, allow_tie=False):
-    """Pick the next challenger: an unused player whose gap from `anchor_val` is
-    near the target the difficulty asks for.
+def _next_link(rows, anchor_idx, used, difficulty, rng, allow_tie=False):
+    """Pick the next challenger, `rows` being the board sorted desc by value.
 
-    **Near, not nearest.** Taking the single closest match made each step a pure
-    function of (anchor, round), so a board plus a starting player determined almost
-    the whole chain — measured over 300 runs, 58% of all pairings shown were repeats
-    and LeBron–Harden came up once every six runs. Choosing at random among the
-    candidates already within tolerance of the target keeps the difficulty while
-    multiplying the number of distinct paths through a board.
+    Targets a RANK distance from the anchor rather than a value gap — see the note
+    on _RANK_EASY. Sides are tried in random order so the answer isn't predictable,
+    and we fall through to the other side when the anchor sits near an edge.
 
-    Sides are tried in random order so the answer isn't predictable, and we fall
-    through to the other side when the anchor sits near an edge of the board — which
-    is also why a tie is never selected (an equal value has no right answer)."""
-    vals = [r[3] for r in rows]
-    spread = max(vals) - min(vals)
-    if spread <= 0:
+    `allow_tie` lets this round be an equal-valued pair, which both calls clear."""
+    n = len(rows)
+    if n < 2 or not (0 <= anchor_idx < n):
         return None
-    target = spread * (_GAP_EASY * (1 - difficulty) + _GAP_HARD * difficulty)
-    # Tolerance is a share of the target, so an easy round (big target) can roam and
-    # a hard one stays tight — the late-chain near-ties must not loosen into gimmes.
-    tol = max(target * _GAP_TOLERANCE, spread * 0.015)
+    anchor_val = rows[anchor_idx][3]
 
     if allow_tie and rng.random() < _TIE_CHANCE:
         level = [r for r in rows if r[3] == anchor_val and r[0] not in used]
         if level:
             return rng.choice(level)
 
-    above = [r for r in rows if r[3] > anchor_val and r[0] not in used]
-    below = [r for r in rows if r[3] < anchor_val and r[0] not in used]
+    frac = _RANK_EASY * (1 - difficulty) + _RANK_HARD * difficulty
+    target = max(1, round(n * frac))
+    # A rank-adjacent player can still hold the identical value; that's a tie, and
+    # ties are opt-in above rather than something the normal path stumbles into.
+    above = [j for j in range(anchor_idx - 1, -1, -1)
+             if rows[j][0] not in used and rows[j][3] != anchor_val]
+    below = [j for j in range(anchor_idx + 1, n)
+             if rows[j][0] not in used and rows[j][3] != anchor_val]
     sides = [above, below]
     rng.shuffle(sides)
     for side in sides:
         if not side:
             continue
-        err = lambda r: abs(abs(r[3] - anchor_val) - target)
+        err = lambda j: abs(abs(j - anchor_idx) - target)
         ranked = sorted(side, key=err)
-        near = [r for r in ranked if err(r) <= tol][:_CANDIDATES]
+        tol = max(1, round(target * _GAP_TOLERANCE))
+        near = [j for j in ranked if err(j) <= tol][:_CANDIDATES]
         if not near:
-            return ranked[0]
+            return rows[ranked[0]]
         # Every candidate here already satisfies the difficulty; prefer the one
         # more people will recognise.
-        return rng.choices(near, weights=[_FAME_W.get(r[0], _FAME_FLOOR) for r in near])[0]
+        return rows[rng.choices(near, weights=[_FAME_W.get(rows[j][0], _FAME_FLOOR)
+                                               for j in near])[0]]
     return None
 
 
@@ -431,13 +460,15 @@ def build_chain(conn, board_key=None, length=CHAIN_LEN, seed=None):
             continue
         # Start somewhere with room on both sides, so round 1 can go either way.
         lo, hi = len(rows) // 6, len(rows) - len(rows) // 6
-        window = rows[lo:hi]
-        start = rng.choices(window,
-                            weights=[_FAME_W.get(r[0], _FAME_FLOOR) for r in window])[0]
+        window = list(range(lo, hi))
+        start_idx = rng.choices(window,
+                                weights=[_FAME_W.get(rows[j][0], _FAME_FLOOR) for j in window])[0]
+        start = rows[start_idx]
+        index_of = {r[0]: j for j, r in enumerate(rows)}
         chain, used, prev_tie = [start], {start[0]}, False
         for r in range(1, length + 1):
-            nxt = _next_link(rows, chain[-1][3], used, _difficulty(r, length), rng,
-                             allow_tie=not prev_tie)
+            nxt = _next_link(rows, index_of[chain[-1][0]], used, _difficulty(r, length),
+                             rng, allow_tie=not prev_tie)
             if nxt is None:
                 break
             prev_tie = (nxt[3] == chain[-1][3])
@@ -457,7 +488,9 @@ def build_chain(conn, board_key=None, length=CHAIN_LEN, seed=None):
 def _link(kind, row):
     pid, name, team, val, season = row
     return {"id": pid, "name": name, "team": team, "season": season,
-            "value": val, "display": _fmt(kind, val)}
+            "value": val, "display": _fmt(kind, val),
+            # False -> the CDN has no portrait, draw the monogram instead.
+            "art": pid not in _NO_ART}
 
 
 def next_link(conn, board_key, anchor_id, exclude, round_no, length=CHAIN_LEN,
@@ -469,11 +502,11 @@ def next_link(conn, board_key, anchor_id, exclude, round_no, length=CHAIN_LEN,
     """
     spec = board(conn, board_key)
     rows = spec["rows"]
-    anchor = next((r for r in rows if r[0] == anchor_id), None)
-    if anchor is None:
+    anchor_idx = next((j for j, r in enumerate(rows) if r[0] == anchor_id), None)
+    if anchor_idx is None:
         return None
     used = set(exclude or ()) | {anchor_id}
-    nxt = _next_link(rows, anchor[3], used, _difficulty(round_no, length),
+    nxt = _next_link(rows, anchor_idx, used, _difficulty(round_no, length),
                      random.Random(), allow_tie=not prev_tie)
     return _link(spec["kind"], nxt) if nxt else None
 

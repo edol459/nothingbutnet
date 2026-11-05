@@ -85,13 +85,42 @@ can't tell from an anchor id alone). Measured ~3.8% of rounds, zero consecutive.
 Integer boards — single-game bests — depend on this; without it half their usable
 partners get discarded.
 
-### Difficulty
+### Difficulty — rank distance, not value gap
 
-Difficulty is the **stat gap** between anchor and challenger as a fraction of the
-board's spread — a huge gap is obvious, a near-tie is a coinflip. It ramps across
-the run (`_GAP_EASY` 0.58 → `_GAP_HARD` 0.035, reaching `_DIFF_END` 0.85 by round
-10), so round 1 is a gimme and round 10 is genuinely hard; measured median relative
-gap runs ~30% down to ~10%. Past round 10 it keeps tightening toward a 0.97 cap.
+Difficulty is **how far apart the two players sit in the board's order**, ramping
+from `_RANK_EASY` (~a third of the board away) to `_RANK_HARD` (~1%) by round 10,
+then creeping toward a `_DIFF_CAP` of 0.97 in an endless run.
+
+It was originally the value gap as a fraction of the board's spread, which looked
+right and was wrong: **every board is 3–6× skewed** (LeBron on career points, Curry
+on threes), so a single outlier stretched the scale and even the "hardest" target
+stayed wider than a fifth of the field. A player ran 46 rounds deep on career threes
+per game, where everyone below Curry is packed between 0 and 1.5. Rank distance has
+no such failure mode — N places apart is N places apart whatever the distribution
+does. Measured median relative gap now runs ~40% at round 1 down to ~6% at round 10.
+
+### Values are rounded to what the card shows
+
+`_round()` collapses each value to its displayed precision before the board is
+sorted. The card shows one decimal, so 1.54 and 1.49 both read "1.5" — comparing
+the raw floats marked one of them lower and scored the player wrong on two numbers
+that were **identical on screen**. Rounding first makes ordering, tie detection and
+scoring all agree with what the player can actually see.
+
+### Players with no portrait
+
+The CDN answers **200 for every player id**, serving a shared silhouette when it has
+no photo — the same trap LockerVision sets for jerseys. `backend/ingest/sync_headshots.py`
+probes each player once and records `players.has_headshot`, identifying the
+placeholder by *sharing* (a real portrait is unique to its player) so it survives the
+CDN swapping its silhouette.
+
+Those players are **not filtered out**. Headshot coverage is an era boundary, not a
+popularity one — 24% of players who last played 2010-14 have art versus 96% of
+2015-19 — so filtering would quietly delete Jason Kidd, Shawn Marion and Jermaine
+O'Neal from the game. Each link carries `art: false` instead and the clients draw a
+monogram in the art column, deliberately **unmasked**: the left-edge fade exists to
+blend a photo into the type column and on a letterform it just erases half the mark.
 
 Tune and inspect it with the module's own CLI:
 
