@@ -18501,7 +18501,13 @@ def chain_run():
         _log_pro_wall("survival_unlimited", user["id"])
         return jsonify({"error": "pro_required",
                         "message": "Unlimited runs are a Pro feature."}), 403
-    run = chain_api.build_chain(conn)
+    # `board` forces a specific board (e.g. high:reb) so a run can be played on
+    # demand instead of waited for — the only way to judge a pool by feel.
+    forced = (request.args.get("board") or "").strip() or None
+    try:
+        run = chain_api.build_chain(conn, board_key=forced)
+    except (ValueError, StopIteration):
+        return jsonify({"error": "bad_board"}), 400
     if not run:
         return jsonify({"error": "no_chain"}), 503
     return jsonify({"rounds": run["rounds"], "board": run["board"], "label": run["label"],
@@ -18530,8 +18536,12 @@ def chain_next():
         return jsonify({"error": "bad_anchor"}), 400
     exclude = [int(x) for x in request.args.get("exclude", "").split(",") if x.strip().isdigit()]
     round_no = max(1, int(request.args.get("round", 1)))
+    # The client knows whether the round it just played was a tie; the server can't
+    # tell from an anchor id alone, and two ties running would feel broken.
+    prev_tie = request.args.get("tie") == "1"
     try:
-        link = chain_api.next_link(conn, board_key, anchor, exclude, round_no)
+        link = chain_api.next_link(conn, board_key, anchor, exclude, round_no,
+                                   prev_tie=prev_tie)
     except (ValueError, StopIteration):
         return jsonify({"error": "bad_board"}), 400
     if not link:

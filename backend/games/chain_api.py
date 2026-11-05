@@ -45,20 +45,87 @@ import question_engine as qe  # noqa: E402  — MIN_GP and the season list
 CHAIN_LEN = 10          # rounds in the daily (a chain of CHAIN_LEN + 1 players)
 PAYLOAD_V = 1           # payload shape version, so a future change can migrate
 
-# Career / peak / accolade boards only hold players who DEBUTED in 1997-98+ —
-# `player_seasons` starts at 1996-97, so anyone earlier has a truncated total and
-# the chain would be comparing a real number against a clipped one.
-_DEBUT_FLOOR = "1997-98"
-
 # Difficulty is the stat GAP between anchor and challenger, as a fraction of the
 # board's spread: a huge gap is obvious, a near-tie is a coinflip. It ramps across
 # a run, so round 1 is a gimme and round 10 is genuinely hard.
 _GAP_EASY = 0.58        # fraction of board spread at difficulty 0
 _GAP_HARD = 0.035       # …and at difficulty 1
 _DIFF_END = 0.85        # difficulty reached by the last round of the daily
+# How far a challenger's gap may stray from the target, and how many of those
+# near-target players to choose between. Together these are the variety dial: 1
+# candidate is fully deterministic, too many turns the difficulty ramp to mush.
+_GAP_TOLERANCE = 0.45
+_CANDIDATES    = 6
+# Ties are a legitimate round, not a dead end: when both players share a value,
+# either call carries you through. They're opt-in rather than accidental, so the
+# rate is set here and never two in a row — a run of them would feel like the game
+# had stopped asking. Integer boards (single-game bests) rely on this; without it
+# half their usable partners get thrown away.
+_TIE_CHANCE = 0.14
 # Beyond the daily (Pro endless), keep tightening — slowly, and never to a pure tie.
 _DIFF_CREEP = 0.015
 _DIFF_CAP   = 0.97
+
+# Who a board can draw from. The gate is "did they really play in the NBA", not
+# "are they good at this stat" — ranking the pool BY the stat made every board a
+# leaderboard of specialists, so career rebounds was the 90 best rebounders and
+# could never ask LeBron vs Curry. Gating on minutes instead lets each board run
+# its natural full range, right down to a guard whose career high is 4 rebounds.
+_MIN_MINUTES = 15_000      # ~8–10 seasons of rotation minutes
+_POOL_CACHE = {}
+# Pool membership and pick probability are separate dials. The pool is wide so the
+# low end of every board is real; this weight then decides WHICH of several equally
+# valid candidates actually gets shown, so stars surface more often than journeymen
+# without ever being the only players available. Without it a 333-man pool drifts
+# deep-cut, because role players outnumber stars about two to one.
+_FAME_W = {}
+_FAME_FLOOR = 1.0          # a journeyman's weight
+_FAME_PER_ALLSTAR = 1.6
+
+# A player's whole career must sit inside our window or their career numbers are
+# clipped. Data starts 1996-97, so:
+#   • drafted 1996 or later  -> their rookie year is in the window (Kobe, Iverson)
+#   • undrafted              -> draft_year is NULL for ALL of them (VanVleet,
+#     Haslem, Calderon), so fall back to "first appeared 1997-98 or later". That
+#     loses the handful of undrafted 1996-97 rookies, which beats publishing a
+#     truncated career high for everyone already in the league when we start.
+_COMPLETE_CAREER = """
+    ((p.draft_year::text ~ '^[0-9]{4}$' AND p.draft_year::text::int >= 1996)
+     OR (p.draft_year IS NULL AND ps_first.first_season >= '1997-98'))
+"""
+
+
+def _pool_ids(conn, min_minutes=_MIN_MINUTES):
+    """Every player with a complete career in our window and real NBA minutes."""
+    if min_minutes not in _POOL_CACHE:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                WITH mins AS (
+                    SELECT player_id, SUM(min) AS total
+                    FROM   player_gamelogs
+                    WHERE  season_type = 'Regular Season'
+                    GROUP  BY player_id
+                ),
+                ps_first AS (
+                    SELECT player_id, MIN(season) AS first_season
+                    FROM   player_seasons WHERE season_type = 'Regular Season'
+                    GROUP  BY player_id
+                )
+                SELECT p.player_id,
+                       (SELECT COUNT(*) FROM player_seasons a
+                        WHERE a.player_id = p.player_id
+                          AND a.season_type = 'Regular Season'
+                          AND 'All-Star' = ANY(a.awards)) AS allstars
+                FROM   players p
+                JOIN   mins     ON mins.player_id = p.player_id
+                JOIN   ps_first ON ps_first.player_id = p.player_id
+                WHERE  mins.total >= %s AND {_COMPLETE_CAREER}
+            """, (min_minutes,))
+            rows = cur.fetchall()
+            _POOL_CACHE[min_minutes] = [r["player_id"] for r in rows]
+            for r in rows:
+                _FAME_W[r["player_id"]] = _FAME_FLOOR + _FAME_PER_ALLSTAR * r["allstars"]
+    return _POOL_CACHE[min_minutes]
 
 
 # ── boards ────────────────────────────────────────────────────────────────────
@@ -68,6 +135,21 @@ _CAREER_BOARDS = [
     ("reb",  "Career rebounds",      "career rebounds",      "REB"),
     ("ast",  "Career assists",       "career assists",       "AST"),
     ("fg3m", "Career threes made",   "career made threes",   "3PM"),
+]
+_CAREER_AVG_BOARDS = [
+    ("pts",  "Career scoring average",    "career points per game",   "PPG"),
+    ("reb",  "Career rebounding average", "career rebounds per game", "RPG"),
+    ("ast",  "Career assist average",     "career assists per game",  "APG"),
+    ("fg3m", "Career threes per game",    "career threes per game",   "3PM"),
+]
+# Single-game career bests. Blocks and steals are absent because `player_gamelogs`
+# doesn't carry them — adding those means a schema change plus a full re-pull from
+# stats.nba.com on a residential IP.
+_HIGH_BOARDS = [
+    ("pts",  "Career high, points",   "points in a single game",   "PTS"),
+    ("reb",  "Career high, rebounds", "rebounds in a single game", "REB"),
+    ("ast",  "Career high, assists",  "assists in a single game",  "AST"),
+    ("fg3m", "Career high, threes",   "threes in a single game",   "3PM"),
 ]
 _PEAK_BOARDS = [
     ("pts",  "Best scoring season",   "points per game in their best season",   "PPG"),
@@ -87,7 +169,9 @@ _SEASON_BOARDS = [
 
 # How deep into each board we draw. Deeper = more variety but less recognizable
 # names; these are the points where the board still reads as "players I know".
-_DEPTH = {"career": 90, "peak": 100, "season": 40}
+# Only season boards still cap by rank: a single season's leaderboard is a natural
+# top-N. Career-shaped boards take the whole pool, so their range runs full depth.
+_DEPTH = {"season": 40}
 
 _BOARD_CACHE = {}       # board key -> [(player_id, name, team, value)] desc by value
 
@@ -104,19 +188,61 @@ _TEAM_EXPR = """
 
 
 def _career_rows(conn, col):
+    """Career totals across the pool — no rank cap, so the board spans from LeBron
+    down to a rotation guard, which is what makes the low end worth asking about."""
+    ids = _pool_ids(conn)
     with conn.cursor() as cur:
         cur.execute(f"""
             SELECT ps.player_id, p.player_name AS name, {_TEAM_EXPR} AS team,
                    SUM(ps.{col} * ps.gp) AS val
             FROM   player_seasons ps JOIN players p ON p.player_id = ps.player_id
             WHERE  ps.season_type = 'Regular Season' AND ps.{col} IS NOT NULL
+              AND  ps.player_id = ANY(%s)
             GROUP BY ps.player_id, p.player_name, p.current_team
-            HAVING SUM(ps.gp) >= 200 AND MIN(ps.season) >= %s
-            ORDER BY val DESC LIMIT %s
-        """, (_DEBUT_FLOOR, _DEPTH["career"]))
+            ORDER BY val DESC
+        """, (ids,))
         # No season: a career total spans all of them (the UI captions it "all-time").
         return [(r["player_id"], r["name"], r["team"], float(r["val"]), None)
                 for r in cur.fetchall()]
+
+
+def _career_avg_rows(conn, col):
+    """Career per-game average: total production over total games."""
+    ids = _pool_ids(conn)
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT ps.player_id, p.player_name AS name, {_TEAM_EXPR} AS team,
+                   SUM(ps.{col} * ps.gp) / NULLIF(SUM(ps.gp), 0) AS val
+            FROM   player_seasons ps JOIN players p ON p.player_id = ps.player_id
+            WHERE  ps.season_type = 'Regular Season' AND ps.{col} IS NOT NULL
+              AND  ps.player_id = ANY(%s)
+            GROUP BY ps.player_id, p.player_name, p.current_team
+            HAVING SUM(ps.gp) > 0
+            ORDER BY val DESC
+        """, (ids,))
+        return [(r["player_id"], r["name"], r["team"], float(r["val"]), None)
+                for r in cur.fetchall()]
+
+
+def _high_rows(conn, col):
+    """Each famous player's best single game on `col`, with the date and the team
+    they did it for. Values are integers, so these boards lean on the tie rule."""
+    ids = _pool_ids(conn)
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT DISTINCT ON (g.player_id)
+                   g.player_id, p.player_name AS name, g.{col} AS val, g.season,
+                   split_part(g.matchup, ' ', 1) AS team
+            FROM   player_gamelogs g
+            JOIN   players p ON p.player_id = g.player_id
+            WHERE  g.season_type = 'Regular Season'
+              AND  g.player_id = ANY(%s) AND g.{col} IS NOT NULL
+            ORDER  BY g.player_id, g.{col} DESC, g.game_date ASC
+        """, (ids,))
+        rows = [(r["player_id"], r["name"], r["team"], float(r["val"]), r["season"])
+                for r in cur.fetchall()]
+    rows.sort(key=lambda r: r[3], reverse=True)
+    return rows
 
 
 def _peak_rows(conn, col):
@@ -124,28 +250,23 @@ def _peak_rows(conn, col):
     happened in and the team they played it for.
 
     Not `current_team`: a peak board is a historical claim, so tagging Vince
-    Carter's 2000-01 with whoever he last suited up for is simply wrong.
-    """
+    Carter's 2000-01 with whoever he last suited up for is simply wrong."""
+    ids = _pool_ids(conn)
     with conn.cursor() as cur:
         cur.execute(f"""
-            WITH elig AS (
-                SELECT player_id FROM player_seasons
-                WHERE season_type = 'Regular Season'
-                GROUP BY player_id HAVING MIN(season) >= %s
-            )
             SELECT DISTINCT ON (ps.player_id)
                    ps.player_id, p.player_name AS name, ps.team_abbr AS team,
                    ps.{col} AS val, ps.season
             FROM   player_seasons ps
             JOIN   players p ON p.player_id = ps.player_id
-            JOIN   elig e    ON e.player_id = ps.player_id
-            WHERE  ps.season_type = 'Regular Season' AND ps.gp >= %s AND ps.{col} IS NOT NULL
+            WHERE  ps.season_type = 'Regular Season' AND ps.gp >= %s
+              AND  ps.{col} IS NOT NULL AND ps.player_id = ANY(%s)
             ORDER  BY ps.player_id, ps.{col} DESC
-        """, (_DEBUT_FLOOR, qe.MIN_GP))
+        """, (qe.MIN_GP, ids))
         rows = [(r["player_id"], r["name"], r["team"], float(r["val"]), r["season"])
                 for r in cur.fetchall()]
     rows.sort(key=lambda r: r[3], reverse=True)
-    return rows[:_DEPTH["peak"]]
+    return rows
 
 
 def _season_rows(conn, col, season):
@@ -164,8 +285,13 @@ def _season_rows(conn, col, season):
 
 
 def _fmt(kind, v):
-    """Career totals read as whole numbers; per-game stats get one decimal."""
-    return f"{v:,.0f}" if kind == "career" else f"{v:.1f}"
+    """Career totals read as whole numbers with separators, single-game bests as
+    plain whole numbers, and everything else as a per-game average."""
+    if kind == "career":
+        return f"{v:,.0f}"
+    if kind == "high":
+        return f"{v:.0f}"
+    return f"{v:.1f}"
 
 
 def board(conn, key):
@@ -181,6 +307,12 @@ def board(conn, key):
     if kind == "career":
         label, noun, unit = next((l, n, u) for c, l, n, u in _CAREER_BOARDS if c == col)
         rows = _career_rows(conn, col)
+    elif kind == "avg":
+        label, noun, unit = next((l, n, u) for c, l, n, u in _CAREER_AVG_BOARDS if c == col)
+        rows = _career_avg_rows(conn, col)
+    elif kind == "high":
+        label, noun, unit = next((l, n, u) for c, l, n, u in _HIGH_BOARDS if c == col)
+        rows = _high_rows(conn, col)
     elif kind == "peak":
         label, noun, unit = next((l, n, u) for c, l, n, u in _PEAK_BOARDS if c == col)
         rows = _peak_rows(conn, col)
@@ -194,6 +326,8 @@ def board(conn, key):
     # `scope` answers "all-time or one season?" at a glance — the single thing a
     # chain is most easily misread about, since the axis never restates itself.
     scope = ({"career": "All-time",
+              "avg":    "Career average",
+              "high":   "Single game",
               "peak":   "Career-best season"}.get(kind) or f"{parts[2]} season")
     spec = {"key": key, "kind": kind, "col": col, "label": label, "scope": scope,
             "noun": noun, "unit": unit, "rows": rows}
@@ -204,12 +338,17 @@ def board(conn, key):
 def _pick_board_key(conn, rng):
     """Choose a board for a run: mostly career totals and single-season
     leaderboards (the two most intuitive axes), sometimes a career peak."""
-    kind = rng.choices(["career", "season", "peak"], weights=[0.42, 0.38, 0.20])[0]
+    kind = rng.choices(["season", "career", "avg", "peak", "high"],
+                       weights=[0.38, 0.17, 0.13, 0.13, 0.19])[0]
     if kind == "career":
         # Points and threes are the starry boards; career rebounds/assists reward
         # longevity over fame, so they come up less often.
         return "career:" + rng.choices([b[0] for b in _CAREER_BOARDS],
-                                       weights=[0.40, 0.15, 0.20, 0.25])[0]
+                                       weights=[0.31, 0.19, 0.22, 0.28])[0]
+    if kind == "avg":
+        return "avg:" + rng.choice(_CAREER_AVG_BOARDS)[0]
+    if kind == "high":
+        return "high:" + rng.choice(_HIGH_BOARDS)[0]
     if kind == "peak":
         return "peak:" + rng.choice(_PEAK_BOARDS)[0]
     seasons = qe.list_seasons(conn)
@@ -230,9 +369,16 @@ def _difficulty(round_no, length):
     return min(_DIFF_CAP, _DIFF_END + (round_no - length) * _DIFF_CREEP)
 
 
-def _next_link(rows, anchor_val, used, difficulty, rng):
-    """Pick the next challenger: the unused player whose gap from `anchor_val` is
-    closest to the target the difficulty asks for.
+def _next_link(rows, anchor_val, used, difficulty, rng, allow_tie=False):
+    """Pick the next challenger: an unused player whose gap from `anchor_val` is
+    near the target the difficulty asks for.
+
+    **Near, not nearest.** Taking the single closest match made each step a pure
+    function of (anchor, round), so a board plus a starting player determined almost
+    the whole chain — measured over 300 runs, 58% of all pairings shown were repeats
+    and LeBron–Harden came up once every six runs. Choosing at random among the
+    candidates already within tolerance of the target keeps the difficulty while
+    multiplying the number of distinct paths through a board.
 
     Sides are tried in random order so the answer isn't predictable, and we fall
     through to the other side when the anchor sits near an edge of the board — which
@@ -242,14 +388,30 @@ def _next_link(rows, anchor_val, used, difficulty, rng):
     if spread <= 0:
         return None
     target = spread * (_GAP_EASY * (1 - difficulty) + _GAP_HARD * difficulty)
+    # Tolerance is a share of the target, so an easy round (big target) can roam and
+    # a hard one stays tight — the late-chain near-ties must not loosen into gimmes.
+    tol = max(target * _GAP_TOLERANCE, spread * 0.015)
+
+    if allow_tie and rng.random() < _TIE_CHANCE:
+        level = [r for r in rows if r[3] == anchor_val and r[0] not in used]
+        if level:
+            return rng.choice(level)
 
     above = [r for r in rows if r[3] > anchor_val and r[0] not in used]
     below = [r for r in rows if r[3] < anchor_val and r[0] not in used]
     sides = [above, below]
     rng.shuffle(sides)
     for side in sides:
-        if side:
-            return min(side, key=lambda r: abs(abs(r[3] - anchor_val) - target))
+        if not side:
+            continue
+        err = lambda r: abs(abs(r[3] - anchor_val) - target)
+        ranked = sorted(side, key=err)
+        near = [r for r in ranked if err(r) <= tol][:_CANDIDATES]
+        if not near:
+            return ranked[0]
+        # Every candidate here already satisfies the difficulty; prefer the one
+        # more people will recognise.
+        return rng.choices(near, weights=[_FAME_W.get(r[0], _FAME_FLOOR) for r in near])[0]
     return None
 
 
@@ -269,12 +431,16 @@ def build_chain(conn, board_key=None, length=CHAIN_LEN, seed=None):
             continue
         # Start somewhere with room on both sides, so round 1 can go either way.
         lo, hi = len(rows) // 6, len(rows) - len(rows) // 6
-        start = rows[rng.randrange(lo, hi)]
-        chain, used = [start], {start[0]}
+        window = rows[lo:hi]
+        start = rng.choices(window,
+                            weights=[_FAME_W.get(r[0], _FAME_FLOOR) for r in window])[0]
+        chain, used, prev_tie = [start], {start[0]}, False
         for r in range(1, length + 1):
-            nxt = _next_link(rows, chain[-1][3], used, _difficulty(r, length), rng)
+            nxt = _next_link(rows, chain[-1][3], used, _difficulty(r, length), rng,
+                             allow_tie=not prev_tie)
             if nxt is None:
                 break
+            prev_tie = (nxt[3] == chain[-1][3])
             chain.append(nxt)
             used.add(nxt[0])
         if len(chain) == length + 1:
@@ -294,7 +460,8 @@ def _link(kind, row):
             "value": val, "display": _fmt(kind, val)}
 
 
-def next_link(conn, board_key, anchor_id, exclude, round_no, length=CHAIN_LEN):
+def next_link(conn, board_key, anchor_id, exclude, round_no, length=CHAIN_LEN,
+              prev_tie=False):
     """One more link for an endless run, past the end of the pre-built chain.
 
     Stateless by design: the board key and the anchor are enough to continue, so a
@@ -306,17 +473,21 @@ def next_link(conn, board_key, anchor_id, exclude, round_no, length=CHAIN_LEN):
     if anchor is None:
         return None
     used = set(exclude or ()) | {anchor_id}
-    nxt = _next_link(rows, anchor[3], used, _difficulty(round_no, length), random.Random())
+    nxt = _next_link(rows, anchor[3], used, _difficulty(round_no, length),
+                     random.Random(), allow_tie=not prev_tie)
     return _link(spec["kind"], nxt) if nxt else None
 
 
 # ── scoring ───────────────────────────────────────────────────────────────────
 def answer_for(payload, round_no):
-    """The correct call for a round: 'more' if the challenger beats the anchor."""
+    """The correct call for a round — or 'tie', which both calls satisfy."""
     chain = payload.get("chain") or []
     if round_no < 1 or round_no >= len(chain):
         return None
-    return "more" if chain[round_no]["value"] > chain[round_no - 1]["value"] else "less"
+    a, b = chain[round_no - 1]["value"], chain[round_no]["value"]
+    if a == b:
+        return "tie"
+    return "more" if b > a else "less"
 
 
 def score_picks(payload, picks):
@@ -337,7 +508,7 @@ def score_picks(payload, picks):
         if i > rounds:
             break
         want = answer_for(payload, i)
-        if p not in ("more", "less") or p != want:
+        if p not in ("more", "less") or (want != "tie" and p != want):
             return score, i
         score += 1
     return score, None

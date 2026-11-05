@@ -109,7 +109,7 @@
   .pval{font-family:var(--ff-mono); font-weight:500; font-size:clamp(30px,7.4vw,48px);
         line-height:1.05; margin-top:6px; font-variant-numeric:tabular-nums;
         transition:color .3s}
-  .pval.good{color:#5fd99a} .pval.bad{color:#ff8d7e}
+  .pval.good{color:#5fd99a} .pval.bad{color:#ff8d7e} .pval.tie{color:#e8e8ef}
   .pval.hidden-val{color:rgba(255,255,255,.34)}
   .punit{font-family:var(--ff-mono); font-size:12.5px; letter-spacing:.11em;
          text-transform:uppercase; color:rgba(255,255,255,.78); margin-top:7px}
@@ -147,6 +147,7 @@
   }
   .verdict.show{opacity:1; transform:translateY(0)}
   .verdict.good{background:#1a7a4a; color:#fff}
+  .verdict.tie{background:#4a4a55; color:#fff}
   .verdict.bad{background:#c0392b; color:#fff}
 
   @media(min-width:860px){
@@ -281,12 +282,16 @@ const headshot = (id, big) =>
   `https://cdn.nba.com/headshots/nba/latest/${big ? '1040x760' : '260x190'}/${id}.png`;
 
 // Career totals are whole numbers; everything else is a per-game average.
-const isTotal = () => S && S.board && S.board.startsWith('career');
+// Two different questions. `isTotal` decides formatting (career TOTALS are whole
+// numbers); `isAllTime` decides the caption. Career AVERAGES are all-time but still
+// per-game, so they need one and not the other.
+const isTotal   = () => S && S.board && (S.board.startsWith('career:') || S.board.startsWith('high:'));
+const isAllTime = () => S && S.board && (S.board.startsWith('career:') || S.board.startsWith('avg:'));
 // Caption under a player's number: the unit plus WHEN it happened. On a career-best
 // board each player's season differs, which is the most useful thing on the card.
 function contextFor(link){
   const u = S.unit || '';
-  if (isTotal()) return `${u} · all-time`;
+  if (isAllTime()) return `${u} · all-time`;
   return link.season ? `${u} · ${link.season}` : u;
 }
 const fmtVal  = v => isTotal() ? Math.round(v).toLocaleString() : v.toFixed(1);
@@ -425,8 +430,12 @@ async function onCall(call, btn){
   if (S.busy || S.over) return;
   S.busy = true;
   const anchor = S.chain[S.round - 1], chal = S.chain[S.round];
-  const truth = chal.value > anchor.value ? 'more' : 'less';
-  const right = call === truth;
+  // A tie clears on either call — the server scores it the same way. Without this
+  // the client would mark "higher" on an equal pair wrong while the server counted
+  // it right, and the two would disagree about where the run ended.
+  const tie = chal.value === anchor.value;
+  const truth = tie ? null : (chal.value > anchor.value ? 'more' : 'less');
+  const right = tie || call === truth;
 
   document.querySelectorAll('.call').forEach(b => b.disabled = true);
   btn.classList.add('chosen');
@@ -435,11 +444,11 @@ async function onCall(call, btn){
   valEl.classList.remove('hidden-val');
   await countUp(valEl, chal.value);
   valEl.textContent = chal.display;
-  valEl.classList.add(right ? 'good' : 'bad');
+  valEl.classList.add(tie ? 'tie' : right ? 'good' : 'bad');
 
   const v = $('#verdict');
-  v.className = 'verdict show ' + (right ? 'good' : 'bad');
-  v.textContent = right ? 'correct' : 'wrong';
+  v.className = 'verdict show ' + (tie ? 'tie' : right ? 'good' : 'bad');
+  v.textContent = tie ? 'tie · both count' : right ? 'correct' : 'wrong';
 
   if (right){
     S.picks.push(call); S.score = S.picks.length;
@@ -486,8 +495,10 @@ async function advance(){
 async function extend(){
   const anchor = S.chain[S.round - 1];
   const used = S.chain.map(l => l.id).join(',');
+  const prevTie = S.round > 1 &&
+    S.chain[S.round - 1].value === S.chain[S.round - 2].value;
   const r = await jfetch(`/api/survival/chain/next?board=${encodeURIComponent(S.board)}`
-    + `&anchor=${anchor.id}&exclude=${used}&round=${S.round}`);
+    + `&anchor=${anchor.id}&exclude=${used}&round=${S.round}&tie=${prevTie ? 1 : 0}`);
   if (r.ok && r.body.link){ S.chain.push(r.body.link); return true; }
   return false;
 }
@@ -704,7 +715,9 @@ async function startRun(){
   const prevBest = +(localStorage.getItem('hol_run_best') || 0);
   stage.className = '';
   stage.innerHTML = `<div class="card"><div class="sub">Dealing a new chain…</div></div>`;
-  const r = await jfetch('/api/survival/chain/run');
+  const forced = new URLSearchParams(location.search).get('board');
+  const r = await jfetch('/api/survival/chain/run' +
+                         (forced ? '?board=' + encodeURIComponent(forced) : ''));
   if (r.status === 403) return simpleCard(`
       <img class="resultlogo" src="/transparent.png" alt="">
       <div class="headline">Unlimited is Pro</div>

@@ -68,7 +68,11 @@ virtualenv.
 - **"Higher or Lower"** is the user-facing name; the code says **`survival`**.
   Two generations coexist: the live chain game is `backend/games/chain_api.py`
   (`/api/survival/chain/*`, `survival_chain_daily`, results under `mode='chain'`),
-  while `survival_api.py` + `survival_daily` is the **legacy ten-question quiz,
+  Boards come in five families (`career` / `avg` / `peak` / `high` / `season`) and
+  draw from a minutes-gated pool, **not** a ranking by the stat itself — see
+  "The pool" in `docs/trivia-game.md` before changing how players are selected.
+  Ties clear on either call and must stay in sync across server and both clients.
+  While `survival_api.py` + `survival_daily` is the **legacy ten-question quiz,
   kept only because the shipped iOS app calls it against production**. Don't change
   the legacy endpoint shapes until the app is ported. See `docs/trivia-game.md`.
 - **"Guess Who"** is user-facing; the code/routes say **`poeltl`**

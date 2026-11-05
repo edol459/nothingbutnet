@@ -35,19 +35,55 @@ Two rules carry the design:
 
 ### Boards
 
-Three kinds, keyed self-describingly (`career:pts`, `peak:reb`, `season:pts:2024-25`):
+Five families, keyed self-describingly (`career:pts`, `avg:reb`, `peak:ast`,
+`high:fg3m`, `season:pts:2024-25`):
 
-| kind | what it is | pool depth |
+| kind | what it is | scope shown |
 |---|---|---|
-| `career` | career totals (`SUM(stat·gp)`), 1997-98+ debuts | top 90 |
-| `peak` | each player's best qualified single season | top 100 |
-| `season` | one season's per-game leaderboard (recent seasons weighted up) | top 40 |
+| `career` | career totals (`SUM(stat·gp)`) | All-time |
+| `avg` | career per-game average — rewards peak where totals reward longevity | Career average |
+| `peak` | each player's best qualified single season, captioned with that season | Career-best season |
+| `high` | best single game ever, from `player_gamelogs` | Single game |
+| `season` | one season's per-game leaderboard, recent seasons weighted up | *the season* |
 
 Only **points, rebounds, assists and made threes** are boards. Steals, blocks and
-the percentage stats are deliberately excluded: a chain commits a whole run to one
-axis, so an axis nobody has a feel for (1.4 vs 1.6 SPG) doesn't cost one question
-like it did in the quiz — it ruins the day. Career rebounds/assists are drawn less
-often than points/threes because they reward longevity over fame.
+the percentage stats are excluded: a chain commits a whole run to one axis, so an
+axis nobody has a feel for (1.4 vs 1.6 SPG) doesn't cost one question like it did
+in the quiz — it ruins the day. `high` boards additionally *can't* offer blocks or
+steals, because `player_gamelogs` doesn't carry those columns at all.
+
+### The pool, and why it isn't ranked by the stat
+
+**Boards draw from `_pool_ids()`, gated on career minutes — not on the stat.**
+Ranking the pool by the stat made every board a leaderboard of specialists: career
+rebounds was literally the 90 best rebounders, so it filled with long-tenured
+centres and could never ask LeBron vs Curry. Gating on minutes instead
+(`_MIN_MINUTES`, 15,000) lets each board run its natural full range, down to a
+guard whose career high is 4 rebounds. It roughly doubles the distinct values on
+every board.
+
+Pool membership and pick probability are **separate dials**. The pool is wide so
+the low end is real; `_FAME_W` (All-Star count) then biases *which* of several
+equally-valid candidates is shown, so stars surface more often than journeymen
+without ever being the only option. A 333-man pool drifts deep-cut without it.
+
+**Career completeness** is `_COMPLETE_CAREER`: drafted 1996+, or undrafted and
+first seen 1997-98+. A player's first season *in our data* is not their debut —
+everyone already in the league in 1996-97 looks like a 1996-97 rookie, which is how
+John Stockton landed on a rebounding board with the 9 he grabbed after our window
+opens. `draft_year` is the real test, and it still admits Kobe, Iverson and Nash.
+Undrafted players all have `draft_year = NULL` (VanVleet, Haslem, Calderon), hence
+the second branch.
+
+### Ties
+
+When both players share a value, **either call clears the round** — the server
+scores it that way and both clients must agree, or they'd disagree about where the
+run ended. Ties are opt-in rather than accidental: `_TIE_CHANCE` sets the rate and
+they never come two in a row (the endless endpoint takes a `tie=1` flag, since it
+can't tell from an anchor id alone). Measured ~3.8% of rounds, zero consecutive.
+Integer boards — single-game bests — depend on this; without it half their usable
+partners get discarded.
 
 ### Difficulty
 
@@ -61,9 +97,12 @@ Tune and inspect it with the module's own CLI:
 
 ```bash
 python backend/games/chain_api.py                      # print a chain with answers
-python backend/games/chain_api.py --board career:pts
+python backend/games/chain_api.py --board high:reb
 python backend/games/chain_api.py --simulate 400       # gap profile per round
 ```
+
+To play a specific board rather than wait for it, a Pro run accepts a board key:
+`/survival?mode=unlimited&board=high:reb`.
 
 ### API
 
