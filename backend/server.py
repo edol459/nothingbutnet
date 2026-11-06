@@ -9300,7 +9300,11 @@ def get_user_stats(user_id):
               FROM lg WHERE potg_person_id IS NOT NULL
              GROUP BY potg_person_id
              ORDER BY picks DESC, MAX(potg_name)
-             LIMIT 10
+             -- The client collapses this to ten with a "Show all" beneath it, so a
+             -- cap of ten made that control a lie: one user has picked 65 distinct
+             -- players and could never have reached the 11th. Bounded, but above any
+             -- plausible number of distinct picks.
+             LIMIT 200
         """, params)
         out["players"] = [{"personId": r["person_id"], "name": r["name"] or "",
                            "picks": int(r["picks"]),
