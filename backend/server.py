@@ -15096,6 +15096,28 @@ def remove_friend(target_id):
 _PERF_COMMENT_MAX = 1000
 
 
+def _format_perf_comment(r, viewer_id=None) -> dict:
+    """The wire shape of a performance comment. ONE definition, used by the list and
+    by the create response — they drifted apart once and the client could not decode
+    what it had just written."""
+    return {
+        "id":        r["id"],
+        "parentId":  r["parent_id"],
+        "body":      r["body"],
+        "createdAt": r["created_at"].strftime("%Y-%m-%dT%H:%M:%SZ") if r["created_at"] else None,
+        "userId":    r["user_id"],
+        "displayName":  r["display_name"] or "",
+        "avatarUrl":    r["avatar_url"] or "",
+        "favoriteTeam": r["favorite_team"] or "",
+        "isPro":        bool(r["is_pro"]),
+        "ballKnowledgeLevel": _xp_to_level(int(r["xp"] or 0)),
+        "equippedRing":  r["equipped_ring"],
+        "equippedTitle": r["equipped_title"],
+        # So a row can offer Delete without a second request.
+        "isMine":    viewer_id is not None and r["user_id"] == viewer_id,
+    }
+
+
 def _ensure_perf_comments(cur):
     """Create the table on a deploy that has not run schema_v24 yet."""
     cur.execute("""
@@ -15148,22 +15170,7 @@ def get_performance_comments(game_id, person_id):
              ORDER BY c.created_at ASC
              LIMIT %(limit)s
         """, params)
-        items = [{
-            "id":        r["id"],
-            "parentId":  r["parent_id"],
-            "body":      r["body"],
-            "createdAt": r["created_at"].strftime("%Y-%m-%dT%H:%M:%SZ") if r["created_at"] else None,
-            "userId":    r["user_id"],
-            "displayName": r["display_name"] or "",
-            "avatarUrl":   r["avatar_url"] or "",
-            "favoriteTeam": r["favorite_team"] or "",
-            "isPro":       bool(r["is_pro"]),
-            "ballKnowledgeLevel": _xp_to_level(int(r["xp"] or 0)),
-            "equippedRing":  r["equipped_ring"],
-            "equippedTitle": r["equipped_title"],
-            # So the client can offer delete without a second request.
-            "isMine":      viewer_id is not None and r["user_id"] == viewer_id,
-        } for r in cur.fetchall()]
+        items = [_format_perf_comment(r, viewer_id) for r in cur.fetchall()]
         return jsonify({"comments": items, "count": len(items)})
     except Exception as e:
         return jsonify({"comments": [], "count": 0, "error": str(e)}), 500
@@ -15213,23 +15220,29 @@ def post_performance_comment(game_id, person_id):
             VALUES (%s, %s, %s, %s, %s)
             RETURNING id, created_at
         """, (game_id, person_id, user["id"], parent_id, text))
-        row = cur.fetchone()
+        new_id = cur.fetchone()["id"]
         conn.commit()
 
         _safe_log("performance_comment", source="player_card", user_id=user["id"],
                   platform="ios", metadata={"game_id": game_id, "person_id": person_id,
                                             "is_reply": parent_id is not None,
                                             "length": len(text)})
-        return jsonify({
-            "id": row["id"],
-            "parentId": parent_id,
-            "body": text,
-            "createdAt": row["created_at"].strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "userId": user["id"],
-            "displayName": user["display_name"],
-            "avatarUrl": user.get("avatar_url") or "",
-            "isMine": True,
-        }), 201
+
+        # Re-read through the SAME shape the GET returns, rather than assembling a
+        # response by hand. The hand-built version omitted favorite_team and is_pro,
+        # which the client decodes as non-optional — so a comment saved correctly and
+        # then failed to decode, reporting "the data couldn't be read" for a write that
+        # had in fact succeeded. Reading it back cannot drift from the list contract.
+        cur.execute("""
+            SELECT c.id, c.parent_id, c.body, c.created_at, c.user_id,
+                   u.display_name, u.avatar_url, u.favorite_team, u.is_pro,
+                   u.xp, u.equipped_ring, u.equipped_title
+              FROM performance_comments c
+              JOIN users u ON u.id = c.user_id
+             WHERE c.id = %s
+        """, (new_id,))
+        r = cur.fetchone()
+        return jsonify(_format_perf_comment(r, viewer_id=user["id"])), 201
     except Exception as e:
         conn.rollback()
         return jsonify({"error": str(e)}), 500
