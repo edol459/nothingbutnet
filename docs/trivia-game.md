@@ -43,14 +43,35 @@ Five families, keyed self-describingly (`career:pts`, `avg:reb`, `peak:ast`,
 | `career` | career totals (`SUM(stat·gp)`) | All-time |
 | `avg` | career per-game average — rewards peak where totals reward longevity | Career average |
 | `peak` | each player's best qualified single season, captioned with that season | Career-best season |
-| `high` | best single game ever, from `player_gamelogs` | Single game |
+| `high` | best single game ever, from `player_career_highs` | Single game high |
 | `season` | one season's per-game leaderboard, recent seasons weighted up | *the season* |
 
-Only **points, rebounds, assists and made threes** are boards. Steals, blocks and
+Only **points, rebounds, assists and made threes** are boards — **except `high`,
+which also has blocks and steals.** Steals, blocks and
 the percentage stats are excluded: a chain commits a whole run to one axis, so an
 axis nobody has a feel for (1.4 vs 1.6 SPG) doesn't cost one question like it did
-in the quiz — it ruins the day. `high` boards additionally *can't* offer blocks or
-steals, because `player_gamelogs` doesn't carry those columns at all.
+in the quiz — it ruins the day.
+
+A single game reverses that for blocks and steals: "did Chris Paul or Rudy Gobert
+have more steals in a game" is pure archetype, and the answer flips when you ask
+about blocks. `player_gamelogs` has no `stl`/`blk` columns, so those highs come from
+the NBA's own career-highs endpoint instead — see below.
+
+### `player_career_highs` has to keep running
+
+`backend/ingest/sync_career_highs.py` fills it from nba_api's `PlayerProfileV2`
+`CareerHighs` result set: one call per player for all six stats, rather than
+re-pulling 789k gamelog rows to add two columns.
+
+**A career high is broken by playing**, so active players go stale. The daily pass
+in `daily_update_local.py` refreshes `players.is_active` only (~160 players, about a
+minute); everyone else is fetched once and never touched again. It lives in the
+local pipeline because stats.nba.com blocks Railway IPs.
+
+The board query inner-joins the table, so a player who hasn't been fetched yet
+simply sits out the single-game boards until the next pass rather than showing a
+hole. Team and season come from joining the stored `game_id` back to the gamelog —
+the endpoint reports the opponent and a date, not the uniform they wore.
 
 ### The pool, and why it isn't ranked by the stat
 

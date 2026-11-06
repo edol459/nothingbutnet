@@ -49,14 +49,8 @@
   .hud-board{flex:1 1 auto; min-width:0}
   .hud-kicker{font-family:var(--ff-mono); font-size:10px; letter-spacing:.16em;
               text-transform:uppercase; color:var(--orange)}
-  .hud-label{font-family:var(--ff-serif); font-size:clamp(24px,5.4vw,31px); line-height:1.08;
-             color:var(--ink); display:flex; align-items:center; gap:9px; flex-wrap:wrap}
-  /* Scope is the thing a chain is most easily misread about — a run never restates
-     its own axis, so "all-time" vs "one season" gets its own chip, not fine print. */
-  .scope{font-family:var(--ff-mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase;
-         color:var(--orange); background:var(--orange-lt); border:1px solid #f6d8c8;
-         border-radius:100px; padding:4px 10px; white-space:nowrap; flex-shrink:0}
-  html.night-mode .scope{border-color:transparent}
+  .hud-label{font-family:var(--ff-serif); font-size:clamp(21px,5vw,29px); line-height:1.1;
+             color:var(--ink); text-wrap:balance}
   .hud-right{display:flex; align-items:center; gap:16px; flex-shrink:0}
   .hud-stat{text-align:right}
   .hud-n{font-family:var(--ff-serif); font-size:26px; line-height:1; color:var(--ink)}
@@ -347,8 +341,10 @@ function teamVars(abbr){
 
 // ── chrome ───────────────────────────────────────────────────────────────────
 function renderHud(){
-  hudLabel.innerHTML = `${esc(S.label || '')}` +
-    (S.scope ? `<span class="scope">${esc(S.scope)}</span>` : '');
+  // The scope leads the label itself now ("Single game high · Threes") instead of
+  // sitting beside it as a chip — it's the context a chain can never restate, so it
+  // belongs at title size rather than in a caption.
+  hudLabel.textContent = S.label || '';
   hudKicker.textContent = S.mode === 'run' ? 'Unlimited run' : 'Higher or Lower';
   const streakBit = (S.mode === 'daily' && S.streak != null)
     ? `<div class="hud-stat"><div class="hud-n">${S.streak}</div><div class="hud-l">days</div></div>` : '';
@@ -724,7 +720,7 @@ function renderAlreadyPlayed(d){
 function newState(src, mode){
   return {
     mode, date: src.date || '', board: src.board, label: src.label,
-    noun: src.noun, unit: src.unit, scope: src.scope || '', rounds: src.rounds, chain: src.chain,
+    noun: src.noun, unit: src.unit, rounds: src.rounds, chain: src.chain,
     round: 1, picks: [], score: 0, over: false, busy: false, bustedRound: null,
     best: src.best ?? 0, streak: src.streak ?? null, isPro: !!src.is_pro,
   };

@@ -68,7 +68,9 @@ virtualenv.
 - **"Higher or Lower"** is the user-facing name; the code says **`survival`**.
   Two generations coexist: the live chain game is `backend/games/chain_api.py`
   (`/api/survival/chain/*`, `survival_chain_daily`, results under `mode='chain'`),
-  Boards come in five families (`career` / `avg` / `peak` / `high` / `season`) and
+  Boards come in five families (`career` / `avg` / `peak` / `high` / `season`). The
+  `high` family reads `player_career_highs`, which **`sync_career_highs.py` must keep
+  refreshing for active players** — a career high is broken by playing. Boards
   draw from a minutes-gated pool, **not** a ranking by the stat itself — see
   "The pool" in `docs/trivia-game.md` before changing how players are selected.
   Ties clear on either call and must stay in sync across server and both clients.

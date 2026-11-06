@@ -116,6 +116,13 @@ def main():
         #     season_args + ['--min-poss', '20', '--min-def-poss', '300'],
         # ),
         (
+            'sync_career_highs.py',
+            'Career highs (Higher or Lower single-game boards)',
+            # Active players only: a career high is broken by playing, so retired
+            # players never change and are fetched once. ~160 players, ~1 minute.
+            ['--active'],
+        ),
+        (
             'fetch_nba_stats.py',
             'NBA Stats (gravity, shot quality, leverage)',
             season_args,

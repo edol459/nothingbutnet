@@ -145,43 +145,56 @@ def _pool_ids(conn, min_minutes=_MIN_MINUTES):
 
 
 # ── boards ────────────────────────────────────────────────────────────────────
-# Each entry: (column, run label, comparison noun, short unit)
+# Each entry: (column, stat name, comparison noun, short unit). The run's label is
+# "<scope> · <stat name>" — see `_SCOPE`.
 _CAREER_BOARDS = [
-    ("pts",  "Career points",        "career points",        "PTS"),
-    ("reb",  "Career rebounds",      "career rebounds",      "REB"),
-    ("ast",  "Career assists",       "career assists",       "AST"),
-    ("fg3m", "Career threes made",   "career made threes",   "3PM"),
+    ("pts",  "Points",   "career points",        "PTS"),
+    ("reb",  "Rebounds", "career rebounds",      "REB"),
+    ("ast",  "Assists",  "career assists",       "AST"),
+    ("fg3m", "Threes",   "career made threes",   "3PM"),
 ]
 _CAREER_AVG_BOARDS = [
-    ("pts",  "Career scoring average",    "career points per game",   "PPG"),
-    ("reb",  "Career rebounding average", "career rebounds per game", "RPG"),
-    ("ast",  "Career assist average",     "career assists per game",  "APG"),
-    ("fg3m", "Career threes per game",    "career threes per game",   "3PM"),
+    ("pts",  "Points",   "career points per game",   "PPG"),
+    ("reb",  "Rebounds", "career rebounds per game", "RPG"),
+    ("ast",  "Assists",  "career assists per game",  "APG"),
+    ("fg3m", "Threes",   "career threes per game",   "3PM"),
 ]
-# Single-game career bests. Blocks and steals are absent because `player_gamelogs`
-# doesn't carry them — adding those means a schema change plus a full re-pull from
-# stats.nba.com on a residential IP.
+# Single-game career bests, from `player_career_highs` (sync_career_highs.py).
+#
+# This is the one family that can ask about STEALS and BLOCKS. Per-game averages of
+# those are noise nobody has intuition for — 1.4 vs 1.6 steals — which is why they
+# are absent everywhere else. A single game flips that: "did Chris Paul or Rudy
+# Gobert have more steals in a game" is pure archetype, and the answer reverses when
+# you ask about blocks. `player_gamelogs` has no stl/blk columns, which is why these
+# come from the NBA's own career-highs endpoint rather than being derived locally.
 _HIGH_BOARDS = [
-    ("pts",  "Career high, points",   "points in a single game",   "PTS"),
-    ("reb",  "Career high, rebounds", "rebounds in a single game", "REB"),
-    ("ast",  "Career high, assists",  "assists in a single game",  "AST"),
-    ("fg3m", "Career high, threes",   "threes in a single game",   "3PM"),
+    ("pts",  "Points",   "points in a single game",   "PTS"),
+    ("reb",  "Rebounds", "rebounds in a single game", "REB"),
+    ("ast",  "Assists",  "assists in a single game",  "AST"),
+    ("fg3m", "Threes",   "threes in a single game",   "3PM"),
+    ("blk",  "Blocks",   "blocks in a single game",   "BLK"),
+    ("stl",  "Steals",   "steals in a single game",   "STL"),
 ]
 _PEAK_BOARDS = [
-    ("pts",  "Best scoring season",   "points per game in their best season",   "PPG"),
-    ("reb",  "Best rebounding season", "rebounds per game in their best season", "RPG"),
-    ("ast",  "Best passing season",   "assists per game in their best season",  "APG"),
-    ("fg3m", "Best shooting season",  "threes per game in their best season",   "3PM"),
+    ("pts",  "Points",   "points per game in their best season",   "PPG"),
+    ("reb",  "Rebounds", "rebounds per game in their best season", "RPG"),
+    ("ast",  "Assists",  "assists per game in their best season",  "APG"),
+    ("fg3m", "Threes",   "threes per game in their best season",   "3PM"),
 ]
 # Steals, blocks and the percentage stats are deliberately absent from every board.
 # A chain commits a whole run to one axis, so an axis people have no feel for (1.4 vs
 # 1.6 SPG) doesn't cost one question like it did in the old quiz — it ruins the day.
 _SEASON_BOARDS = [
-    ("pts",  "points per game",   "PPG"),
-    ("reb",  "rebounds per game", "RPG"),
-    ("ast",  "assists per game",  "APG"),
-    ("fg3m", "made threes per game", "3PM"),
+    ("pts",  "Points",   "PPG"),
+    ("reb",  "Rebounds", "RPG"),
+    ("ast",  "Assists",  "APG"),
+    ("fg3m", "Threes",   "3PM"),
 ]
+
+# The scope is the single most important thing on screen — a chain never restates
+# its own axis — so it leads the label rather than sitting beside it in small type.
+_SCOPE = {"career": "All-time total", "avg": "Career average",
+          "high":   "Single game high", "peak": "Best season"}
 
 # How deep into each board we draw. Deeper = more variety but less recognizable
 # names; these are the points where the board still reads as "players I know".
@@ -241,20 +254,25 @@ def _career_avg_rows(conn, col):
 
 
 def _high_rows(conn, col):
-    """Each famous player's best single game on `col`, with the date and the team
-    they did it for. Values are integers, so these boards lean on the tie rule."""
+    """Each pool player's best single game on `col`, from `player_career_highs`.
+
+    The team and season come from joining the stored game_id back to the gamelog —
+    the NBA's endpoint reports the opponent and a date, not the uniform they wore.
+    An inner join on purpose: a player who hasn't been fetched yet simply sits out
+    the single-game boards until the next daily pass, rather than appearing with a
+    hole where their number should be."""
     ids = _pool_ids(conn)
     with conn.cursor() as cur:
-        cur.execute(f"""
-            SELECT DISTINCT ON (g.player_id)
-                   g.player_id, p.player_name AS name, g.{col} AS val, g.season,
+        cur.execute("""
+            SELECT h.player_id, p.player_name AS name, h.value AS val,
+                   g.season,
                    split_part(g.matchup, ' ', 1) AS team
-            FROM   player_gamelogs g
-            JOIN   players p ON p.player_id = g.player_id
-            WHERE  g.season_type = 'Regular Season'
-              AND  g.player_id = ANY(%s) AND g.{col} IS NOT NULL
-            ORDER  BY g.player_id, g.{col} DESC, g.game_date ASC
-        """, (ids,))
+            FROM   player_career_highs h
+            JOIN   players p ON p.player_id = h.player_id
+            LEFT   JOIN player_gamelogs g
+                   ON g.player_id = h.player_id AND g.game_id = h.game_id
+            WHERE  h.stat = %s AND h.player_id = ANY(%s)
+        """, (col.upper(), ids))
         rows = [(r["player_id"], r["name"], r["team"], float(r["val"]), r["season"])
                 for r in cur.fetchall()]
     rows.sort(key=lambda r: r[3], reverse=True)
@@ -332,30 +350,28 @@ def board(conn, key):
     parts = key.split(":")
     kind, col = parts[0], parts[1]
     if kind == "career":
-        label, noun, unit = next((l, n, u) for c, l, n, u in _CAREER_BOARDS if c == col)
+        stat, noun, unit = next((l, n, u) for c, l, n, u in _CAREER_BOARDS if c == col)
         rows = _career_rows(conn, col)
     elif kind == "avg":
-        label, noun, unit = next((l, n, u) for c, l, n, u in _CAREER_AVG_BOARDS if c == col)
+        stat, noun, unit = next((l, n, u) for c, l, n, u in _CAREER_AVG_BOARDS if c == col)
         rows = _career_avg_rows(conn, col)
     elif kind == "high":
-        label, noun, unit = next((l, n, u) for c, l, n, u in _HIGH_BOARDS if c == col)
+        stat, noun, unit = next((l, n, u) for c, l, n, u in _HIGH_BOARDS if c == col)
         rows = _high_rows(conn, col)
     elif kind == "peak":
-        label, noun, unit = next((l, n, u) for c, l, n, u in _PEAK_BOARDS if c == col)
+        stat, noun, unit = next((l, n, u) for c, l, n, u in _PEAK_BOARDS if c == col)
         rows = _peak_rows(conn, col)
     elif kind == "season":
         season = parts[2]
-        noun_base, unit = next((n, u) for c, n, u in _SEASON_BOARDS if c == col)
-        label, noun = f"{season} {noun_base}", f"{noun_base} in {season}"
+        stat, unit = next((n, u) for c, n, u in _SEASON_BOARDS if c == col)
+        noun = f"{stat.lower()} per game in {season}"
         rows = _season_rows(conn, col, season)
     else:
         raise ValueError(f"unknown board kind: {kind}")
     # `scope` answers "all-time or one season?" at a glance — the single thing a
     # chain is most easily misread about, since the axis never restates itself.
-    scope = ({"career": "All-time",
-              "avg":    "Career average",
-              "high":   "Single game",
-              "peak":   "Career-best season"}.get(kind) or f"{parts[2]} season")
+    scope = _SCOPE.get(kind) or f"{parts[2]} season"
+    label = f"{scope} \u00b7 {stat}"
     # Round to what the card shows, then re-sort so equal-on-screen players end up
     # adjacent — the rank targeting and the tie rule both rely on that ordering.
     rows = [(pid, nm, tm, _round(kind, val), sn) for pid, nm, tm, val, sn in rows]
